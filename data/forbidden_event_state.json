@@ -1,0 +1,58 @@
+{
+	"version": 1,
+	"active": {
+		"cleansing": null,
+		"daoSighting": null
+	},
+	"history": [
+		{
+			"type": "dao-sighting-auto-opened",
+			"eventId": "dao-sighting-1787727000054-248637",
+			"serverId": "global",
+			"at": 1787727000054
+		},
+		{
+			"type": "daoSighting-expired",
+			"eventId": "dao-sighting-1787727000054-248637",
+			"serverId": "global",
+			"at": 1787728200048
+		},
+		{
+			"type": "dao-sighting-auto-opened",
+			"eventId": "dao-sighting-1787745000040-791470",
+			"serverId": "global",
+			"at": 1787745000040
+		},
+		{
+			"type": "daoSighting-expired",
+			"eventId": "dao-sighting-1787745000040-791470",
+			"serverId": "global",
+			"at": 1787746200036
+		},
+		{
+			"type": "dao-sighting-auto-opened",
+			"eventId": "dao-sighting-1787752800034-646162",
+			"serverId": "global",
+			"at": 1787752800034
+		},
+		{
+			"type": "daoSighting-expired",
+			"eventId": "dao-sighting-1787752800034-646162",
+			"serverId": "global",
+			"at": 1787753400050
+		},
+		{
+			"type": "dao-sighting-auto-opened",
+			"eventId": "dao-sighting-1787762400047-669489",
+			"serverId": "global",
+			"at": 1787762400047
+		},
+		{
+			"type": "daoSighting-expired",
+			"eventId": "dao-sighting-1787762400047-669489",
+			"serverId": "global",
+			"at": 1787764200037
+		}
+	],
+	"lastAutoSpawnAt": 0
+}

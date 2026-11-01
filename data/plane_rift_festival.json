@@ -1,0 +1,38 @@
+{
+  "lastCheckWorldYear": 4000,
+  "pity": {
+    "仙界": 1,
+    "太初星墟": 1
+  },
+  "activeRifts": [],
+  "history": [
+    {
+      "id": "4000-太初星墟",
+      "plane": "太初星墟",
+      "name": "归零舰墓",
+      "worldYear": 4000,
+      "openedAt": 1787731201533
+    },
+    {
+      "id": "4000-仙界",
+      "plane": "仙界",
+      "name": "万象丹庭",
+      "worldYear": 4000,
+      "openedAt": 1787745601878
+    },
+    {
+      "id": "6000-太初星墟",
+      "plane": "太初星墟",
+      "name": "无光观测站",
+      "worldYear": 6000,
+      "openedAt": 1787756401572
+    },
+    {
+      "id": "8000-仙界",
+      "plane": "仙界",
+      "name": "斩岁仙府",
+      "worldYear": 8000,
+      "openedAt": 1787763601073
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="row"><span class="k">状态</span><span class="v {% if alive %}cyan{% else %}warn{% endif %}">{{ status }}</span></div>
+<div class="row"><span class="k">剩余血量</span><span class="v">{{ health }} / {{ health_max }}</span></div>
+<div class="bar"><div style="width: {{ pct }}%"></div></div>
+<div class="row"><span class="k">奖池</span><span class="v gold">{{ reward }} 灵石</span></div>
+<div class="section">
+  <div class="head">本轮贡献榜</div>
+  {% if ledger %}
+  <table>
+    {% for name, dmg in ledger %}<tr {% if loop.first %}class="top"{% endif %}><td class="l">{{ loop.index }}. {{ name }}</td><td class="r">{{ dmg }}</td></tr>{% endfor %}
+  </table>
+  {% else %}<div class="empty">本轮尚无人讨伐。</div>{% endif %}
+</div>
+{% endblock %}

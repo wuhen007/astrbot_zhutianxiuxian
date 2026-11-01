@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="section"><div class="head">修为前十</div>
+<table>
+  {% for p in by_exp %}<tr {% if loop.first %}class="top"{% endif %}><td class="l">{{ loop.index }}. {{ p.name }}（{{ p.realm }}）</td><td class="r">{{ p.exp }}</td></tr>{% endfor %}
+</table>
+</div>
+<div class="section"><div class="head">富甲前十</div>
+<table>
+  {% for p in by_stones %}<tr {% if loop.first %}class="top"{% endif %}><td class="l">{{ loop.index }}. {{ p.name }}</td><td class="r">{{ p.stones }}</td></tr>{% endfor %}
+</table>
+</div>
+{% endblock %}

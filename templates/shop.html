@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="row"><span class="k">货架</span><span class="v">第 {{ cur }} / {{ pages }} 页</span></div>
+<table>
+  {% for e in rows %}<tr><td class="l">{{ e.name }}<span class="tag"> {{ e.cls }}｜{{ e.typ }}</span></td><td class="r gold">{{ e.price }} 灵石</td></tr>{% endfor %}
+</table>
+<div class="section"><div class="chip plain">购买：#购买 商品名 数量</div></div>
+{% endblock %}

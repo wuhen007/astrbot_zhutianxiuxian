@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="row"><span class="k">道友</span><span class="v">{{ name }}</span></div>
+<div class="row"><span class="k">境界</span><span class="v gold">{{ realm }}</span></div>
+<div class="row"><span class="k">修为</span><span class="v">{{ exp }}{% if next %} <span class="cyan">/ {{ req }}（下一境 {{ next }}）</span>{% endif %}</span></div>
+{% if progress is defined %}<div class="bar gold"><div style="width: {{ progress }}%"></div></div>{% endif %}
+<div class="row"><span class="k">气血</span><span class="v">{{ hp_cur }} / {{ hp_max }}</span></div>
+<div class="row"><span class="k">灵石</span><span class="v gold">{{ stones }}</span></div>
+{% if linggen %}<div class="row"><span class="k">灵根</span><span class="v gold">{{ linggen }}</span></div>{% endif %}
+<div class="section">
+  <div class="head">三维属性</div>
+  <div class="row"><span class="k">攻击</span><span class="v">{{ atk }}</span></div>
+  <div class="row"><span class="k">防御</span><span class="v">{{ defense }}</span></div>
+  <div class="row"><span class="k">血量</span><span class="v">{{ hp }}</span></div>
+  {% if bao %}<div class="row"><span class="k">暴击</span><span class="v warn">{{ bao }}</span></div>{% endif %}
+</div>
+{% if state_note %}
+<div class="section"><div class="head">当前状态</div><div class="chip plain">{{ state_note }}</div></div>
+{% endif %}
+{% if set_lines %}
+<div class="section"><div class="head">套装共鸣</div>{% for s in set_lines %}<div class="chip">{{ s }}</div>{% endfor %}</div>
+{% endif %}
+{% endblock %}

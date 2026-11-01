@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="vs">
+  <div class="side"><div class="sname">{{ side_a.name }}</div><div class="sattr">攻 {{ side_a.atk }} · 防 {{ side_a.defense }} · 血 {{ side_a.hp }}</div></div>
+  <div class="vsmark">VS</div>
+  <div class="side"><div class="sname">{{ side_b.name }}</div><div class="sattr">攻 {{ side_b.atk }} · 防 {{ side_b.defense }} · 血 {{ side_b.hp }}</div></div>
+</div>
+<div class="logbox">
+  {% for l in log %}<div class="logline">{{ l }}</div>{% endfor %}
+</div>
+<div class="result">{{ result }}</div>
+{% for e in extras %}<div class="chip">{{ e }}</div>{% endfor %}
+{% endblock %}

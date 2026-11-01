@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="row"><span class="k">炼器等级</span><span class="v cyan">{{ forge_lv }} 级</span></div>
+{% for r in rows %}
+<div class="section">
+  <div class="row"><span class="v gold">{{ r.name }}</span><span class="k">{{ r.meta }}｜成功率 {{ r.rate }}</span></div>
+  <div style="font-size:12px;color:#8a97ab;padding:2px 2px">{{ r.mats }}</div>
+</div>
+{% endfor %}
+{% endblock %}

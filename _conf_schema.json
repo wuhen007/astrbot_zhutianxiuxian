@@ -1,0 +1,84 @@
+{
+  "ACCESS_CONTROL": {
+    "description": "访问控制",
+    "type": "object",
+    "items": {
+      "WHITELIST_GROUPS": {
+        "description": "白名单群号列表",
+        "type": "list",
+        "default": [],
+        "hint": "允许使用修仙指令的群号。留空 = 所有群可用。"
+      }
+    }
+  },
+  "VALUES": {
+    "description": "核心数值",
+    "type": "object",
+    "items": {
+      "SIGN_REWARD_MIN": {
+        "description": "签到奖励下限",
+        "type": "int",
+        "default": 100
+      },
+      "SIGN_REWARD_MAX": {
+        "description": "签到奖励上限",
+        "type": "int",
+        "default": 500
+      },
+      "CULTIVATE_EXP_PER_MIN": {
+        "description": "闭关每分钟修为（旧模式，已被按境界公式取代）",
+        "type": "int",
+        "default": 20,
+        "hint": "保留兼容；出关结算现按 CULTIVATE_EXP_PER_REALM × 境界id 计算"
+      },
+      "CULTIVATE_EXP_PER_REALM": {
+        "description": "闭关每周期基础修为×境界id（对齐原版 biguan.size=10）",
+        "type": "int",
+        "default": 10,
+        "hint": "出关修为 = 该值 × 境界id × 效率乘区 × 结算分钟（30 分钟周期取整）"
+      },
+      "CULTIVATE_MAX_MINUTES": {
+        "description": "单次闭关结算上限（分钟）",
+        "type": "int",
+        "default": 7200,
+        "hint": "闭关时长超过该值时按上限计算并提示"
+      },
+      "BREAKTHROUGH_SUCCESS_RATE": {
+        "description": "突破成功率",
+        "type": "float",
+        "default": 1.0,
+        "hint": "1.0 = 必成；想有失败风险可设 0.8 等"
+      },
+      "BREAKTHROUGH_FAIL_PENALTY": {
+        "description": "突破失败修为损耗比例",
+        "type": "float",
+        "default": 0.3,
+        "hint": "仅成功率 < 1.0 时生效"
+      },
+      "SHOP_BUY_MARKUP": {
+        "description": "坊市售价系数",
+        "type": "float",
+        "default": 2.0,
+        "hint": "购买价 = 物品出售价 × 该系数"
+      },
+      "SPAR_COOLDOWN_SECONDS": {
+        "description": "切磋冷却（秒）",
+        "type": "int",
+        "default": 60,
+        "hint": "同一发起者两次切磋的最小间隔"
+      },
+      "BOSS_CD_SECONDS": {
+        "description": "讨伐 Boss 冷却（秒）",
+        "type": "int",
+        "default": 300,
+        "hint": "同一玩家两次讨伐妖王的最小间隔（原版 5 分钟）"
+      },
+      "RENDER_ENABLE": {
+        "description": "面板图片渲染",
+        "type": "bool",
+        "default": true,
+        "hint": "开=关键面板出图（需 Playwright 环境），失败自动回退纯文本"
+      }
+    }
+  }
+}
