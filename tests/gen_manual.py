@@ -1,0 +1,88 @@
+"""指令手册生成器：扫描 main.py 的 @filter.command 注册，输出《指令手册》。
+
+用法：python tests/gen_manual.py [输出路径]
+- 指令名取 CMD 常量值或字面量；说明取装饰器第二参数；handler 函数名与所在分组一并输出。
+- 与代码同步：每次加指令后重跑即可。
+"""
+import os
+import re
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def main() -> int:
+    src = open(os.path.join(ROOT, "main.py"), encoding="utf-8").read()
+
+    # CMD 常量表
+    consts = dict(re.findall(r'(CMD_\w+)\s*=\s*"([^"]+)"', src))
+
+    # @filter.command(名, 说明) —— 名可为常量或字面量
+    entries = []
+    for m in re.finditer(
+        r'@filter\.command\(\s*(CMD_\w+|"#[^"]+")\s*(?:,\s*"([^"]*)")?\s*\)\s*\n\s*async def (\w+)',
+        src,
+    ):
+        name_tok, desc, fn = m.group(1), m.group(2) or "", m.group(3)
+        name = consts.get(name_tok, name_tok.strip('"')) if name_tok.startswith("CMD_") else name_tok.strip('"')
+        entries.append((name, desc, fn))
+
+    # 分组归属：按 handler 名与帮助分组的近似映射（人工维护组标签）
+    GROUPS = [
+        ("基础修炼", ("handle_start", "handle_status", "handle_sign", "handle_closed", "handle_open", "handle_break")),
+        ("每日任务", ("handle_task_get", "handle_task_my", "handle_task_submit", "handle_task_claim")),
+        ("灵根天资", ("handle_linggen", "handle_linggen_my", "handle_yaoxiao")),
+        ("物品装备", ("handle_bag", "handle_shop", "handle_buy", "handle_sell", "handle_use", "handle_equip",
+                    "handle_my_equip", "handle_unequip", "handle_enhance", "handle_gem_set", "handle_gem_unset")),
+        ("战斗秘境", ("handle_spar", "handle_boss", "handle_boss_fight", "handle_heal", "handle_secret",
+                    "handle_enter", "handle_search", "handle_flee")),
+        ("黑暗动乱·神魄", ("handle_dark_open", "handle_dark_close", "handle_dark_status",
+                       "handle_dark_fight", "handle_dark_rank", "handle_shenpo", "handle_shenpo_all")),
+        ("宗门", ("handle_sect_create", "handle_sect_join", "handle_sect_quit", "handle_sect_mine",
+                 "handle_sect_list", "handle_sect_donate", "handle_sect_up", "handle_salary",
+                 "handle_sect_secret", "handle_sect_war", "handle_sect_shop", "handle_sect_exchange")),
+        ("职业体系", ("handle_job", "handle_job_swap", "handle_job_my", "handle_plant", "handle_plant_end",
+                   "handle_mine", "handle_mine_end", "handle_make")),
+        ("炼丹锻造", ("handle_recipes", "handle_craft", "handle_alchemy_lv", "handle_danfang", "handle_fufang",
+                   "handle_forge_recipes", "handle_forge", "handle_forge_lv", "handle_imperial", "handle_imperial_my")),
+        ("交易社交", ("handle_pay", "handle_list_item", "handle_market", "handle_buy_lot", "handle_delist",
+                   "handle_my_lots", "handle_rank", "handle_duel", "handle_duel_rank")),
+        ("仙宠功法", ("handle_pet_get", "handle_pet_my", "handle_pet_feed", "handle_pet_free",
+                   "handle_pet_duel", "handle_pet_rank", "handle_pet_adv",
+                   "handle_gongfa_learn", "handle_gongfa_my")),
+        ("图鉴查询", ("handle_lou", "handle_lou_danyao", "handle_lou_zhuangbei", "handle_lou_gongfa",
+                   "handle_lou_daoju", "handle_lou_xianchong", "handle_lou_duanzaocailiao",
+                   "handle_catalog_linggen", "handle_where")),
+        ("帮助", ("handle_help",)),
+    ]
+    grouped = {}
+    for g, fns in GROUPS:
+        grouped[g] = list(fns)
+    assigned = {fn for _, fns in GROUPS for fn in fns}
+    for name, desc, fn in entries:
+        if fn not in assigned and fn not in [f for fns in grouped.values() for f in fns]:
+            grouped.setdefault("其它", []).append(fn)
+
+    out = ["# 诸天修仙 · 指令手册（自动生成，与代码同步）", "",
+           f"> 生成自 main.py 的 @filter.command 注册，共 {len(entries)} 条指令。", ""]
+    total = 0
+    for g, fns in grouped.items():
+        rows = [(n, d, f) for n, d, f in entries if f in fns]
+        if not rows:
+            continue
+        out.append(f"\n## {g}\n")
+        out.append("| 指令 | 说明 |")
+        out.append("| --- | --- |")
+        for n, d, _f in rows:
+            total += 1
+            out.append(f"| `{n}` | {d} |")
+    out.append(f"\n---\n\n合计 {total} 条指令。玩家侧另见「#修仙帮助」与「#修仙帮助 目录」（源版 14 分组帮助）。")
+
+    dst = sys.argv[1] if len(sys.argv) > 1 else r"Z:\dsh\指令手册.md"
+    open(dst, "w", encoding="utf-8").write("\n".join(out))
+    print(f"written {dst}：{total} 条指令")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

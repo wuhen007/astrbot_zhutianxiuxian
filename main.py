@@ -11,7 +11,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import alchemy, battle, boss, catalog, cultivate, equipment, items, linggen, occupation, pet, quest, secret, sect
+from .core import alchemy, battle, boss, catalog, cultivate, equipment, items, linggen, occupation, pet, quest, secret, sect, shenjie
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -98,6 +98,12 @@ CMD_DARK_FIGHT = "#平定黑暗动乱"
 CMD_DARK_RANK = "#黑暗动乱帝战贡献榜"
 CMD_SHENPO = "#炼神魄"
 CMD_SHENPO_ALL = "#一键炼神魄"
+CMD_OFFER = "#供奉神石"
+CMD_CANWU = "#参悟神石"
+CMD_STONE = "#敲开闪闪发光的石头"
+CMD_SHENJIE = "#踏入神界"
+CMD_SHENJIE_END = "#神界归来"
+CMD_EVIL = "#我的邪道"
 CMD_IMPERIAL = "#认主"
 CMD_IMPERIAL_MY = "#已认主"
 CMD_SECT_SECRET = "#宗门秘境"
@@ -455,6 +461,14 @@ class ZhutianPlugin(Star):
                 (CMD_DARK_RANK, "帝战贡献榜"),
                 (CMD_SHENPO, "炼神魄（锻神池，2 分钟 CD，胜则神魄+5 血气+）"),
                 (CMD_SHENPO_ALL, "一键炼神魄（连破到败）"),
+            ]},
+            {"title": "神界邪道", "lines": [
+                (CMD_OFFER, "供奉神石（进度 /200，魔道值>0 被拒）"),
+                (f"{CMD_CANWU} 次数", "参悟神石（8 石/次得限定丹药）"),
+                (f"{CMD_STONE} 次数", "敲开闪闪发光的石头（赌石）"),
+                (CMD_SHENJIE, "踏入神界（供奉圆满+220 万灵石+每日 1 次）"),
+                (CMD_SHENJIE_END, "神界归来结算"),
+                (CMD_EVIL, "我的邪道（魔道值/业力）"),
             ]},
             {"title": "图鉴查询", "lines": [
                 (f"{CMD_LOU} 类目 页码", "丹药楼/装备楼/功法楼/道具楼/仙宠楼/锻造材料楼/灵根图鉴等"),
@@ -1388,6 +1402,169 @@ class ZhutianPlugin(Star):
         )
         tail = f"血气累计 +{xueqi_gain}" if xueqi_gain else f"修为 -{exp_lost}（参悟失败）"
         yield event.plain_result(head + "\n" + "\n".join(log[-5:]) + f"\n{tail}")
+
+    # ---- 神界（对齐原版 shenren.js） ----
+
+    def _linggen_type(self, doc: PlayerDoc) -> str:
+        lg = doc.ext.get("linggen")
+        return str(lg.get("type", "")) if isinstance(lg, dict) else ""
+
+    def _shenjie_gate(self, doc: PlayerDoc) -> tuple[bool, str]:
+        return shenjie.offer_gate(int(doc.ext.get("modao", 0) or 0), self._linggen_type(doc))
+
+    @filter.command(CMD_OFFER, "供奉神石")
+    async def handle_offer(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, why = self._shenjie_gate(doc)
+        if not ok:
+            yield event.plain_result(why)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        owned = int(inv.get("神石", 0))
+        if owned < 1:
+            yield event.plain_result("你没有神石。")
+            return
+        progress = int(doc.ext.get("shenshi", 0) or 0)
+        new_progress, used = shenjie.offer_shenshi(progress, owned)
+        d = doc.model_copy(deep=True)
+        d.ext["shenshi"] = new_progress
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            await self.db.remove_item(doc.uid, "神石", used)
+        note = f"供奉成功，当前供奉进度 {new_progress}/{shenjie.SHENSHI_NEED}。"
+        if progress < shenjie.SHENSHI_NEED <= new_progress:
+            note += "\n供奉圆满，神界之门为你虚掩——可「#踏入神界」（220 万灵石/次）。"
+        yield event.plain_result(note)
+
+    @filter.command(CMD_CANWU, "参悟神石")
+    async def handle_canwu(self, event: AstrMessageEvent, times: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, why = self._shenjie_gate(doc)
+        if not ok:
+            yield event.plain_result(why)
+            return
+        n = max(1, min(int("".join(ch for ch in (times or "") if ch.isdigit()) or 1), 99))
+        cost = n * shenjie.CANWU_COST
+        inv = await self.db.get_inventory(doc.uid)
+        if int(inv.get("神石", 0)) < cost:
+            yield event.plain_result(f"神石不足，需要 {cost} 个（{n} 次×8），当前 {int(inv.get('神石', 0))}。")
+            return
+        import random as _random
+        pill_table = [e for e in (self.content.table("Timelimit/限定丹药") or []) if isinstance(e, dict) and e.get("name")]
+        rewards = shenjie.canwu_rewards(pill_table, n, _random.Random(f"{doc.uid}:canwu:{time.time()}"))
+        d = doc.model_copy(deep=True)
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            await self.db.remove_item(doc.uid, "神石", cost)
+            await self.db.add_items(doc.uid, rewards)
+        text = "，".join(f"{k}×{v}" for k, v in rewards.items())
+        yield event.plain_result(f"参悟完成（消耗神石 {cost}）！获得：{text}")
+
+    @filter.command(CMD_STONE, "敲石赌博")
+    async def handle_stone(self, event: AstrMessageEvent, times: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        n = max(1, min(int("".join(ch for ch in (times or "") if ch.isdigit()) or 1), 99))
+        inv = await self.db.get_inventory(doc.uid)
+        if int(inv.get("闪闪发光的石头", 0)) < n:
+            yield event.plain_result(f"闪闪发光的石头不足，需要 {n} 个，当前 {int(inv.get('闪闪发光的石头', 0))}。")
+            return
+        import random as _random
+        pill_table = [e for e in (self.content.table("Timelimit/限定丹药") or []) if isinstance(e, dict) and e.get("name")]
+        rewards = shenjie.canwu_rewards(pill_table, n, _random.Random(f"{doc.uid}:stone:{time.time()}"))
+        d = doc.model_copy(deep=True)
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            await self.db.remove_item(doc.uid, "闪闪发光的石头", n)
+            await self.db.add_items(doc.uid, rewards)
+        text = "，".join(f"{k}×{v}" for k, v in rewards.items())
+        yield event.plain_result(f"敲开石头，灵光乍现！获得：{text}")
+
+    @filter.command(CMD_SHENJIE, "踏入神界")
+    async def handle_shenjie(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if doc.state != "空闲":
+            yield event.plain_result(f"道友正在「{doc.state}」中，无法分心。")
+            return
+        today = quest.date_key()
+        used = doc.ext.get("shenjie_date") == today
+        ok, why = shenjie.shenjie_entry_gate(
+            int(doc.ext.get("shenshi", 0) or 0), doc.stones,
+            int(doc.ext.get("modao", 0) or 0), self._linggen_type(doc), used)
+        if not ok:
+            yield event.plain_result(why)
+            return
+        d = doc.model_copy(deep=True)
+        d.stones -= shenjie.SHENJIE_STONES
+        d.state = "神界中"
+        d.state_start = time.time()
+        d.ext["shenjie_date"] = today
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result(
+            f"神界之门开启，你踏入其中历练 {shenjie.SHENJIE_MINUTES} 分钟。\n"
+            f"归来后发「{CMD_SHENJIE_END}」结算。"
+        )
+
+    @filter.command(CMD_SHENJIE_END, "神界归来")
+    async def handle_shenjie_end(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if doc.state != "神界中":
+            yield event.plain_result("道友并未在神界历练。")
+            return
+        elapsed = max(0.0, (time.time() - doc.state_start) / 60)
+        floored = int(elapsed // shenjie.SHENJIE_MINUTES) * shenjie.SHENJIE_MINUTES
+        d = doc.model_copy(deep=True)
+        d.state = "空闲"
+        d.state_start = 0.0
+        if floored < shenjie.SHENJIE_MINUTES:
+            await self.db.save_player(d.model_dump())
+            yield event.plain_result(f"神界历练不足 {shenjie.SHENJIE_MINUTES} 分钟，空手而归（可稍后再归）。")
+            return
+        import random as _random
+        rewards = shenjie.shenjie_rewards()
+        gain_stones = rewards.pop("__stones__")
+        d.stones += gain_stones
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            await self.db.add_items(doc.uid, rewards)
+        text = "，".join(f"{k}×{v}" for k, v in rewards.items())
+        yield event.plain_result(
+            f"神界历练归来（{floored} 分钟）：灵石 +{gain_stones}，{text}！"
+        )
+
+    @filter.command(CMD_EVIL, "我的邪道")
+    async def handle_evil(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result("【邪道录】\n" + shenjie.evil_profile(doc.model_dump()))
 
     @filter.command(CMD_HEAL, "灵石疗伤")
     async def handle_heal(self, event: AstrMessageEvent):

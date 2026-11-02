@@ -445,6 +445,31 @@ async def main():
     assert (await db.get_dark_boss())["alive"]
     print("dark boss & shenpo ok")
 
+    # 15g. 神界：供奉/参悟/踏入门槛（对齐 shenren.js）
+    from core import shenjie as sj_mod  # noqa: E402
+
+    ok, why = sj_mod.offer_gate(100, "伪灵根")
+    assert not ok and "罪孽" in why, why
+    ok, _ = sj_mod.offer_gate(0, "伪灵根")
+    assert ok
+    ok, _ = sj_mod.offer_gate(100, "转生")
+    assert ok, "转生灵根可入神界"
+    assert sj_mod.offer_shenshi(100, 150) == (250, 150)
+    pills = [{"name": "限定丹A"}, {"name": "限定丹B"}]
+    rs = sj_mod.canwu_rewards(pills, 5, _random.Random(1))
+    assert sum(rs.values()) == 5 and set(rs) <= {"限定丹A", "限定丹B"}, rs
+    ok, why = sj_mod.shenjie_entry_gate(150, 9_999_999, 0, "伪灵根", False)
+    assert not ok and "供奉进度" in why, why
+    ok, why = sj_mod.shenjie_entry_gate(200, 100, 0, "伪灵根", False)
+    assert not ok and "灵石不足" in why, why
+    ok, _ = sj_mod.shenjie_entry_gate(200, 9_999_999, 0, "伪灵根", False)
+    assert ok
+    ok, why = sj_mod.shenjie_entry_gate(200, 9_999_999, 0, "伪灵根", True)
+    assert not ok and "次数" in why, why
+    rw = sj_mod.shenjie_rewards()
+    assert rw["__stones__"] == 8_000_000 and rw["神石"] == 10
+    print("shenjie ok")
+
     # 15c. 每日任务：公式 / 接取-提交-领奖闭环 / 灵石自动追踪 / 秘境计数
     from core import quest as quest_mod  # noqa: E402
 
