@@ -661,6 +661,45 @@ async def main():
     assert won and log
     print("adventure ok")
 
+    # 15m. 帝兵炼制：炼制→融合→雷劫门槛→进阶→蕴养→更名
+    from core import dibing as db_mod  # noqa: E402
+    ok, msg, _ = db_mod.forge("凡铁", "混沌剑")
+    assert not ok  # 非仙金
+    ok, msg, _ = db_mod.forge("仙泪绿金", "混沌")
+    assert not ok and "形态" in msg  # 缺形态字
+    ok, msg, w = db_mod.forge("仙泪绿金", "混沌剑")
+    assert ok and w["atk"] == 7200 and w["all"] == 0.9 and w["stage"] == 0, msg
+    # 融合：主材拒、重复拒、九金齐备判定
+    ok, msg, _ = db_mod.fuse(w, "仙泪绿金")
+    assert not ok and "主材" in msg
+    ok, msg, w2 = db_mod.fuse(w, "龙纹黑金")
+    assert ok and w2["potential"] == 5.7 and len(w2["fused"]) == 1
+    ok, msg, _ = db_mod.fuse(w2, "龙纹黑金")
+    assert not ok and "已融合" in msg
+    # 雷劫：九金未齐 → 拒；齐备 + 资源 → 进 1 阶
+    ok, msg, _ = db_mod.tribulation(w2, 10 ** 9, 10 ** 9)
+    assert not ok and "九种" in msg
+    w_all = dict(w2)
+    w_all["fused"] = [g for g in db_mod.GOLD_RARITY if g != "仙泪绿金"][:8]
+    ok, msg, _ = db_mod.tribulation(w_all, 100, 100)
+    assert not ok and "修为" in msg  # 资源不足
+    ok, msg, w3 = db_mod.tribulation(w_all, 10 ** 9, 10 ** 9)
+    assert ok and w3["stage"] == 1 and "通灵" in msg, msg
+    # 蕴养：上限与成长
+    ok, msg, w4, consume = db_mod.nurture(w3, 2, 10 ** 9, 10 ** 9)
+    assert ok and w4["nurture"] == 2 and w4["atk"] == w3["atk"] + 2 * db_mod.NURTURE_BOOST
+    assert consume["exp"] == 2 * db_mod.NURTURE_COST
+    ok, msg, _, _ = db_mod.nurture(w4, 100, 10 ** 12, 10 ** 12)
+    assert ok  # 超上限自动钳制到剩余
+    ok, msg, w6 = db_mod.rename(w4, "吞天")
+    assert not ok  # 缺形态字
+    ok, msg, w6 = db_mod.rename(w4, "吞天剑")
+    assert ok and w6["name"] == "吞天剑"
+    # 物品卡：可被装备系统消费
+    card = db_mod.item_card(w3)
+    assert card["type"] == "帝兵" and card["atk"] == w3["atk"] and card["品阶"] == "通灵"
+    print("dibing ok")
+
     # 15i. 师徒/道侣/封禁（纯存档语义验证）
     master = PlayerDoc(uid="m1", ext={"recruit": True})
     disciple = PlayerDoc(uid="d1")

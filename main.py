@@ -11,7 +11,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, battle, boss, catalog, cultivate, equipment, items, linggen, occupation, pet, quest, secret, sect, shenjie, universe, xiaoshijie, zhutian
+from .core import adventure, alchemy, battle, boss, catalog, cultivate, dibing, equipment, items, linggen, occupation, pet, quest, secret, sect, shenjie, universe, xiaoshijie, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -116,6 +116,12 @@ CMD_RAID_LIST = "#洗劫列表"
 CMD_RAID = "#洗劫"
 CMD_RAID_SPY = "#探查"
 CMD_GIFT = "#赠予花篮"
+CMD_DB_FORGE = "#炼制帝兵"
+CMD_DB_FUSE = "#融合帝兵"
+CMD_DB_TRIB = "#雷劫洗礼帝兵"
+CMD_DB_NURTURE = "#蕴养帝兵"
+CMD_DB_RENAME = "#为帝兵更名"
+CMD_DB_MY = "#我的帝兵"
 CMD_DARK_OPEN = "#开启黑暗动乱"
 CMD_DARK_CLOSE = "#关闭黑暗动乱"
 CMD_DARK_STATUS = "#禁区至尊状态"
@@ -412,8 +418,20 @@ class ZhutianPlugin(Star):
         yield event.plain_result(text)
 
     def _stats(self, doc: PlayerDoc) -> equipment.Stats:
+        # 本命帝兵是玩家私有数据（不在全局 item_index），按玩家注入 lookup 避免跨玩家同名污染
+        w = dibing.system_of(doc)
+        if w:
+            card = dibing.item_card(w)
+            name = card["name"]
+
+            def lookup(n: str):
+                if n == name:
+                    return card
+                return self.item_index.get(n)
+        else:
+            lookup = self.item_index.get
         return equipment.aggregate(
-            doc, self.content.table(doc.realm_table), self.item_index.get,
+            doc, self.content.table(doc.realm_table), lookup,
             doc.ext.get("enh"), set(doc.ext.get("imperial") or []),
         )
 
@@ -585,6 +603,14 @@ class ZhutianPlugin(Star):
                 ("#天机符楼", "符楼商店（需邀请函，顶级灵石代币）"),
                 ("#天机符楼兑换 物品 数量", "兑换"),
                 ("双修彩蛋", "特定体质道侣双修可融合更高灵根（圣体道胎/终焉神魔体/混沌体）"),
+            ]},
+            {"title": "本命帝兵", "lines": [
+                (f"{CMD_DB_FORGE} 仙金*帝兵名", "炼制本命帝兵（名称须含剑/鼎/枪/钟/塔等形态字）"),
+                (CMD_DB_MY, "查看帝兵（品阶/潜力/融合/蕴养）"),
+                (f"{CMD_DB_FUSE} 仙金名", "融合仙金提潜力（每种限一次，九金齐备解锁雷劫）"),
+                (CMD_DB_TRIB, "雷劫洗礼进阶（需九金全融合）"),
+                (f"{CMD_DB_NURTURE}*次数", "蕴养（修为血气各 2000 万/次，三维 +50 万）"),
+                (f"{CMD_DB_RENAME} 新名", "更名（仍须含形态字）"),
             ]},
             {"title": "历练寻宝", "lines": [
                 (CMD_TOWER, "挑战当前层（胜+5 层得灵石，败罚灵石）"),
@@ -1046,7 +1072,10 @@ class ZhutianPlugin(Star):
         if err:
             yield event.plain_result(err)
             return
-        item = self.item_index.get((item_name or "").strip())
+        name = (item_name or "").strip()
+        w = dibing.system_of(doc)
+        is_own_dibing = bool(w and name == w.get("name"))
+        item = dibing.item_card(w) if is_own_dibing else self.item_index.get(name)
         if not item:
             yield event.plain_result(f"物品索引中找不到「{item_name}」。")
             return
@@ -1055,9 +1084,10 @@ class ZhutianPlugin(Star):
             yield event.plain_result(msg)
             return
         async with self.db.transaction():
-            if not await self.db.remove_item(doc.uid, item["name"], 1):
-                raise RuntimeError("INSUFFICIENT")
-            if old:
+            if not is_own_dibing:
+                if not await self.db.remove_item(doc.uid, item["name"], 1):
+                    raise RuntimeError("INSUFFICIENT")
+            if old and not (w and old == w.get("name")):
                 await self.db.add_items(doc.uid, {old: 1})
             await self.db.save_player(doc.model_dump())
         st = self._stats(doc)
@@ -1078,8 +1108,10 @@ class ZhutianPlugin(Star):
         if not ok:
             yield event.plain_result(msg)
             return
+        w = dibing.system_of(doc)
         async with self.db.transaction():
-            await self.db.add_items(doc.uid, {old: 1})
+            if not (w and old == w.get("name")):  # 本命帝兵卸下回 ext 私有档，不进纳戒
+                await self.db.add_items(doc.uid, {old: 1})
             await self.db.save_player(doc.model_dump())
         yield event.plain_result(msg)
 
@@ -3455,6 +3487,170 @@ class ZhutianPlugin(Star):
             dl.ext["qinmidu"] = qm
             await self.db.save_player(dl.model_dump())
         yield event.plain_result(f"你将一篮百合赠予 {lover_name}，花香满堂——双方亲密度 +10。")
+
+    # ---- B1：本命帝兵炼制 ----
+
+    def _db_sync(self, doc: PlayerDoc, w: dict | None) -> PlayerDoc:
+        """帝兵档写回 ext；更名时同步穿戴槽（属性由 _stats 的私有 lookup 提供）。"""
+        d = doc.model_copy(deep=True)
+        old = (d.ext.get("dibing") or {}).get("name")
+        if w:
+            d.ext["dibing"] = w
+            if old and old != w["name"]:
+                eq = d.ext.get("equipment") or {}
+                for slot, nm in list(eq.items()):
+                    if nm == old:
+                        eq[slot] = w["name"]
+                d.ext["equipment"] = eq
+        return d
+
+    @filter.command(CMD_DB_MY, "我的帝兵")
+    async def handle_db_my(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = dibing.system_of(doc)
+        if not w:
+            yield event.plain_result(
+                "尚未炼制本命帝兵。\n格式：#炼制帝兵 仙金名*帝兵名（名称需含剑/鼎/枪/钟/塔/镜/印/刀等形态字）\n"
+                "可用仙金：仙泪绿金、凰血赤金、龙纹黑金、永恒蓝金、神痕紫金、道劫黄金、羽化青金、混沌石精、大罗银精"
+            )
+            return
+        async for r in self._smart(event, dibing.summary(w), "本命帝兵"):
+            yield r
+
+    @filter.command(CMD_DB_FORGE, "炼制帝兵")
+    async def handle_db_forge(self, event: AstrMessageEvent, *, args: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if dibing.system_of(doc):
+            yield event.plain_result("你已有本命帝兵（#我的帝兵），器随其主，不可再炼。")
+            return
+        raw = (args or "").strip().replace("*", " ")
+        parts = raw.split(None, 1)
+        if len(parts) < 2:
+            yield event.plain_result("格式：#炼制帝兵 仙金名*帝兵名（如 仙泪绿金*混沌剑）")
+            return
+        gold, name = parts[0].strip(), parts[1].strip()
+        ok, msg, w = dibing.forge(gold, name)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        have = dict(await self.db.get_inventory(doc.uid)).get(gold, 0)
+        if have < 1:
+            yield event.plain_result(f"纳戒中没有「{gold}」（#哪里有 {gold} 可查获取渠道）。")
+            return
+        d = self._db_sync(doc, w)
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            if not await self.db.remove_item(doc.uid, gold, 1):
+                raise RuntimeError("INSUFFICIENT")
+        async for r in self._smart(event, msg, "帝兵出世"):
+            yield r
+
+    @filter.command(CMD_DB_FUSE, "融合帝兵")
+    async def handle_db_fuse(self, event: AstrMessageEvent, gold: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = dibing.system_of(doc)
+        if not w:
+            yield event.plain_result("尚未炼制本命帝兵（#炼制帝兵）。")
+            return
+        gold = (gold or "").strip().replace("*", "").strip()
+        ok, msg, w2 = dibing.fuse(w, gold)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        have = dict(await self.db.get_inventory(doc.uid)).get(gold, 0)
+        if have < 1:
+            yield event.plain_result(f"纳戒中没有「{gold}」。")
+            return
+        d = self._db_sync(doc, w2)
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            if not await self.db.remove_item(doc.uid, gold, 1):
+                raise RuntimeError("INSUFFICIENT")
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_DB_TRIB, "雷劫洗礼帝兵")
+    async def handle_db_trib(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = dibing.system_of(doc)
+        if not w:
+            yield event.plain_result("尚未炼制本命帝兵（#炼制帝兵）。")
+            return
+        ok, msg, w2 = dibing.tribulation(w, doc.exp, float(doc.ext.get("xueqi", 0) or 0))
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = self._db_sync(doc, w2)
+        d.exp -= dibing.TRIBULATION_COST
+        d.ext["xueqi"] = max(0.0, float(d.ext.get("xueqi", 0) or 0) - dibing.TRIBULATION_COST)
+        await self.db.save_player(d.model_dump())
+        async for r in self._smart(event, msg, "雷劫洗礼"):
+            yield r
+
+    @filter.command(CMD_DB_NURTURE, "蕴养帝兵")
+    async def handle_db_nurture(self, event: AstrMessageEvent, *, args: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = dibing.system_of(doc)
+        if not w:
+            yield event.plain_result("尚未炼制本命帝兵（#炼制帝兵）。")
+            return
+        times = 1
+        raw = (args or "").strip().lstrip("*").strip()
+        if raw.isdigit():
+            times = int(raw)
+        ok, msg, w2, consume = dibing.nurture(w, times, doc.exp, float(doc.ext.get("xueqi", 0) or 0))
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = self._db_sync(doc, w2)
+        d.exp -= consume["exp"]
+        d.ext["xueqi"] = max(0.0, float(d.ext.get("xueqi", 0) or 0) - consume["xueqi"])
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_DB_RENAME, "为帝兵更名")
+    async def handle_db_rename(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = dibing.system_of(doc)
+        if not w:
+            yield event.plain_result("尚未炼制本命帝兵（#炼制帝兵）。")
+            return
+        ok, msg, w2 = dibing.rename(w, (name or "").strip())
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = self._db_sync(doc, w2)
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
 
     @filter.command(CMD_HEAL, "灵石疗伤")
     async def handle_heal(self, event: AstrMessageEvent):
