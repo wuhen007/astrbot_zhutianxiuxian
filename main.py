@@ -2951,16 +2951,21 @@ class ZhutianPlugin(Star):
         u = universe.system_of(doc)
         if not u:
             check = universe.can_ascend(doc)
-            tips = {
-                "world": "尚未开辟小世界（#开辟小世界）。",
-                "ascended": "",
-                "world-level": f"小世界演化 {check.get('current', 0)}/5 级（#演化小世界）。",
-                "authority": f"境界不足：需金仙 {check['required']} 境（当前 {check.get('current', 0)} 境）。",
-                "potential": f"仙道潜力不足：{check.get('current', 0):g}/{check['required']}（凝聚精血类丹药提升）。",
-            }
+            reason = check["reason"]
+            cur = check.get("current", 0)
+            req = check.get("required", 0)
+            if reason == "world":
+                tip = "尚未开辟小世界（#开辟小世界）。"
+            elif reason == "world-level":
+                tip = f"小世界演化 {cur}/5 级（#演化小世界）。"
+            elif reason == "authority":
+                tip = f"境界不足：需金仙 {req} 境（当前 {cur} 境）。"
+            elif reason == "potential":
+                tip = f"仙道潜力不足：{cur:g}/{req}（凝聚精血类丹药提升）。"
+            else:
+                tip = ""
             yield event.plain_result(
-                "尚未升格大宇宙。升格条件：\n· 小世界演化圆满（5 级）\n· 境界 ≥ 金仙\n· 仙道潜力 ≥ 151\n"
-                + tips.get(check["reason"], "")
+                "尚未升格大宇宙。升格条件：\n· 小世界演化圆满（5 级）\n· 境界 ≥ 金仙\n· 仙道潜力 ≥ 151\n" + tip
             )
             return
         stage = universe.LAW_STAGES[int(u.get("law", 0))]
