@@ -797,6 +797,51 @@ async def main():
     assert "每日任务" in text and "1500" not in text
     print("wenxian ok")
 
+    # 15p. 源石坊：市场生成确定性/勘石/切石结算/凶源/日限
+    from core import yuanshi as ys_mod  # noqa: E402
+    now_s = 1_800_000_000.0
+    st1 = ys_mod.make_market("u1", "外园", now_s)
+    st2 = ys_mod.make_market("u1", "外园", now_s)
+    assert [s["outcome"] for s in st1] == [s["outcome"] for s in st2], "同日市场应确定"
+    assert len(st1) == 5 and all(s["price"] >= 39_000 for s in st1)
+    ok, msg = ys_mod.inspect(st1, 1)
+    assert ok and msg
+    ok, msg = ys_mod.inspect(st1, 9)
+    assert not ok
+    # 切石：纯净源（ratio 1）→ 源石 = 价/10
+    y = {"amount": 0, "day": {}}
+    stone = {"no": 1, "price": 100_000, "name": "纯净源", "outcome": "pure",
+             "ratio": 1.0, "item": None, "danger": False, "surface": "x"}
+    ok, msg, y2, consume = ys_mod.buy_and_cut(
+        PlayerDoc(uid="u1"), y, "外园", [stone], 1, 5_000_000, 1000, 1000, now_s, _random.Random(1))
+    assert ok and y2["amount"] == 10_000 and consume["cost"]["amount"] == 100_000, (msg, y2)
+    assert y2["day"]["count"]["外园"] == 1
+    # 日限：外园 3 块
+    y3 = y2
+    for i in range(2):
+        ok, msg, y3, _ = ys_mod.buy_and_cut(
+            PlayerDoc(uid="u1"), y3, "外园", [stone], 1, 5_000_000, 1000, 1000, now_s, _random.Random(i))
+        assert ok, msg
+    ok, msg, _, _ = ys_mod.buy_and_cut(
+        PlayerDoc(uid="u1"), y3, "外园", [stone], 1, 5_000_000, 1000, 1000, now_s, _random.Random(9))
+    assert not ok and "限额" in msg
+    # 凶源反噬
+    danger_stone = {"no": 1, "price": 50_000, "name": "凶源", "outcome": "ominous",
+                    "ratio": 0.0, "item": None, "danger": True, "surface": "x"}
+    ok, msg, y4, consume = ys_mod.buy_and_cut(
+        PlayerDoc(uid="u1"), {"amount": 0, "day": {}}, "外园", [danger_stone], 1, 5_000_000, 1000, 1000, now_s, _random.Random(2))
+    assert ok and consume["hp_pct"] == 0.05 and "反噬" in msg
+    # 物品型（地字号神源液）
+    item_stone = {"no": 1, "price": 300_000, "name": "神源液", "outcome": "divine_liquid",
+                  "ratio": 0.0, "item": "神源液", "danger": False, "surface": "x"}
+    ok, msg, y5, consume = ys_mod.buy_and_cut(
+        PlayerDoc(uid="u1"), {"amount": 400_000, "day": {}}, "地字号", [item_stone], 1, 0, 1000, 1000, now_s, _random.Random(3))
+    assert ok and consume["gains"].get("神源液") == 1 and y5["amount"] == 100_000, (msg, y5)
+    # 兑换
+    ok, msg, y6 = ys_mod.exchange(1000, {"amount": 2000, "day": {}})
+    assert ok and y6["amount"] == 1000
+    print("yuanshi ok")
+
     # 15i. 师徒/道侣/封禁（纯存档语义验证）
     master = PlayerDoc(uid="m1", ext={"recruit": True})
     disciple = PlayerDoc(uid="d1")

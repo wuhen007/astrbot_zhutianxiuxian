@@ -11,7 +11,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, battle, boss, catalog, cultivate, dibing, equipment, items, linggen, occupation, pet, quest, secret, sect, shenjie, universe, wenxian, world_deep, xiaoshijie, zhutian
+from .core import adventure, alchemy, battle, boss, catalog, cultivate, dibing, equipment, items, linggen, occupation, pet, quest, secret, sect, shenjie, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -136,6 +136,10 @@ CMD_WXL_ACT = "#激活问仙令"
 CMD_WXL_DAILY = "#问仙令任务"
 CMD_WXL_CLAIM = "#领取问仙令"
 CMD_WXL_WEEKLY = "#领取每周任务"
+CMD_STONE_MARKET = "#源石坊"
+CMD_STONE_INSPECT = "#勘石"
+CMD_STONE_BUY = "#购石"
+CMD_STONE_EXCHANGE = "#源石兑换"
 CMD_DARK_OPEN = "#开启黑暗动乱"
 CMD_DARK_CLOSE = "#关闭黑暗动乱"
 CMD_DARK_STATUS = "#禁区至尊状态"
@@ -642,6 +646,12 @@ class ZhutianPlugin(Star):
                 (f"{CMD_RAID_SPY} 地点", "花 0.3×价格打探收获"),
                 (f"{CMD_RAID} 地点", "洗劫（强化费+战斗，2h CD，魔道值+）"),
                 (f"{CMD_GIFT} @道侣", "赠百合花篮（亲密度 +10）"),
+            ]},
+            {"title": "源石坊赌石", "lines": [
+                (f"{CMD_STONE_MARKET} [外园/地字号/天字号]", "当日 5 块原石（外园 5 万灵石起）"),
+                (f"{CMD_STONE_INSPECT} 序号", "勘石看线索（1 万灵石）"),
+                (f"{CMD_STONE_BUY} 序号 [档位]", "购石当场切开（凶源会反噬气血）"),
+                (f"{CMD_STONE_EXCHANGE} 数量", "源石兑灵石（汇率 10）"),
             ]},
             {"title": "问仙令", "lines": [
                 (CMD_WXL, "通行证面板（激活后：等级/经验/任务）"),
@@ -4011,6 +4021,119 @@ class ZhutianPlugin(Star):
             await self.db.save_player(d.model_dump())
         async for r in self._smart(event, msg, "问仙令 · 周任务"):
             yield r
+
+    # ---- B4：源石坊赌石 ----
+
+    @filter.command(CMD_STONE_MARKET, "源石坊")
+    async def handle_stone_market(self, event: AstrMessageEvent, garden: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        g = (garden or "外园").strip()
+        if g not in yuanshi.GARDENS:
+            yield event.plain_result(f"可选档位：{'、'.join(yuanshi.GARDENS)}（默认外园）。")
+            return
+        now = time.time()
+        y = yuanshi.system_of(doc)
+        stones = yuanshi.make_market(doc.uid, g, now)
+        async for r in self._smart(event, yuanshi.market_text(g, stones, y, now), f"源石坊 · {g}"):
+            yield r
+
+    @filter.command(CMD_STONE_INSPECT, "勘石")
+    async def handle_stone_inspect(self, event: AstrMessageEvent, no: str = "", garden: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        g = (garden or "外园").strip()
+        if g not in yuanshi.GARDENS:
+            g = "外园"
+        try:
+            n = int(no)
+        except (TypeError, ValueError):
+            yield event.plain_result("格式：#勘石 序号（1-5）")
+            return
+        if doc.stones < yuanshi.INSPECT_COST:
+            yield event.plain_result(f"勘石需 {yuanshi.INSPECT_COST:,} 灵石。")
+            return
+        stones = yuanshi.make_market(doc.uid, g, time.time())
+        ok, msg = yuanshi.inspect(stones, n)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = doc.model_copy(deep=True)
+        d.stones -= yuanshi.INSPECT_COST
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_STONE_BUY, "购石切石")
+    async def handle_stone_buy(self, event: AstrMessageEvent, no: str = "", garden: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        g = (garden or "外园").strip()
+        if g not in yuanshi.GARDENS:
+            g = "外园"
+        try:
+            n = int(no)
+        except (TypeError, ValueError):
+            yield event.plain_result("格式：#购石 序号 [档位]（如 #购石 2 地字号）")
+            return
+        now = time.time()
+        y = yuanshi.system_of(doc)
+        stones = yuanshi.make_market(doc.uid, g, now)
+        hp_cur, max_hp = self._hp_pair(doc)
+        import random as _random
+        rng = _random.Random(f"{doc.uid}:cut:{now}")
+        ok, msg, y2, consume = yuanshi.buy_and_cut(doc, y, g, stones, n, doc.stones, hp_cur, max_hp, now, rng)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = doc.model_copy(deep=True)
+        d.ext["yuanshi"] = y2
+        cost = consume["cost"]
+        if cost["currency"] == "灵石":
+            d.stones = max(0, d.stones - int(cost["amount"]))
+        if consume["hp_pct"]:
+            d.ext["hp"] = max(1, int(hp_cur * (1 - consume["hp_pct"])))
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            if consume["gains"]:
+                await self.db.add_items(doc.uid, consume["gains"])
+        async for r in self._smart(event, msg, f"切石 · {g}"):
+            yield r
+
+    @filter.command(CMD_STONE_EXCHANGE, "源石兑换")
+    async def handle_stone_exchange(self, event: AstrMessageEvent, n: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        try:
+            num = int(n)
+        except (TypeError, ValueError):
+            yield event.plain_result("格式：#源石兑换 数量（源石→灵石，汇率 10）")
+            return
+        y = yuanshi.system_of(doc)
+        ok, msg, y2 = yuanshi.exchange(num, y)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = doc.model_copy(deep=True)
+        d.ext["yuanshi"] = y2
+        d.stones += num * 10
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
 
     @filter.command(CMD_HEAL, "灵石疗伤")
     async def handle_heal(self, event: AstrMessageEvent):
