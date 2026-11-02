@@ -180,10 +180,23 @@ def aggregate(
         xueqi_flat = 0.0
     flat["hp"] += xueqi_flat
 
+    # 诸天化身：装载化身时的三维比例加成（ext["zhutian"]["current"] 对应化身的 root）
+    av_atk = av_def = av_hp = 0.0
+    zt = doc.ext.get("zhutian")
+    if isinstance(zt, dict) and zt.get("current"):
+        av = (zt.get("avatars") or {}).get(str(zt["current"])) or {}
+        root = av.get("root") or {}
+        try:
+            av_atk = max(0.0, float(root.get("atk", 0) or 0))
+            av_def = max(0.0, float(root.get("def", 0) or 0))
+            av_hp = max(0.0, float(root.get("hp", 0) or 0))
+        except (TypeError, ValueError):
+            pass
+
     return Stats(
-        atk=int((base_atk * (1 + ratio["atk"]) + flat["atk"]) * set_mult * pet_mult),
-        defense=int((base_def * (1 + ratio["def"]) + flat["def"]) * set_mult * pet_mult),
-        hp=int((base_hp * (1 + ratio["hp"]) + flat["hp"]) * set_mult * pet_mult),
+        atk=int((base_atk * (1 + ratio["atk"] + av_atk) + flat["atk"]) * set_mult * pet_mult),
+        defense=int((base_def * (1 + ratio["def"] + av_def) + flat["def"]) * set_mult * pet_mult),
+        hp=int((base_hp * (1 + ratio["hp"] + av_hp) + flat["hp"]) * set_mult * pet_mult),
         bao=min(bao, 1.0),
         set_lines=tuple(set_lines),
     )

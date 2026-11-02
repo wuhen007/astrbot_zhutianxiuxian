@@ -11,7 +11,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import alchemy, battle, boss, catalog, cultivate, equipment, items, linggen, occupation, pet, quest, secret, sect, shenjie, xiaoshijie
+from .core import alchemy, battle, boss, catalog, cultivate, equipment, items, linggen, occupation, pet, quest, secret, sect, shenjie, xiaoshijie, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -91,6 +91,15 @@ CMD_PLANT_END = "#结束采药"
 CMD_MINE = "#采矿"
 CMD_MINE_END = "#结束采矿"
 CMD_MAKE = "#制作"
+CMD_MIRROR = "#诸天镜"
+CMD_MIRROR_REFINE = "#淬炼诸天镜"
+CMD_MIRROR_WORLDS = "#诸天世界"
+CMD_MIRROR_PROJ = "#投影诸天"
+CMD_MIRROR_CHOICE = "#选择"
+CMD_MIRROR_EXIT = "#退出投影"
+CMD_MIRROR_AVATAR = "#诸天化身"
+CMD_MIRROR_LOAD = "#装载化身"
+CMD_XT_USE = "#使用诸天镜"
 CMD_DARK_OPEN = "#开启黑暗动乱"
 CMD_DARK_CLOSE = "#关闭黑暗动乱"
 CMD_DARK_STATUS = "#禁区至尊状态"
@@ -542,6 +551,16 @@ class ZhutianPlugin(Star):
                 ("#天机符楼", "符楼商店（需邀请函，顶级灵石代币）"),
                 ("#天机符楼兑换 物品 数量", "兑换"),
                 ("双修彩蛋", "特定体质道侣双修可融合更高灵根（圣体道胎/终焉神魔体/混沌体）"),
+            ]},
+            {"title": "诸天镜主线", "lines": [
+                ("#使用诸天镜", "绑定诸天镜（天机阁 2 仙兽玉兑换）"),
+                (CMD_MIRROR, "镜阶/镜能/材料/化身总览"),
+                (CMD_MIRROR_REFINE, "淬炼升阶（1-7 阶，材料探索获取）"),
+                (CMD_MIRROR_WORLDS, "十大投影世界与门槛"),
+                (f"{CMD_MIRROR_PROJ} 世界名", "投影（1 亿修为血气 + 1 镜能，剧情抉择）"),
+                ("#1 / #2 / #3 / #选择 序号", "投影剧情抉择（慧/勇/仁）"),
+                ("#探索友枝町/#探索见泷原/#探索骑士世界 地点", "世界探索（镜能 -1，掉材料/卡牌/印记）"),
+                (f"{CMD_MIRROR_AVATAR} / {CMD_MIRROR_LOAD} 名", "化身谱与装载（灵根替换+三维加成）"),
             ]},
             {"title": "图鉴查询", "lines": [
                 (f"{CMD_LOU} 类目 页码", "丹药楼/装备楼/功法楼/道具楼/仙宠楼/锻造材料楼/灵根图鉴等"),
@@ -2644,6 +2663,254 @@ class ZhutianPlugin(Star):
             return
         async for r in self._tianji_buy(event, "item/商店/天机阁符楼", thing, max(1, int(qty or 1)), True):
             yield r
+
+    # ---- 诸天镜主线（对齐原版 zhutiantouying/ZhutianMirror） ----
+
+    def _zt_save(self, doc: PlayerDoc, zt: dict) -> PlayerDoc:
+        d = doc.model_copy(deep=True)
+        d.ext["zhutian"] = zt
+        return d
+
+    @filter.command(CMD_XT_USE, "使用诸天镜（绑定）")
+    async def handle_xt_bind(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, zt = zhutian.bind(doc)
+        if ok:
+            if not await self.db.remove_item(doc.uid, "诸天镜", 1):
+                yield event.plain_result("纳戒中没有「诸天镜」（天机阁 2 仙兽玉可兑换）。")
+                return
+            await self.db.save_player(self._zt_save(doc, zt).model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_MIRROR, "诸天镜面板")
+    async def handle_mirror(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        zt = zhutian.system_of(doc)
+        zhutian.daily_reset(zt)
+        if not zt.get("bound"):
+            yield event.plain_result(
+                "尚未绑定诸天镜。天机阁可兑换「诸天镜」，然后发送 #使用诸天镜 绑定。"
+            )
+            return
+        info = zhutian.MIRROR_TIERS[int(zt["tier"])]
+        nxt, req = zhutian.missing_refine(zt)
+        mats = zt["materials"]
+        lines = [
+            f"--- 诸天镜 · {info['name']} ---",
+            f"镜能：{zt['energy']} / {info['energy']}（每日重置）",
+            f"材料：镜尘 {mats.get('镜尘', 0)}｜世界残响 {mats.get('世界残响', 0)}"
+            f"｜位面晶核 {mats.get('位面晶核', 0)}｜时空锚 {mats.get('时空锚', 0)}｜诸天镜心 {mats.get('诸天镜心', 0)}",
+            f"世界印记（{len(zt['imprints'])}）：{'、'.join(zt['imprints']) or '（无）'}",
+            f"化身：{'、'.join(zt['avatars']) or '（尚未收录）'}｜当前：{zt.get('current') or '本源'}",
+            f"库洛牌 {len(zt.get('clow_cards') or [])} 张｜骑士卡 {len(zt.get('rider_cards') or [])} 张｜希望碎片 {zt.get('hopes', 0)}",
+        ]
+        if req:
+            lines.append(f"下一阶（{nxt}）淬炼需：{'、'.join(f'{k}×{v}' for k, v in req.items())}")
+        else:
+            lines.append("已臻七阶·彼岸。")
+        lines.append("投影：#投影诸天 世界名（#诸天世界 查列表）｜探索：#探索友枝町 地点 等")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command(CMD_MIRROR_REFINE, "淬炼诸天镜")
+    async def handle_mirror_refine(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, zt = zhutian.refine(doc)
+        if ok:
+            await self.db.save_player(self._zt_save(doc, zt).model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_MIRROR_WORLDS, "诸天世界列表")
+    async def handle_mirror_worlds(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        zt = zhutian.system_of(doc)
+        tier = int(zt.get("tier") or 0) if zt.get("bound") else 0
+        lines = [f"--- 诸天世界（镜阶 {tier or '未绑定'}）---"]
+        for w, t in zhutian.WORLD_MIN_TIER.items():
+            mark = "✅可投影" if tier >= t else f"需 {t} 阶"
+            lines.append(f"· {w}（{mark}）")
+        lines.append("投影：#投影诸天 世界名（修为 1 亿 + 血气 1 亿 + 镜能 1）")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command(CMD_MIRROR_PROJ, "投影诸天")
+    async def handle_mirror_proj(self, event: AstrMessageEvent, world: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if doc.ext.get("projection"):
+            yield event.plain_result("已有进行中的投影（#1-#3 抉择 或 #退出投影）。")
+            return
+        ok, msg, zt, proj = zhutian.begin_projection(doc, world.strip(), time.time())
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = self._zt_save(doc, zt)
+        d.ext["projection"] = proj
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_MIRROR_CHOICE, "投影抉择")
+    async def handle_mirror_choice(self, event: AstrMessageEvent, choice: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        proj = doc.ext.get("projection")
+        if not proj:
+            yield event.plain_result("当前没有进行中的投影。")
+            return
+        try:
+            n = int(choice)
+        except (TypeError, ValueError):
+            n = 0
+        if n < 1 or n > int(proj.get("max_choice", 3)):
+            yield event.plain_result(f"请输入 1-{proj.get('max_choice', 3)} 作出抉择。")
+            return
+        import random as _random
+        rng = _random.Random(f"{doc.uid}:proj:{time.time()}")
+        tail, zt = zhutian.resolve_projection(doc, proj, n, rng)
+        d = self._zt_save(doc, zt)
+        d.ext.pop("projection", None)
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result(tail)
+
+    @filter.command("#1", "投影抉择1")
+    async def handle_choice1(self, event: AstrMessageEvent):
+        async for r in self.handle_mirror_choice(event, "1"):
+            yield r
+
+    @filter.command("#2", "投影抉择2")
+    async def handle_choice2(self, event: AstrMessageEvent):
+        async for r in self.handle_mirror_choice(event, "2"):
+            yield r
+
+    @filter.command("#3", "投影抉择3")
+    async def handle_choice3(self, event: AstrMessageEvent):
+        async for r in self.handle_mirror_choice(event, "3"):
+            yield r
+
+    @filter.command("#4", "投影抉择4")
+    async def handle_choice4(self, event: AstrMessageEvent):
+        async for r in self.handle_mirror_choice(event, "4"):
+            yield r
+
+    @filter.command(CMD_MIRROR_EXIT, "退出投影")
+    async def handle_mirror_exit(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if not doc.ext.get("projection"):
+            yield event.plain_result("当前没有进行中的投影。")
+            return
+        d = doc.model_copy(deep=True)
+        d.ext.pop("projection", None)
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result("神魂抽离镜光，投影中止（镜能不退）。")
+
+    @filter.command("#探索友枝町", "探索魔卡世界")
+    async def handle_xt_tomoeda(self, event: AstrMessageEvent, place: str = ""):
+        async for r in self._xt_explore(event, "魔卡少女樱", place):
+            yield r
+
+    @filter.command("#探索见泷原", "探索魔圆世界")
+    async def handle_xt_mitakihara(self, event: AstrMessageEvent, place: str = ""):
+        async for r in self._xt_explore(event, "魔法少女小圆", place):
+            yield r
+
+    @filter.command("#探索骑士世界", "探索帝骑世界")
+    async def handle_xt_decade(self, event: AstrMessageEvent, place: str = ""):
+        async for r in self._xt_explore(event, "假面骑士帝骑", place):
+            yield r
+
+    async def _xt_explore(self, event: AstrMessageEvent, world: str, place: str):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if not place:
+            spots = zhutian.LOCATIONS.get(world, {})
+            cmd_name = {"魔卡少女樱": "#探索友枝町", "魔法少女小圆": "#探索见泷原",
+                        "假面骑士帝骑": "#探索骑士世界"}[world]
+            yield event.plain_result(f"格式：{cmd_name} 地点\n地点：{'、'.join(spots)}")
+            return
+        import random as _random
+        rng = _random.Random(f"{doc.uid}:explore:{time.time()}")
+        ok, msg, zt = zhutian.explore(doc, world, place.strip(), rng)
+        if ok:
+            await self.db.save_player(self._zt_save(doc, zt).model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_MIRROR_AVATAR, "诸天化身谱")
+    async def handle_mirror_avatar(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        zt = zhutian.system_of(doc)
+        if not zt.get("bound"):
+            yield event.plain_result("尚未绑定诸天镜。")
+            return
+        lines = ["--- 诸天化身谱 ---"]
+        av: dict = zt.get("avatars") or {}
+        if not av:
+            lines.append("（尚未收录化身）投影世界并在抉择中行「仁」之事，有缘者自会现身。")
+        for name, info in av.items():
+            root = info.get("root") or {}
+            cur = "（当前装载）" if zt.get("current") == name else ""
+            lines.append(
+                f"· {name}{cur}｜eff +{root.get('eff', 0):g}｜三维 +{root.get('atk', 0):.0%}"
+            )
+        lines.append(f"当前灵根：{zt.get('current') or '本源'}｜切换：#装载化身 化身名 / #装载化身 本源（1 镜能 + 15 分钟冷却）")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command(CMD_MIRROR_LOAD, "装载化身")
+    async def handle_mirror_load(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, zt, buff = zhutian.load_avatar(doc, name, time.time())
+        if ok:
+            d = self._zt_save(doc, zt)
+            if buff:
+                d.ext["avatar_buff"] = buff
+            else:
+                d.ext.pop("avatar_buff", None)
+            await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
 
     @filter.command(CMD_HEAL, "灵石疗伤")
     async def handle_heal(self, event: AstrMessageEvent):

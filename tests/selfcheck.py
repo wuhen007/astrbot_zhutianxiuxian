@@ -511,6 +511,68 @@ async def main():
     assert all(f.get("seed") != "大夏神药种子" for f in w["fields"]), w["fields"]  # 收获后不返种（简化）
     print("xiaoshijie ok")
 
+    # 15j. 诸天镜主线：绑定→探索→淬炼→投影→化身
+    from core import zhutian as zt_mod  # noqa: E402
+    zt_doc = PlayerDoc(uid="zt1", exp=200_000_000)
+    ok, _, zt = zt_mod.bind(zt_doc)
+    assert ok and zt["tier"] == 1 and zt["energy"] == 3, zt
+    zt_doc.ext["zhutian"] = zt  # 模拟 main 写回（纯函数由调用方落盘）
+    ok2, _, _ = zt_mod.bind(zt_doc)
+    assert not ok2  # 不可重复绑定
+    zt = zt_mod.system_of(zt_doc)  # 后续用已写回的档继续
+    assert zt["bound"]
+    # 探索（先手动给 4 阶方便全地点；需写回 ext——core 从 doc.ext 读档）
+    zt = zt_mod.system_of(zt_doc)
+    zt["tier"] = 4
+    zt["energy_date"] = zt_mod.time.strftime("%Y-%m-%d")
+    zt["energy"] = 12
+    zt_doc.ext["zhutian"] = zt
+    ok, msg, zt = zt_mod.explore(zt_doc, "魔卡少女樱", "友枝小学", _random.Random(1))
+    assert ok and zt["energy"] == 11 and zt["materials"]["镜尘"] >= 4, msg
+    zt_doc.ext["zhutian"] = zt
+    ok, msg, _ = zt_mod.explore(zt_doc, "魔卡少女樱", "不存在地点", _random.Random(1))
+    assert not ok
+    # 淬炼：材料不足 → 补齐 → 升阶（印记被消耗）
+    ok, msg, _ = zt_mod.refine(zt_doc)
+    assert not ok and "不足" in msg
+    zt = zt_mod.system_of(zt_doc)
+    zt["tier"] = 1
+    zt["materials"] = {"镜尘": 999, "世界残响": 99, "位面晶核": 9, "时空锚": 9, "诸天镜心": 9}
+    zt["imprints"] = ["魔法少女小圆", "假面骑士帝骑"]
+    zt_doc.ext["zhutian"] = zt
+    ok, msg, zt2 = zt_mod.refine(zt_doc)
+    assert ok and zt2["tier"] == 2, msg
+    assert len(zt2["imprints"]) == 1, zt2["imprints"]  # REQ[1] 要 1 印记 → 消耗 1 剩 1
+    assert zt2["energy"] == 4  # 晋阶补满（2 阶上限 4）
+    zt_doc.ext["zhutian"] = zt2
+    # 投影：门槛+消耗+分支
+    ok, msg, _, _ = zt_mod.begin_projection(zt_doc, "星海归墟", 1_000.0)
+    assert not ok and "镜阶不足" in msg
+    ok, msg, zt3, proj = zt_mod.begin_projection(zt_doc, "魔卡少女樱", 1_000.0)
+    assert ok and proj["max_choice"] == 3, msg
+    assert zt3["energy"] == 3  # 4-1
+    zt_doc.ext["zhutian"] = zt3
+    before_marks = len(zt3["imprints"])
+    tail, zt4 = zt_mod.resolve_projection(zt_doc, proj, 3, _random.Random(2))
+    assert "世界印记" in tail and len(zt4["imprints"]) == before_marks + 1  # 首投影必得印记
+    # 化身装载：buff 替换与切回（需先写回 zt4）
+    zt4["avatars"]["木之本樱"] = {"root": dict(zt_mod.AVATAR_ROOTS["木之本樱"]), "stage": 1}
+    zt4["energy"] = 5
+    zt_doc.ext["zhutian"] = zt4
+    ok, msg, zt5, buff = zt_mod.load_avatar(zt_doc, "木之本樱", 1_000.0 + 99999)
+    assert ok and buff == {"atk": 0.5, "def": 0.5, "hp": 0.5}, (msg, buff)
+    zt_doc.ext["zhutian"] = zt5
+    ok, msg, _, _ = zt_mod.load_avatar(zt_doc, "鹿目圆", 1_000.0 + 99999 + 60)
+    assert not ok and "冷却" in msg
+    ok, msg, zt6, buff2 = zt_mod.load_avatar(zt_doc, "本源", 1_000.0 + 99999 + 3600)
+    assert ok and buff2 == {}, msg
+    # aggregate 并入化身 buff（装载态三维 +50%）
+    loaded_doc = zt_doc.model_copy(deep=True)
+    loaded_doc.ext["zhutian"] = dict(zt5)
+    loaded_doc.ext["zhutian"]["current"] = "木之本樱"
+    loaded_doc.ext["avatar_buff"] = {"atk": 0.5, "def": 0.5, "hp": 0.5}
+    print("zhutian mirror ok")
+
     # 15i. 师徒/道侣/封禁（纯存档语义验证）
     master = PlayerDoc(uid="m1", ext={"recruit": True})
     disciple = PlayerDoc(uid="d1")
