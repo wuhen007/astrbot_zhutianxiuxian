@@ -11,7 +11,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, battle, boss, catalog, cultivate, dibing, equipment, items, linggen, motou, npc, occupation, pet, quest, secret, sect, shenjie, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, battle, boss, catalog, cultivate, dibing, equipment, items, linggen, motou, npc, occupation, pet, quest, secret, sect, shenjie, story_npc, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -147,11 +147,24 @@ CMD_EVIL_MOSHI = "#供奉魔石"
 CMD_EVIL_BREAK = "#冲击魂印"
 CMD_EVIL_REFINE = "#炼化遗蜕"
 CMD_NPC = "#剧情人物"
+CMD_NPC_ALIAS = "#剧情人物图鉴"
 CMD_FIERCE_TALK = "#狠人交流"
 CMD_FIERCE_ASK = "#狠人请教"
 CMD_SU_TALK = "#苏灵交流"
 CMD_SU_ASK = "#苏灵请教"
 CMD_ESSENCE = "#凝聚精血"
+CMD_PROTECT_LIU = "#请柳神护道"
+CMD_PROTECT_SU = "#请苏灵护道"
+CMD_PROTECT_HEN = "#请狠人护道"
+CMD_PROTECT_MY = "#我的护道人"
+CMD_PROTECT_OFF = "#解除护道"
+CMD_HEI = "#黑皇"
+CMD_HEI_TALK = "#黑皇交流"
+CMD_HEI_TEACH = "#黑皇请教阵道"
+CMD_HEI_ARRAYS = "#黑皇阵法"
+CMD_HEI_ENGRAVE = "#请黑皇刻阵"
+CMD_ARRAY_OFF = "#停用阵法"
+CMD_ARRAY_ON = "#启用阵法"
 CMD_DARK_OPEN = "#开启黑暗动乱"
 CMD_DARK_CLOSE = "#关闭黑暗动乱"
 CMD_DARK_STATUS = "#禁区至尊状态"
@@ -669,10 +682,13 @@ class ZhutianPlugin(Star):
                 (f"{CMD_GIFT} @道侣", "赠百合花篮（亲密度 +10）"),
             ]},
             {"title": "剧情人物", "lines": [
-                (CMD_NPC, "狠人大帝 / 苏灵 总览（好感/关系/剧情）"),
+                (CMD_NPC, "剧情人物图鉴（11 位 · 立绘/关系/线索）"),
+                (f"{CMD_NPC} 名字", "人物档案（好感/关系/近事/机缘）"),
                 (f"{CMD_FIERCE_TALK} / {CMD_SU_TALK}", "交流 +5~8 好感（每日 3 次）"),
                 (CMD_FIERCE_ASK, "狠人请教（180 好感，授功法）"),
                 (CMD_SU_ASK, "苏灵请教（240 好感，每日推演，10 次领悟终极）"),
+                (CMD_HEI, "黑皇：交流 / #黑皇阵法 / #请黑皇刻阵 阵法名"),
+                (CMD_PROTECT_MY, "护道之约（480 好感可立约，濒死自动出手）"),
                 (CMD_ESSENCE, "凝聚精血（特殊体质每 7 天 1 份）"),
             ]},
             {"title": "魔头禁术（PvP）", "lines": [
@@ -3699,13 +3715,22 @@ class ZhutianPlugin(Star):
         if not w:
             yield event.plain_result("尚未炼制本命帝兵（#炼制帝兵）。")
             return
-        ok, msg, w2 = dibing.tribulation(w, doc.exp, float(doc.ext.get("xueqi", 0) or 0))
+        s = story_npc.state_of(doc)
+        cheat = bool(s.get("trib_pending"))
+        need = dibing.TRIBULATION_COST // 2 if cheat else dibing.TRIBULATION_COST
+        ok, msg, w2 = dibing.tribulation(
+            w, doc.exp, float(doc.ext.get("xueqi", 0) or 0), cost=need
+        )
         if not ok:
             yield event.plain_result(msg)
             return
+        if cheat:
+            story_npc.consume_tribulation(s)
+            msg += f"\n【欺天阵纹】阵纹遮蔽天机，雷劫消耗减半（各 {need:,}）。"
         d = self._db_sync(doc, w2)
-        d.exp -= dibing.TRIBULATION_COST
-        d.ext["xueqi"] = max(0.0, float(d.ext.get("xueqi", 0) or 0) - dibing.TRIBULATION_COST)
+        d = story_npc.save(d, s)
+        d.exp -= need
+        d.ext["xueqi"] = max(0.0, float(d.ext.get("xueqi", 0) or 0) - need)
         await self.db.save_player(d.model_dump())
         async for r in self._smart(event, msg, "雷劫洗礼"):
             yield r
@@ -4354,18 +4379,6 @@ class ZhutianPlugin(Star):
         d.ext["npc"] = n
         return d
 
-    @filter.command(CMD_NPC, "剧情人物")
-    async def handle_npc(self, event: AstrMessageEvent):
-        if not self._allowed(event):
-            return
-        doc, err = await self._require_player(event)
-        if err:
-            yield event.plain_result(err)
-            return
-        n = npc.state_of(doc)
-        async for r in self._smart(event, npc.panel(n, time.time()), "剧情人物"):
-            yield r
-
     @filter.command(CMD_FIERCE_TALK, "狠人交流")
     async def handle_fierce_talk(self, event: AstrMessageEvent):
         async for r in self._npc_talk(event, "ruthless"):
@@ -4469,6 +4482,266 @@ class ZhutianPlugin(Star):
             await self.db.save_player(d.model_dump())
             await self.db.add_items(doc.uid, {npc.ESSENCE_ITEM: 1})
         yield event.plain_result(msg)
+
+    # ---- B7：剧情人物全集（图鉴 / 邂逅 / 护道之约 / 黑皇阵道） ----
+
+    def _story_roster(self) -> list[dict]:
+        return self.content.table("item/剧情人物列表") or []
+
+    def _story_gallery(self, doc: PlayerDoc) -> tuple[list[dict], int, int]:
+        roster = self._story_roster()
+        groups = story_npc.gallery_rows(doc, roster)
+        total = unlocked = 0
+        for g in groups:
+            for c in g["chars"]:
+                total += 1
+                if c["unlocked"]:
+                    unlocked += 1
+                c["portrait_uri"] = (
+                    render.asset_data_uri(f"character/{c['portrait']}") if c.get("portrait") else ""
+                )
+        return groups, total, unlocked
+
+    @filter.command(CMD_NPC, "剧情人物图鉴")
+    async def handle_story(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        raw = (name or "").strip()
+        if raw:
+            if raw in ("狠人", "狠人大帝"):
+                raw = "狠人大帝"
+            text = story_npc.detail_text(doc, self._story_roster(), raw)
+            async for r in self._smart(event, text, f"剧情人物·{raw}"):
+                yield r
+            return
+        groups, total, unlocked = self._story_gallery(doc)
+        if self.render_on and total:
+            pct = round(unlocked / total * 100)
+            png = await render.render_panel(
+                "story",
+                {"title": "剧情人物图鉴", "footer": "诸天人物志",
+                 "groups": groups, "total": total, "unlocked": unlocked, "pct": pct},
+                self.panel_dir,
+            )
+            if png:
+                yield event.image_result(str(png))
+                return
+        async for r in self._smart(event, story_npc.gallery_text(doc, self._story_roster()),
+                                   "剧情人物图鉴"):
+            yield r
+
+    @filter.command(CMD_NPC_ALIAS, "剧情人物图鉴")
+    async def handle_story_alias(self, event: AstrMessageEvent):
+        async for r in self.handle_story(event):
+            yield r
+
+    # ---- 护道之约 ----
+
+    async def _protect_assign(self, event: AstrMessageEvent, name: str):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        s = story_npc.state_of(doc)
+        ok, msg, s2 = story_npc.assign_protector(doc, s, name)
+        if ok:
+            await self.db.save_player(story_npc.save(doc, s2).model_dump())
+        async for r in self._smart(event, msg, "护道之约"):
+            yield r
+
+    @filter.command(CMD_PROTECT_LIU, "请柳神护道")
+    async def handle_protect_liu(self, event: AstrMessageEvent):
+        async for r in self._protect_assign(event, "柳神"):
+            yield r
+
+    @filter.command(CMD_PROTECT_SU, "请苏灵护道")
+    async def handle_protect_su(self, event: AstrMessageEvent):
+        async for r in self._protect_assign(event, "苏灵"):
+            yield r
+
+    @filter.command(CMD_PROTECT_HEN, "请狠人护道")
+    async def handle_protect_hen(self, event: AstrMessageEvent):
+        async for r in self._protect_assign(event, "狠人大帝"):
+            yield r
+
+    @filter.command(CMD_PROTECT_MY, "我的护道人")
+    async def handle_protect_my(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        s = story_npc.state_of(doc)
+        lines = ["--- 护道之约 ---", story_npc.protect_status(s, time.time()), ""]
+        for n in ("柳神", "苏灵", "狠人大帝"):
+            f = story_npc.favor_of(doc, n)
+            mark = "✅" if f >= story_npc.PROTECTOR_FAVOR else f"{f}/{story_npc.PROTECTOR_FAVOR}"
+            lines.append(f"{n}：{mark} 好感｜{story_npc.relation_of(n, f)}")
+        lines.append("※ 480 好感可立约，秘境濒死自动出手（24 小时一次）")
+        async for r in self._smart(event, "\n".join(lines), "护道之约"):
+            yield r
+
+    @filter.command(CMD_PROTECT_OFF, "解除护道")
+    async def handle_protect_off(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        s = story_npc.state_of(doc)
+        old, s2 = story_npc.clear_protector(s)
+        if old == "无":
+            yield event.plain_result("你本就没有护道人。")
+            return
+        await self.db.save_player(story_npc.save(doc, s2).model_dump())
+        yield event.plain_result(f"你与「{old}」的护道之约已解。山高水长，各自珍重。")
+
+    # ---- 黑皇阵道 ----
+
+    @filter.command(CMD_HEI, "黑皇")
+    async def handle_hei(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        s = story_npc.state_of(doc)
+        async for r in self._smart(event, story_npc.hei_panel(s), "剧情人物·黑皇"):
+            yield r
+
+    @filter.command("#黑皇状态", "黑皇状态")
+    async def handle_hei_state(self, event: AstrMessageEvent):
+        async for r in self.handle_hei(event):
+            yield r
+
+    @filter.command(CMD_HEI_TALK, "黑皇交流")
+    async def handle_hei_talk(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        s = story_npc.state_of(doc)
+        ok, msg, s2 = story_npc.hei_talk(s, time.time())
+        if ok:
+            await self.db.save_player(story_npc.save(doc, s2).model_dump())
+        async for r in self._smart(event, msg, "黑皇交流"):
+            yield r
+
+    @filter.command(CMD_HEI_TEACH, "黑皇请教阵道")
+    async def handle_hei_teach(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        s = story_npc.state_of(doc)
+        ok, msg, s2 = story_npc.hei_teach(s)
+        if ok:
+            await self.db.save_player(story_npc.save(doc, s2).model_dump())
+        async for r in self._smart(event, msg, "黑皇阵道"):
+            yield r
+
+    @filter.command(CMD_HEI_ARRAYS, "黑皇阵法")
+    async def handle_hei_arrays(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        s = story_npc.state_of(doc)
+        async for r in self._smart(event, story_npc.formations_text(s, doc.stones), "黑皇阵法"):
+            yield r
+
+    @filter.command(CMD_HEI_ENGRAVE, "请黑皇刻阵")
+    async def handle_hei_engrave(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        s = story_npc.state_of(doc)
+        fname = (name or "").strip()
+        if not fname:
+            async for r in self._smart(event, story_npc.formations_text(s, doc.stones), "黑皇阵法"):
+                yield r
+            return
+        ok, msg, f = story_npc.engrave_check(s, fname, time.time(), doc.stones)
+        if not ok or f is None:
+            yield event.plain_result(msg)
+            return
+        if f["kind"] == "exp" and doc.ext.get("occupation") != "阵法师":
+            yield event.plain_result("「聚灵道阵」须以阵法师之身承受（#转职 阵法师）。")
+            return
+        mats = f.get("mats") or {}
+        inv = await self.db.get_inventory(doc.uid)
+        missing = [f"{k}×{v}（有 {int(inv.get(k, 0))}）" for k, v in mats.items()
+                   if int(inv.get(k, 0)) < int(v)]
+        if missing:
+            yield event.plain_result("材料不足：" + "、".join(missing))
+            return
+        effect, s2 = story_npc.apply_engrave(s, fname, time.time())
+        d = story_npc.save(doc, s2)
+        d.stones -= int(f["cost"])
+        note = ""
+        if effect.get("job_exp"):
+            lv, ex = self._ensure_occ(d)
+            nlv, nex = occupation.add_exp(lv, ex, int(effect["job_exp"]), self.occ_exp_table)
+            d.ext["occupation_level"] = nlv
+            d.ext["occupation_exp"] = nex
+            note = f"\n职业等级 {lv} → {nlv}（经验 +{int(effect['job_exp'])}）"
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            for k, v in mats.items():
+                await self.db.remove_item(doc.uid, k, int(v))
+        detail = {"seal": "阵纹已布下，下一场秘境战斗生效",
+                  "kill": "杀阵已成，接下来 5 场秘境战斗生效",
+                  "escape": "传送阵已就位，秘境战败时自动脱身",
+                  "tribulation": "欺天阵纹已布下，下次帝兵雷劫消耗减半"}.get(f["kind"], "阵成")
+        yield event.plain_result(
+            f"黑皇爪影翻飞，【{fname}】阵纹一气呵成！\n{detail}。\n"
+            f"耗灵石 {int(f['cost']):,}" + (f"、{('、'.join(f'{k}×{v}' for k, v in mats.items()))}" if mats else "")
+            + note
+        )
+
+    @filter.command(CMD_ARRAY_OFF, "停用阵法")
+    async def handle_array_off(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        s = story_npc.state_of(doc)
+        s["arrays_off"] = True
+        await self.db.save_player(story_npc.save(doc, s).model_dump())
+        yield event.plain_result("阵纹暂敛，秘境战斗不再自动触发（#启用阵法 恢复）。")
+
+    @filter.command(CMD_ARRAY_ON, "启用阵法")
+    async def handle_array_on(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        s = story_npc.state_of(doc)
+        s["arrays_off"] = False
+        await self.db.save_player(story_npc.save(doc, s).model_dump())
+        yield event.plain_result("阵纹重新亮起，秘境战斗将自动催动。")
 
     @filter.command(CMD_HEAL, "灵石疗伤")
     async def handle_heal(self, event: AstrMessageEvent):
@@ -4630,12 +4903,36 @@ class ZhutianPlugin(Star):
         table = self.content.table(doc.realm_table)
         entry = realm_entry(doc, table)
         base = (st.atk, st.defense, st.hp)
+        # 黑皇阵纹：只在真正进入战斗时催动（逐场消耗）
+        s = story_npc.state_of(doc)
+        used_arrays: list[str] = []
+
+        def _buff():
+            mods, used = story_npc.battle_mods(s)
+            used_arrays.extend(used)
+            return mods
+
         me = battle.Unit(doc.name or doc.uid[:8] + "…", st.atk, st.defense, hp_cur, st.bao)
+
+        def _protect(place: str, floor: int, enemy: str):
+            got = story_npc.try_protect(s, time.time())
+            if got:
+                return got
+            esc = story_npc.consume_escape(s)
+            if esc:
+                return esc, (f"【{esc}】阵纹骤然亮起，虚空裂开一道门。\n"
+                              f"你在{enemy}的攻势落下前被挪出秘境，收获未失，气血尽复。")
+            return None
+
         sess, me, flavor, fled = secret.explore(
             sess, base, me, self.drop_pool, rng, sect_mode=bool(sess.sect_name),
+            buff=_buff, protect=_protect,
         )
+        if used_arrays:
+            flavor = "【阵法·" + "、".join(used_arrays) + "】阵纹复苏，笼罩战场！\n" + flavor
         d = doc.model_copy()
         d.ext["hp"] = me.hp
+        d.ext["story"] = s
         d.ext["explore"] = {
             "place": sess.place, "floor": sess.floor, "stones": sess.stones,
             "items": sess.items, "log": sess.log[-30:], "factor": sess.factor,
@@ -4643,14 +4940,38 @@ class ZhutianPlugin(Star):
         }
         if not sess.sect_name:  # 每日任务 3：秘境探索计数（宗门秘境不计，对齐原版"沉迷不计入"）
             await self.db.add_daily_secret(doc.uid)
+        # 剧情人物邂逅（战败/传送脱身不触发）
+        enc = None if fled else story_npc.meet(s, sess.place, sess.floor, time.time(), rng)
+        drop_items: dict[str, int] = {}
+        if enc:
+            flavor = flavor + "\n" + str(enc.get("text") or "")
+            if enc.get("exp_pct"):
+                gain = int(d.exp * float(enc["exp_pct"]))
+                d.exp += gain
+                flavor += f"\n修为 +{gain:,}"
+            if enc.get("item"):
+                drop_items[str(enc["item"])] = 1
+                flavor += f"\n（获得【{enc['item']}】×1）"
         if fled:
-            await self.db.save_player(d.model_dump())
+            if "传送阵" in flavor:
+                reason = "传送脱身"
+            elif "护道之约" in flavor:
+                reason = "护道脱险"
+            else:
+                reason = "血战脱身"
             d.state = "空闲"
-            text = await self._settle_explore(d, sess, reason="血战脱身")
+            text = await self._settle_explore(d, sess, reason=reason)
+            if drop_items:
+                await self.db.add_items(doc.uid, drop_items)
             yield event.plain_result(f"{flavor}\n{text}")
             return
         d.state = "秘境中"
-        await self.db.save_player(d.model_dump())
+        if drop_items:
+            async with self.db.transaction():
+                await self.db.save_player(d.model_dump())
+                await self.db.add_items(doc.uid, drop_items)
+        else:
+            await self.db.save_player(d.model_dump())
         yield event.plain_result(
             f"{flavor}\n第 {sess.floor} 层 · 本次已获 {sess.stones} 灵石 · 气血 {me.hp}/{st.hp}"
         )

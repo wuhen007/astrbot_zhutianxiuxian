@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block body %}
+<style>
+  .cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .card { background: rgba(0,0,0,.25); border: 1px solid rgba(122,138,160,.16);
+    border-radius: 10px; overflow: hidden; }
+  .pic { position: relative; height: 168px; background: #0b1017; }
+  .pic img { width: 100%; height: 100%; object-fit: cover; object-position: center top; display: block; }
+  .card.locked .pic img { filter: grayscale(1) brightness(.55) blur(.6px); }
+  .noimg { height: 100%; display: flex; align-items: center; justify-content: center;
+    font-size: 40px; color: #2c3849; font-weight: 700; }
+  .veil { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 12.5px; color: #8a97ab; letter-spacing: 4px; background: rgba(8,12,18,.32); }
+  .badge { position: absolute; right: 8px; bottom: 8px; font-size: 10.5px; padding: 2px 7px;
+    border-radius: 6px; background: rgba(212,175,55,.18);
+    border: 1px solid rgba(212,175,55,.4); color: #f0d78c; }
+  .cbody { padding: 8px 10px 10px; }
+  .cname { font-size: 14px; font-weight: 700; color: #f0d78c; letter-spacing: 1px; }
+  .cid { font-size: 11px; color: #8a97ab; margin-top: 2px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cfav { font-size: 11px; color: #6fd3c7; margin-top: 5px; }
+  .chint { font-size: 10.5px; color: #6a7a92; margin-top: 5px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+<div class="row"><span class="k">已结缘</span><span class="v gold">{{ unlocked }} / {{ total }}</span></div>
+<div class="bar gold"><div style="width: {{ pct }}%"></div></div>
+{% for g in groups %}
+<div class="section">
+  <div class="head">{{ g.plane }}</div>
+  <div class="cards">
+    {% for c in g.chars %}
+    <div class="card{% if not c.unlocked %} locked{% endif %}">
+      <div class="pic">
+        {% if c.portrait_uri %}<img src="{{ c.portrait_uri }}" alt="{{ c.name }}">
+        {% else %}<div class="noimg">{{ c.name[0] }}</div>{% endif %}
+        {% if not c.unlocked %}<div class="veil">未结缘</div>
+        {% else %}<div class="badge">{{ c.relation }}</div>{% endif %}
+      </div>
+      <div class="cbody">
+        <div class="cname">{{ c.name }}</div>
+        <div class="cid">{{ c.identity }}</div>
+        {% if c.unlocked %}
+        <div class="cfav">{{ c.favor }} 好感 · {{ c.realm }}</div>
+        {% else %}
+        <div class="chint">线索：{{ c.hint }}</div>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endfor %}
+<div class="section"><div class="chip plain">详情：#剧情人物 名字 · 护道：#我的护道人</div></div>
+{% endblock %}

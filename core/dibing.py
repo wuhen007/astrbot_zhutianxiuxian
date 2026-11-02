@@ -84,19 +84,25 @@ def fuse(d: Mapping, gold: str) -> tuple[bool, str, dict]:
     ), w
 
 
-def tribulation(d: Mapping, exp: int, xueqi: float) -> tuple[bool, str, dict]:
-    """雷劫洗礼：需九金全融合，消耗修为血气，品阶 +1（必成，原版语义即"齐备即跃迁"）。"""
+def tribulation(
+    d: Mapping, exp: int, xueqi: float, cost: int | None = None
+) -> tuple[bool, str, dict]:
+    """雷劫洗礼：需九金全融合，消耗修为血气，品阶 +1（必成，原版语义即"齐备即跃迁"）。
+
+    cost 可覆盖消耗（黑皇「欺天阵纹」减半）。
+    """
+    need = int(cost or TRIBULATION_COST)
     w = copy.deepcopy(dict(d))
     stage = int(w.get("stage", 0))
     if stage >= len(STAGES) - 1:
         return False, f"「{w['name']}」已至最高品阶【{STAGES[-1]}】。", w
     total = len(set(list(w.get("fused") or []) + [w.get("gold")]))
     if total < 9:
-        need = [g for g in GOLD_RARITY if g not in (set(list(w.get('fused') or []) + [w.get('gold')]))]
+        need9 = [g for g in GOLD_RARITY if g not in (set(list(w.get('fused') or []) + [w.get('gold')]))]
         return False, (f"「{w['name']}」需融合全部九种仙金才能承受雷劫洗礼。\n"
-                       f"缺少：{'、'.join(need[:9])}"), w
-    if exp < TRIBULATION_COST or xueqi < TRIBULATION_COST:
-        return False, f"雷劫洗礼需修为/血气各 {TRIBULATION_COST:,}（当前 {exp:,}/{int(xueqi):,}）。", w
+                       f"缺少：{'、'.join(need9[:9])}"), w
+    if exp < need or xueqi < need:
+        return False, f"雷劫洗礼需修为/血气各 {need:,}（当前 {exp:,}/{int(xueqi):,}）。", w
     w["stage"] = stage + 1
     return True, (
         f"九金共鸣，天雷灌顶——【{w['name']}】渡过雷劫，进阶【{STAGES[stage + 1]}】！\n"

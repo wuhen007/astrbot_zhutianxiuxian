@@ -7,12 +7,15 @@
 
 from __future__ import annotations
 
+import base64
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
+ASSET_DIR = Path(__file__).parent.parent / "assets"
 
 _env: Environment | None = None
 _pw = None
@@ -29,6 +32,18 @@ def _jinja() -> Environment:
             lstrip_blocks=True,
         )
     return _env
+
+
+@lru_cache(maxsize=64)
+def asset_data_uri(rel: str) -> str:
+    """把 assets/ 下的图片转为 data URI（Playwright set_content 读不了相对路径）。"""
+    p = ASSET_DIR / rel
+    if not p.exists():
+        return ""
+    try:
+        return "data:image/webp;base64," + base64.b64encode(p.read_bytes()).decode()
+    except Exception:
+        return ""
 
 
 async def _get_browser():

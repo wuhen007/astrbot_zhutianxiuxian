@@ -25,6 +25,16 @@ RELATIONSHIPS = [
     (0, "时间长河一瞥"),
 ]
 
+# 苏灵的关系档位与狠人分开（原版二人共用 1~4 级，这里各给一套贴原著的称谓）
+SULING_RELATIONSHIPS = [
+    (480, "移劫之约"),
+    (360, "终幕同行"),
+    (240, "命途相知"),
+    (120, "并肩劫云"),
+    (60, "星河同游"),
+    (0, "初识命轮"),
+]
+
 RUTHLESS_TEACH_FAVOR = 180
 SULING_DEEP_FAVOR = 240
 SULING_TOTAL_TEACH = 10
@@ -62,7 +72,10 @@ SULING_BEATS = [
 
 
 def state_of(doc: Mapping) -> dict:
-    n = doc.ext.get("npc") if isinstance(doc.ext, Mapping) else None
+    ext = getattr(doc, "ext", None)
+    if not isinstance(ext, Mapping):
+        ext = doc if isinstance(doc, Mapping) else {}
+    n = ext.get("npc") if isinstance(ext, Mapping) else None
     n = copy.deepcopy(n) if isinstance(n, dict) else {}
     for key in ("ruthless", "suling"):
         d = n.get(key) if isinstance(n.get(key), dict) else {}
@@ -78,11 +91,12 @@ def state_of(doc: Mapping) -> dict:
     return n
 
 
-def relation_of(favor: float) -> str:
-    for need, name in RELATIONSHIPS:
+def relation_of(favor: float, who: str = "ruthless") -> str:
+    tiers = SULING_RELATIONSHIPS if who == "suling" else RELATIONSHIPS
+    for need, name in tiers:
         if favor >= need:
             return name
-    return RELATIONSHIPS[-1][1]
+    return tiers[-1][1]
 
 
 def _date_key(ts: float) -> str:
@@ -101,8 +115,8 @@ def talk(n: dict, who: str, now: float) -> tuple[bool, str, dict]:
     old = int(d["favor"])
     d["favor"] = old + gain
     d["talk_count"] = int(d["talk_count"]) + 1
-    old_rel = relation_of(old)
-    new_rel = relation_of(d["favor"])
+    old_rel = relation_of(old, who)
+    new_rel = relation_of(d["favor"], who)
     line = random.choice(RUTHLESS_TALKS if who == "ruthless" else SULING_TALKS)
     tail = f"\n好感度 +{gain}（{d['favor']}，{new_rel}）"
     if new_rel != old_rel:
@@ -173,9 +187,9 @@ def panel(n: dict, now: float) -> str:
     r, s = n["ruthless"], n["suling"]
     lines = [
         "--- 剧情人物 ---",
-        f"【狠人大帝】关系：{relation_of(r['favor'])}（{r['favor']} 好感）",
+        f"【狠人大帝】关系：{relation_of(r['favor'], 'ruthless')}（{r['favor']} 好感）",
         f"  已授法门：{'、'.join(r.get('learned') or []) or '（无）'}｜请教需 {RUTHLESS_TEACH_FAVOR} 好感",
-        f"【苏灵】关系：{relation_of(s['favor'])}（{s['favor']} 好感）",
+        f"【苏灵】关系：{relation_of(s['favor'], 'suling')}（{s['favor']} 好感）",
         f"  推演进度：{s.get('teach_total', 0)}/{SULING_TOTAL_TEACH}"
         + ("（已领悟终极）" if s.get("ultimate") else f"｜请教需 {SULING_DEEP_FAVOR} 好感、每日一次"),
         f"  剧情：{beat_of(n)}",

@@ -10,6 +10,7 @@ from __future__ import annotations
 import random
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import Any
 
 from .battle import spar_full, Unit
 
@@ -105,6 +106,29 @@ def roll_drop(
     return rng.choice(pool) if pool else None
 
 
+def _scale_enemy(monster: Unit, mods: Mapping | None) -> None:
+    """黑皇阵法对敌方的削弱（原地修改）。"""
+    if not mods:
+        return
+    atk_scale = float(mods.get("atk", 1) or 1)
+    def_scale = float(mods.get("def", 1) or 1)
+    monster.atk = max(1, int(monster.atk * atk_scale))
+    monster.defense = max(0, int(monster.defense * def_scale))
+
+
+def _battle_buff(me: Unit, monster: Unit, buff: Any) -> tuple[int, ...]:
+    """战斗开始时结算阵法：返回 spar_full 的 skip_first。"""
+    if not buff:
+        return ()
+    b = buff() or {}
+    if b.get("atk_mult"):
+        me.atk = max(1, int(me.atk * float(b["atk_mult"])))
+    if b.get("bao_add"):
+        me.bao = min(1.0, float(me.bao) + float(b["bao_add"]))
+    _scale_enemy(monster, b.get("enemy"))
+    return (1,) if b.get("stun") else ()
+
+
 def explore(
     session: Session,
     base: tuple[int, int, int],
@@ -113,11 +137,17 @@ def explore(
     rng: random.Random,
     stone_scale: float = 1.0,
     sect_mode: bool = False,
+    buff: Any = None,
+    protect: Any = None,
 ) -> tuple[Session, Unit, str, bool]:
     """寻宝一次。返回 (更新后的会话, 战斗后的我, 文本, 是否被打出局)。
 
     宗门秘境（sect_mode）每 5 层强制遭遇守关 Boss（强度 ×3、奖励 ×5）。
     我方血量由调用方以 Unit.hp 传入（当前气血），战斗后同步回 ext。
+    buff：战斗开始时的阵法回调 () -> {atk_mult, bao_add, enemy:{atk,def}, stun}；
+    只在真正进入战斗时调用，避免空探索白烧次数。
+    protect：护道回调 (place, floor, enemy) -> (护道人, 文案) | None；
+    战败瞬间调用，触发则气血全复、收益不减、留在秘境。
     """
     session.floor += 1
     boss_floor = sect_mode and (session.floor % 5 == 0)
@@ -130,7 +160,8 @@ def explore(
             session.place, session.floor - 1, base, rng,
             elite=False, factor_override=pf * 3.0,
         )
-        winner, log, hp_left, _ = spar_full(me, monster, rng)
+        skip = _battle_buff(me, monster, buff)
+        winner, log, hp_left, _ = spar_full(me, monster, rng, skip_first=skip)
         me.hp = max(0, hp_left)
         tail = log[-1] if log else ""
         if winner == 0:
@@ -146,6 +177,12 @@ def explore(
             got = f"，掉落「{'」「'.join(drops)}」" if drops else ""
             session.log.append(f"第{session.floor}层：击败守关Boss·{monster.name}{tail}，得 {stones} 灵石{got}")
             return session, me, tail, False
+        saved = protect(session.place, session.floor, monster.name) if protect else None
+        if saved:
+            name, msg = saved
+            me.hp = base[2]
+            session.log.append(f"第{session.floor}层：不敌守关Boss·{monster.name}，护道人「{name}」出手相护")
+            return session, me, msg, False
         lost = session.stones // 3
         session.stones -= lost
         session.log.append(f"第{session.floor}层：守关Boss·{monster.name}太强{tail}，败退，散失 {lost} 灵石")
@@ -156,7 +193,8 @@ def explore(
             session.place, session.floor - 1, base, rng,
             elite=(kind == "elite"), factor_override=pf,
         )
-        winner, log, hp_left, _ = spar_full(me, monster, rng)
+        skip = _battle_buff(me, monster, buff)
+        winner, log, hp_left, _ = spar_full(me, monster, rng, skip_first=skip)
         me.hp = max(0, hp_left)
         tail = log[-1] if log else ""
         if winner == 0:
@@ -169,6 +207,12 @@ def explore(
                 got = f"，掉落「{drop['name']}」"
             session.log.append(f"第{session.floor}层：击败{monster.name}{tail}，得 {stones} 灵石{got}")
             return session, me, tail, False
+        saved = protect(session.place, session.floor, monster.name) if protect else None
+        if saved:
+            name, msg = saved
+            me.hp = base[2]
+            session.log.append(f"第{session.floor}层：不敌{monster.name}，护道人「{name}」出手相护")
+            return session, me, msg, False
         # 战败：损失全部带入收益的一半灵石（物品保留），被传送出秘境
         lost = session.stones // 2
         session.stones -= lost

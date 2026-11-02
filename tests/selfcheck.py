@@ -1057,6 +1057,81 @@ async def main():
     assert sess2.stones >= 0 and sess2.floor >= 1
     print("secret realm ok")
 
+    # 16b. 剧情人物：图鉴 / 邂逅 / 好感 / 护道 / 黑皇阵道
+    from core import story_npc as story_mod  # noqa: E402
+
+    roster = store.table("item/剧情人物列表")
+    assert isinstance(roster, list) and len(roster) == 10, len(roster)
+    assert story_mod.relation_of("柳神", 0) == "初识"
+    assert story_mod.relation_of("柳神", 60) == "相识"
+    assert story_mod.relation_of("柳神", 480) == "护道者"
+    assert story_mod.relation_of("黑皇", 40) == "熟人"
+    assert story_mod.relation_of("黑皇", 360) == "帝阵传人"
+
+    sdoc = PlayerDoc(uid="story", name="说书人", realm_index=10, stones=10 ** 12)
+    sdoc.ext["occupation"] = "阵法师"
+    sdoc.ext["occupation_level"] = 3
+    sdoc.ext["occupation_exp"] = 0
+    s = story_mod.state_of(sdoc)
+    assert story_mod.meet(s, "青冥山", 2, 0, _random.Random(1)) is None, "层数未到不应邂逅"
+    enc = story_mod.meet(s, "青冥山", 3, 0, _random.Random(1))
+    assert enc and enc["name"] == "柳神" and enc["first"] and enc["gain"] == 10, enc
+    enc = story_mod.meet(s, "幽冥渊", 6, 0, _random.Random(1))
+    assert enc and enc["name"] == "张五爷" and enc.get("item") == "源师转职凭证", enc
+
+    sdoc.ext["story"] = s
+    rows = story_mod.gallery_rows(sdoc, roster)
+    names = [c["name"] for g in rows for c in g["chars"]]
+    assert len(names) == 11 and "柳神" in names and "狠人大帝" in names, names
+
+    ok, _, s = story_mod.assign_protector(sdoc, s, "柳神")
+    assert not ok, "好感不足不应立约"
+    s["chars"]["柳神"]["favor"] = 480
+    sdoc.ext["story"] = s
+    ok, _, s = story_mod.assign_protector(sdoc, s, "柳神")
+    assert ok, "480 好感应可立护道之约"
+    assert story_mod.try_protect(s, 100)[0] == "柳神"
+    assert story_mod.try_protect(s, 200) is None, "护道 24h 冷却未生效"
+
+    s["chars"]["黑皇"] = {"favor": 90, "met": True, "unlock_ts": 0, "events": [],
+                          "talk_day": "", "talk_count": 0, "engrave_day": "",
+                          "engrave_count": 0, "taught": False}
+    ok, _, s = story_mod.hei_teach(s)
+    assert ok, "80 好感应获黑皇阵道传承"
+    s["chars"]["黑皇"]["favor"] = 360
+    ok, _, f = story_mod.engrave_check(s, "无始杀阵", 1000, 10 ** 12)
+    assert ok and f and f["kind"] == "kill"
+    eff, s = story_mod.apply_engrave(s, "无始杀阵", 1000)
+    mods, used = story_mod.battle_mods(s)
+    assert mods.get("atk_mult") == 2.0 and used == ["无始杀阵"], (mods, used)
+    assert s["arrays"][0]["left"] == 4, "无始杀阵次数未扣减"
+
+    winner, slog, _, _ = battle_mod.spar_full(
+        battle_mod.Unit("甲", 1000, 100, 100000),
+        battle_mod.Unit("乙", 1000, 100, 100000),
+        _random.Random(1), skip_first=(1,),
+    )
+    assert any("困住" in ln for ln in slog), "困龙阵定身未生效"
+
+    triggered = None
+    for i in range(40):
+        def _prot(place, floor, enemy, _state={"ready": True}):
+            if _state["ready"]:
+                _state["ready"] = False
+                return "柳神", "【护道之约·柳神】护道法相出手。"
+            return None
+
+        sess3 = secret_mod.Session(place="太古战场")
+        weak3 = battle_mod.Unit("弱", 5, 5, 10)
+        sess3, weak3, fl3, fled3 = secret_mod.explore(
+            sess3, (5, 5, 500), weak3, pool, _random.Random(i), protect=_prot
+        )
+        if "护道" in fl3:
+            triggered = (fled3, weak3.hp, sess3.stones)
+            break
+    assert triggered and triggered[0] is False and triggered[1] == 500, triggered
+    print("story npc ok")
+
     # 17. 宗门纯函数 + 存取
     from core import sect as sect_mod  # noqa: E402
 

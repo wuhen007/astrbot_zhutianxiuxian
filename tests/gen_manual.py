@@ -53,6 +53,12 @@ def main() -> int:
         ("图鉴查询", ("handle_lou", "handle_lou_danyao", "handle_lou_zhuangbei", "handle_lou_gongfa",
                    "handle_lou_daoju", "handle_lou_xianchong", "handle_lou_duanzaocailiao",
                    "handle_catalog_linggen", "handle_where")),
+        ("剧情人物", ("handle_story", "handle_story_alias", "handle_npc", "handle_fierce_talk",
+                   "handle_fierce_ask", "handle_su_talk", "handle_su_ask", "handle_essence",
+                   "handle_protect_liu", "handle_protect_su", "handle_protect_hen",
+                   "handle_protect_my", "handle_protect_off",
+                   "handle_hei", "handle_hei_state", "handle_hei_talk", "handle_hei_teach",
+                   "handle_hei_arrays", "handle_hei_engrave", "handle_array_off", "handle_array_on")),
         ("帮助", ("handle_help",)),
     ]
     grouped = {}
