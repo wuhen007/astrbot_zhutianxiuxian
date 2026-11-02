@@ -11,7 +11,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import alchemy, battle, boss, catalog, cultivate, equipment, items, linggen, occupation, pet, quest, secret, sect, shenjie, universe, xiaoshijie, zhutian
+from .core import adventure, alchemy, battle, boss, catalog, cultivate, equipment, items, linggen, occupation, pet, quest, secret, sect, shenjie, universe, xiaoshijie, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -108,6 +108,14 @@ CMD_UNI_FORGE = "#铸造宇宙秘境"
 CMD_UNI_LIST = "#宇宙秘境"
 CMD_UNI_ENTER = "#进入宇宙秘境"
 CMD_UNI_DERIVE = "#演绎宇宙秘境"
+CMD_TOWER = "#挑战镇妖塔"
+CMD_TOWER_ALL = "#一键挑战镇妖塔"
+CMD_PET_SEND = "#派仙宠寻宝"
+CMD_PET_COLLECT = "#结束仙宠寻宝"
+CMD_RAID_LIST = "#洗劫列表"
+CMD_RAID = "#洗劫"
+CMD_RAID_SPY = "#探查"
+CMD_GIFT = "#赠予花篮"
 CMD_DARK_OPEN = "#开启黑暗动乱"
 CMD_DARK_CLOSE = "#关闭黑暗动乱"
 CMD_DARK_STATUS = "#禁区至尊状态"
@@ -559,6 +567,16 @@ class ZhutianPlugin(Star):
                 ("#天机符楼", "符楼商店（需邀请函，顶级灵石代币）"),
                 ("#天机符楼兑换 物品 数量", "兑换"),
                 ("双修彩蛋", "特定体质道侣双修可融合更高灵根（圣体道胎/终焉神魔体/混沌体）"),
+            ]},
+            {"title": "历练寻宝", "lines": [
+                (CMD_TOWER, "挑战当前层（胜+5 层得灵石，败罚灵石）"),
+                (CMD_TOWER_ALL, "连打到战败或 60 层（每层回满血）"),
+                (CMD_PET_SEND, "派仙宠寻宝（800 万灵石，120 分钟）"),
+                (CMD_PET_COLLECT, "召回收获（每 4 分钟 1 次，最多 8 次）"),
+                (CMD_RAID_LIST, "洗劫地点一览"),
+                (f"{CMD_RAID_SPY} 地点", "花 0.3×价格打探收获"),
+                (f"{CMD_RAID} 地点", "洗劫（强化费+战斗，2h CD，魔道值+）"),
+                (f"{CMD_GIFT} @道侣", "赠百合花篮（亲密度 +10）"),
             ]},
             {"title": "诸天镜主线", "lines": [
                 ("#使用诸天镜", "绑定诸天镜（天机阁 2 仙兽玉兑换）"),
@@ -3163,6 +3181,249 @@ class ZhutianPlugin(Star):
             d.ext["xueqi"] = max(0.0, float(d.ext.get("xueqi", 0) or 0) - consume["xueqi"])
             await self.db.save_player(d.model_dump())
         yield event.plain_result(msg)
+
+    # ---- A 档：镇妖塔 / 仙宠寻宝 / 洗劫 / 道侣赠礼 ----
+
+    def _tower_view(self, doc: PlayerDoc, stats: equipment.Stats, rng, once: bool):
+        """单次或连打镇妖塔。返回 (msg, floors, total_stones, final_doc)。"""
+        total_stones = 0
+        floors = 0
+        d = doc
+        for _ in range(1 if once else 60):
+            st = {"atk": stats.atk, "defense": stats.defense, "hp": stats.hp, "bao": stats.bao}
+            ok, msg, ext2, consume = adventure.tower_fight(d, st, rng)
+            if not ok:
+                return msg, 0, 0, d
+            total_stones += consume.get("stones", 0)
+            d = d.model_copy(deep=True)
+            d.ext.update(ext2)
+            if consume.get("stones", 0) < 0:  # 战败
+                return msg, floors, total_stones, d
+            floors += 5
+            if once:
+                return msg, floors, total_stones, d
+        return f"一键挑战结束：连过 {floors} 层！灵石 +{total_stones:,}", floors, total_stones, d
+
+    @filter.command(CMD_TOWER, "挑战镇妖塔")
+    async def handle_tower(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        import random as _random
+        rng = _random.Random(f"{doc.uid}:tower:{time.time()}")
+        msg, floors, stones, d = self._tower_view(doc, self._stats(doc), rng, once=True)
+        if stones:
+            d.stones = max(0, d.stones + stones)
+            d.ext["tower_ts"] = time.time()
+            await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_TOWER_ALL, "一键挑战镇妖塔")
+    async def handle_tower_all(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        import random as _random
+        rng = _random.Random(f"{doc.uid}:towerall:{time.time()}")
+        msg, floors, stones, d = self._tower_view(doc, self._stats(doc), rng, once=False)
+        d.stones = max(0, d.stones + stones)
+        d.ext["tower_ts"] = time.time()
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_PET_SEND, "派仙宠寻宝")
+    async def handle_pet_send(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        import random as _random
+        ok, msg, st = adventure.pet_explore_start(doc, time.time(), _random.Random(f"{doc.uid}:ps:{time.time()}"))
+        if ok:
+            d = doc.model_copy(deep=True)
+            d.ext["pet_explore"] = st
+            d.stones -= adventure.PET_EXPLORE_COST
+            await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_PET_COLLECT, "结束仙宠寻宝")
+    async def handle_pet_collect(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        import random as _random
+        pool = adventure.build_pet_pool(self.item_index)
+        ok, msg, _, gains = adventure.pet_explore_collect(doc, pool, time.time(),
+                                                          _random.Random(f"{doc.uid}:pc:{time.time()}"))
+        if ok:
+            d = doc.model_copy(deep=True)
+            d.ext.pop("pet_explore", None)
+            async with self.db.transaction():
+                await self.db.save_player(d.model_dump())
+                if gains:
+                    await self.db.add_items(doc.uid, gains)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_RAID_LIST, "洗劫列表")
+    async def handle_raid_list(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        shops = self.content.table("item/shop列表") or []
+        lines = ["--- 洗劫地点（洗劫有风险，魔道 +25×档）---"]
+        for s in shops:
+            loot = "、".join(x["name"] for x in (s.get("one") or [])[:4])
+            lines.append(f"· {s['name']}（{s['Grade']} 档｜强化费 {s['price'] * s['Grade']:,}）｜可掠：{loot}…")
+        lines.append("#探查 地点（0.3×价格）｜#洗劫 地点（2h CD，战斗定胜负）")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command(CMD_RAID_SPY, "探查洗劫点")
+    async def handle_raid_spy(self, event: AstrMessageEvent, place: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        shops = {s["name"]: s for s in (self.content.table("item/shop列表") or [])}
+        s = shops.get((place or "").strip())
+        if not s:
+            yield event.plain_result(f"未找到洗劫地点：{place}（#洗劫列表 查看）。")
+            return
+        cost = int(s["price"] * 0.3)
+        if doc.stones < cost:
+            yield event.plain_result(f"打探消息需要 {cost:,} 灵石，家底不足。")
+            return
+        d = doc.model_copy(deep=True)
+        d.stones -= cost
+        await self.db.save_player(d.model_dump())
+        loot = s.get("one") or []
+        preview = "、".join(f"{x['name']}×{x.get('数量', 1)}" for x in loot[:5])
+        yield event.plain_result(
+            f"你花 {cost:,} 灵石买通了 {s['name']} 的账房……\n"
+            f"传闻库中藏着：{preview} 等。守卫实力约 {s['Grade']} 档（{adventure.raid_guard(s['Grade'])['hp']:,} 血）。\n"
+            f"#洗劫 {s['name']} 干一票大的！"
+        )
+
+    @filter.command(CMD_RAID, "洗劫")
+    async def handle_raid(self, event: AstrMessageEvent, place: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if not place:
+            yield event.plain_result("格式：#洗劫 地点名（#洗劫列表 查看）。")
+            return
+        # CD 检查（劫光令可清）
+        last = float(doc.ext.get("raid_ts", 0.0))
+        now = time.time()
+        if now - last < adventure.RAID_CD:
+            have = dict(await self.db.get_inventory(doc.uid)).get("劫光令", 0)
+            if have > 0:
+                d = doc.model_copy(deep=True)
+                async with self.db.transaction():
+                    await self.db.save_player(d.model_dump())
+                    await self.db.remove_item(doc.uid, "劫光令", 1)
+                doc = d
+                yield event.plain_result("你祭出一枚劫光令，劫光一闪，天道禁制化为虚无（洗劫冷却重置）！")
+            else:
+                remain = int((adventure.RAID_CD - (now - last)) / 60) + 1
+                yield event.plain_result(f"每 120 分钟洗劫一次，CD 中（余 {remain} 分钟）；劫光令可重置。")
+                return
+        shops = {s["name"]: s for s in (self.content.table("item/shop列表") or [])}
+        s = shops.get(place.strip())
+        if not s:
+            yield event.plain_result(f"未找到洗劫地点：{place}。")
+            return
+        grade = int(s.get("Grade", 1))
+        strengthen = int(s["price"] * grade)
+        if doc.stones < strengthen:
+            yield event.plain_result(f"洗劫前需花 {strengthen:,} 灵石强化防备，家底不足。")
+            return
+        st = self._stats(doc)
+        import random as _random
+        rng = _random.Random(f"{doc.uid}:raid:{time.time()}")
+        me = {"atk": st.atk, "defense": st.defense, "hp": st.hp, "bao": st.bao}
+        won, log = adventure.raid_fight(me, adventure.raid_guard(grade), rng)
+        d = doc.model_copy(deep=True)
+        d.stones = max(0, d.stones - strengthen)
+        d.ext["raid_ts"] = now
+        d.ext["modao"] = float(d.ext.get("modao", 0) or 0) + adventure.RAID_MODAO_PER_GRADE * grade
+        if won:
+            loot = s.get("one") or []
+            picked = rng.sample(loot, k=min(3, len(loot))) if loot else []
+            gains: dict[str, int] = {}
+            for x in picked:
+                gains[str(x["name"])] = int(x.get("数量", 1) or 1)
+            stones_gain = int(s["price"] * grade * rng.uniform(0.5, 1.5))
+            d.stones += stones_gain
+            async with self.db.transaction():
+                await self.db.save_player(d.model_dump())
+                if gains:
+                    await self.db.add_items(doc.uid, gains)
+            loot_txt = "，".join(f"{k} ×{v}" for k, v in gains.items()) or "（空手但赢了面子）"
+            yield event.plain_result(
+                f"夜色掩护下你潜入 {s['name']}——守卫被你放倒！\n"
+                + "\n".join(log[-3:]) + f"\n💰 掠得：{loot_txt}；灵石 +{stones_gain:,}\n"
+                f"（强化费 −{strengthen:,}，魔道值 +{adventure.RAID_MODAO_PER_GRADE * grade}）"
+            )
+        else:
+            loss = int(s["price"] * grade * 0.3)
+            d.stones = max(0, d.stones - loss)
+            await self.db.save_player(d.model_dump())
+            yield event.plain_result(
+                f"夜袭 {s['name']} 失手——守卫把你打了出来！\n"
+                + "\n".join(log[-3:]) + f"\n❌ 灵石 −{loss:,}（疗伤封口费），魔道值 +{adventure.RAID_MODAO_PER_GRADE * grade}"
+            )
+
+    @filter.command(CMD_GIFT, "赠予花篮")
+    async def handle_gift(self, event: AstrMessageEvent, *, args: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        lover_uid = self._at_target(event)
+        if not lover_uid:
+            yield event.plain_result("格式：#赠予花篮 @道侣")
+            return
+        lover_name = lover_uid[:8] + "…"
+        if doc.ext.get("daolv") != lover_uid:
+            yield event.plain_result("只可赠予道侣（结为道侣后才能赠花）。")
+            return
+        have = dict(await self.db.get_inventory(doc.uid)).get("百合花篮", 0)
+        if have < 1:
+            yield event.plain_result("纳戒中没有「百合花篮」。")
+            return
+        raw = await self.db.get_player(lover_uid)
+        if not raw:
+            yield event.plain_result("对方尚未踏入仙途。")
+            return
+        lover_doc = PlayerDoc(**raw)
+        d = doc.model_copy(deep=True)
+        d.ext["qinmidu"] = {**(d.ext.get("qinmidu") or {}), lover_uid: int((d.ext.get("qinmidu") or {}).get(lover_uid, 0)) + 10}
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            await self.db.remove_item(doc.uid, "百合花篮", 1)
+            dl = lover_doc.model_copy(deep=True)
+            qm = dict(dl.ext.get("qinmidu") or {})
+            qm[doc.uid] = int(qm.get(doc.uid, 0)) + 10
+            dl.ext["qinmidu"] = qm
+            await self.db.save_player(dl.model_dump())
+        yield event.plain_result(f"你将一篮百合赠予 {lover_name}，花香满堂——双方亲密度 +10。")
 
     @filter.command(CMD_HEAL, "灵石疗伤")
     async def handle_heal(self, event: AstrMessageEvent):

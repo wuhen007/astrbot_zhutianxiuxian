@@ -626,6 +626,41 @@ async def main():
     assert ok and len(u5["dungeons"]) == 2 and consume["exp"] == 10_000_000, msg
     print("grand universe ok")
 
+    # 15l. A 档：镇妖塔/寻宝/洗劫
+    from core import adventure as adv_mod  # noqa: E402
+    # 镇妖塔数值公式
+    assert adv_mod.tower_boss(0) == {"hp": 10000, "atk": 10000, "defense": 10000}
+    assert adv_mod.tower_boss(100)["hp"] == 5_000_000 + 10_000
+    assert adv_mod.tower_reward(50) == 5100 and adv_mod.tower_reward(150) == 31000
+    assert adv_mod.tower_reward(999) == 300_700  # 300×999+1000
+    assert adv_mod.tower_reward(1500) == 400_000  # 封顶
+    # 单挑：碾压属性必胜 → 层+5、灵石正收益
+    tdoc = PlayerDoc(uid="tw", ext={"tower_floor": 0})
+    winner = {"atk": 9_999_999, "defense": 9_999_999, "hp": 9_999_999_999, "bao": 0.5}
+    ok, msg, ext2, consume = adv_mod.tower_fight(tdoc, winner, _random.Random(7))
+    assert ok and ext2["tower_floor"] == 5 and consume["stones"] == 100, (msg, consume)
+    loser = {"atk": 1, "defense": 1, "hp": 1, "bao": 0}
+    ok, msg, ext3, consume = adv_mod.tower_fight(tdoc, loser, _random.Random(8))
+    assert ok and consume["stones"] == -200, msg  # 0 层败 → 罚 reward(0)=100×2
+    # 寻宝：未派 → 拒；时长不足 → 拒
+    ok, msg, _, _ = adv_mod.pet_explore_collect(tdoc, [], 1000.0, _random.Random(1))
+    assert not ok
+    tdoc.ext["pet_explore"] = {"name": "小白", "ts": 1000.0, "place": "葬仙古域"}
+    ok, msg, _, _ = adv_mod.pet_explore_collect(tdoc, [], 1000.0 + 600, _random.Random(1))
+    assert not ok and "分钟" in msg    # 时长足够（130 分钟 > 120 必须）→ 8 次满额收获
+    pool = [{"name": "修为丹", "class": "丹药", "数量": 1}, {"name": "庚金", "class": "材料", "数量": 2}]
+    ok, msg, _, gains = adv_mod.pet_explore_collect(tdoc, pool, 1000.0 + 130 * 60, _random.Random(2))
+    assert ok and gains, (msg, gains)
+    # 灵韵池构建
+    p = adv_mod.build_pet_pool({"修为丹": {"稀有度": 3, "class": "丹药"}, "神石": {"稀有度": 7, "class": "道具"}})
+    assert all("name" in x for x in p) and p
+    # 洗劫：守卫数值 + 战斗可判
+    g = adv_mod.raid_guard(1)
+    assert g["hp"] == 900_000
+    won, log = adv_mod.raid_fight(winner, g, _random.Random(9))
+    assert won and log
+    print("adventure ok")
+
     # 15i. 师徒/道侣/封禁（纯存档语义验证）
     master = PlayerDoc(uid="m1", ext={"recruit": True})
     disciple = PlayerDoc(uid="d1")
