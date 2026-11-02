@@ -121,6 +121,12 @@ CMD_VIEW_PLAYER = "#查看玩家"
 CMD_RESET_TASK = "#重置每日任务"
 CMD_BAN = "#封禁修仙"
 CMD_UNBAN = "#解封修仙"
+CMD_SHITU_TRIAL = "#开始师徒试炼"
+CMD_SHITU_SUBMIT = "#提交师徒任务"
+CMD_SHITU_SHOP = "#师徒商店"
+CMD_SHITU_EX = "#师徒兑换"
+CMD_RECAST = "#神兵重铸"
+CMD_SHUANGXIU = "#双修"
 CMD_WORLD_CREATE = "#开辟小世界"
 CMD_WORLD_UP = "#演化小世界"
 CMD_WORLD_MY = "#我的小世界"
@@ -514,8 +520,15 @@ class ZhutianPlugin(Star):
                 (CMD_SHITU_END, "解除师徒关系"),
                 (f"{CMD_MY_TUDI} / {CMD_MY_SHIFU}", "我的弟子 / 我的师门"),
                 (CMD_SHIFU_LIST, "查看收徒中的前辈"),
+                (CMD_SHITU_TRIAL, "师徒试炼（每日 1 次，胜得积分 200+灵石）"),
+                (CMD_SHITU_SUBMIT, "提交师徒任务（徒弟每日积分 50）"),
+                (f"{CMD_SHITU_SHOP} / {CMD_SHITU_EX} 物品", "师徒商店与兑换"),
                 ("结为道侣 @道友", "求婚（定情信物×1，对方 60 秒内我愿意）"),
+                (CMD_SHUANGXIU, "双修（道侣修为+亲密度，1h CD）"),
                 ("断绝姻缘 / #查询亲密度", "道侣解除与亲密度"),
+            ]},
+            {"title": "锻造补充", "lines": [
+                (f"{CMD_RECAST} 原名 新名", "神兵重铸（重铸卡改名，穿戴同步）"),
             ]},
             {"title": "管理", "lines": [
                 (f"{CMD_GIVE_STONES} @玩家 数量", "补发灵石（管理员）"),
@@ -2224,6 +2237,230 @@ class ZhutianPlugin(Star):
         dt.ext["banned"] = False
         await self.db.save_player(dt.model_dump())
         yield event.plain_result(f"{target.name} 已被赦免，重获自由。")
+
+    # ---- 师徒试炼 / 商店 / 神兵重铸 / 双修 ----
+
+    SHITU_SHOP = {
+        "定情信物": 200, "神石": 300, "世界石": 500, "秘境之匙": 100,
+        "天命轮回丹": 800, "仙品辟谷丹": 400,
+    }
+
+    @filter.command(CMD_SHITU_TRIAL, "开始师徒试炼")
+    async def handle_shitu_trial(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if not doc.ext.get("shifu") and not doc.ext.get("tudi"):
+            yield event.plain_result("你还没拜师&收徒过！")
+            return
+        today = quest.date_key()
+        if doc.ext.get("trial_date") == today:
+            yield event.plain_result("今日师徒试炼已过，明日再来。")
+            return
+        hp_cur, hp_max = self._hp_pair(doc)
+        if hp_cur < hp_max * 0.2:
+            yield event.plain_result("你都伤成这样了，先回回血再打吧。")
+            return
+        st = self._stats(doc)
+        name = doc.name or doc.uid[:8] + "…"
+        import random as _random
+        rng = _random.Random(f"{doc.uid}:trial:{today}")
+        boss_hp = st.atk * 100 + 50_000_000
+        shadow = battle.Unit("道祖虚影", int(st.atk * 1.1), st.defense, boss_hp, 0.05)
+        me = battle.Unit(name, st.atk, st.defense, hp_cur, st.bao)
+        won, log, hp_left, _ = battle.spar_full(me, shadow, rng, max_rounds=15)
+        d = doc.model_copy(deep=True)
+        d.ext["trial_date"] = today
+        d.ext["hp"] = hp_left
+        if won == 0:
+            gain = 200
+            d.stones += 500_000
+            d.ext["shitu_points"] = int(d.ext.get("shitu_points", 0)) + gain
+            await self.db.save_player(d.model_dump())
+            yield event.plain_result(
+                f"师徒试炼：你力挫道祖虚影！师徒积分 +{gain}，灵石 +500000。"
+            )
+        else:
+            await self.db.save_player(d.model_dump())
+            yield event.plain_result("师徒试炼败于道祖虚影之手，尚需磨砺（明日再战）。")
+
+    @filter.command(CMD_SHITU_SUBMIT, "提交师徒任务")
+    async def handle_shitu_submit(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if not doc.ext.get("shifu"):
+            yield event.plain_result("只能由徒弟提交任务。")
+            return
+        today = quest.date_key()
+        if doc.ext.get("submit_date") == today:
+            yield event.plain_result("今日任务已提交，明日再来。")
+            return
+        d = doc.model_copy(deep=True)
+        d.ext["submit_date"] = today
+        d.ext["shitu_points"] = int(d.ext.get("shitu_points", 0)) + 50
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result("师徒任务提交，师徒积分 +50。")
+
+    @filter.command(CMD_SHITU_SHOP, "师徒商店")
+    async def handle_shitu_shop(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        pts = int(doc.ext.get("shitu_points", 0))
+        lines = [f"--- 师徒商店（我的积分 {pts}）---"]
+        for name, cost in self.SHITU_SHOP.items():
+            lines.append(f"· {name}：{cost} 积分")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command(CMD_SHITU_EX, "师徒兑换")
+    async def handle_shitu_ex(self, event: AstrMessageEvent, thing_name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        thing = (thing_name or "").strip()
+        cost = self.SHITU_SHOP.get(thing)
+        if not cost:
+            yield event.plain_result(f"师徒商店还没有这样的东西：{thing}。发「{CMD_SHITU_SHOP}」查看。")
+            return
+        pts = int(doc.ext.get("shitu_points", 0))
+        if pts < cost:
+            yield event.plain_result(f"积分不足，还需 {cost - pts} 积分兑换{thing}。")
+            return
+        d = doc.model_copy(deep=True)
+        d.ext["shitu_points"] = pts - cost
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            await self.db.add_items(doc.uid, {thing: 1})
+        yield event.plain_result(f"兑换成功！获得[{thing}]，剩余 {pts - cost} 积分。")
+
+    @filter.command(CMD_RECAST, "神兵重铸")
+    async def handle_recast(self, event: AstrMessageEvent, old_name: str = "", new_name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        old_name = (old_name or "").strip().rstrip("*")
+        new_name = (new_name or "").strip()
+        if not old_name or not new_name:
+            yield event.plain_result(f"格式：{CMD_RECAST} 原装备名 新名字")
+            return
+        if len(new_name) > 12:
+            yield event.plain_result("字符超出最大限制，请重新赋名。")
+            return
+        if new_name in self.item_index or new_name == old_name:
+            yield event.plain_result("这个世间已经拥有这把武器了。")
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        if int(inv.get(old_name, 0)) < 1:
+            yield event.plain_result(f"你没有这件装备（{old_name}）。")
+            return
+        if int(inv.get("神兵重铸卡", 0)) < 1:
+            yield event.plain_result("你没有神兵重铸卡。")
+            return
+        d = doc.model_copy(deep=True)
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            await self.db.remove_item(doc.uid, "神兵重铸卡", 1)
+            await self.db.remove_item(doc.uid, old_name, 1)
+            await self.db.add_items(doc.uid, {new_name: 1})
+            # 穿戴槽同步
+            equip = dict(d.ext.get("equipment") or {})
+            changed = False
+            for slot, equipped in equip.items():
+                if equipped == old_name:
+                    equip[slot] = new_name
+                    changed = True
+            if changed:
+                d.ext["equipment"] = equip
+                await self.db.save_player(d.model_dump())
+        yield event.plain_result("神光转瞬即逝，神兵已重塑真名，重回您的纳戒当中。")
+
+    @filter.command(CMD_SHUANGXIU, "双修")
+    async def handle_shuangxiu(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        lover_uid = doc.ext.get("daolv")
+        if not lover_uid:
+            yield event.plain_result("双修需道侣相伴（结为道侣 后再来）。")
+            return
+        if doc.ext.get("shuangxiu_off"):
+            yield event.plain_result("你已闭关谢客（#允许双修 可重新开启）。")
+            return
+        now = time.time()
+        if now - float(doc.ext.get("shuangxiu_ts") or 0) < 3600:
+            left = int(3600 - (now - float(doc.ext["shuangxiu_ts"])))
+            yield event.plain_result(f"双修初成需温养，{left // 60} 分钟后再来。")
+            return
+        raw = await self.db.get_player(lover_uid)
+        if not raw:
+            yield event.plain_result("道侣已失联。")
+            return
+        lover = PlayerDoc(**raw)
+        gain = 2000 * (max(0, doc.realm_index) + 1)
+        dl = lover.model_copy(deep=True)
+        dd = doc.model_copy(deep=True)
+        dd.exp += gain
+        dl.exp += gain
+        # 亲密度双向 +5
+        qm_d = dict(dd.ext.get("qinmidu") or {})
+        qm_d[lover.uid] = int(qm_d.get(lover.uid, 0)) + 5
+        dd.ext["qinmidu"] = qm_d
+        qm_l = dict(dl.ext.get("qinmidu") or {})
+        qm_l[doc.uid] = int(qm_l.get(doc.uid, 0)) + 5
+        dl.ext["qinmidu"] = qm_l
+        dd.ext["shuangxiu_ts"] = now
+        dl.ext["shuangxiu_ts"] = now
+        async with self.db.transaction():
+            await self.db.save_player(dd.model_dump())
+            await self.db.save_player(dl.model_dump())
+        yield event.plain_result(
+            f"与 {lover.name} 双修圆满：双方修为 +{gain}，亲密度 +5（当前 {qm_d[lover.uid]}）。"
+        )
+
+    @filter.command("#允许双修", "允许双修")
+    async def handle_shuangxiu_on(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        d = doc.model_copy(deep=True)
+        d.ext["shuangxiu_off"] = False
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result("已重新开门迎客。")
+
+    @filter.command("#拒绝双修", "拒绝双修")
+    async def handle_shuangxiu_off(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        d = doc.model_copy(deep=True)
+        d.ext["shuangxiu_off"] = True
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result("已闭关谢客，双修请求将被婉拒。")
 
     @filter.command(CMD_HEAL, "灵石疗伤")
     async def handle_heal(self, event: AstrMessageEvent):

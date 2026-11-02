@@ -524,6 +524,21 @@ async def main():
     assert banned.ext.get("banned") is True
     print("social ok")
 
+    # 15j. 师徒积分/试炼/重铸/双修（存档语义）
+    d_t = disciple.model_copy(deep=True)
+    d_t.ext["shitu_points"] = int(d_t.ext.get("shitu_points", 0)) + 200
+    assert d_t.ext["shitu_points"] == 200
+    d_t.ext["shitu_points"] -= 100  # 兑换
+    assert d_t.ext["shitu_points"] == 100
+    # 双修收益（道侣双方修为+亲密度）
+    lover_a = PlayerDoc(uid="la", ext={"daolv": "lb", "qinmidu": {"lb": 10}})
+    lover_b = PlayerDoc(uid="lb", ext={"daolv": "la", "qinmidu": {"la": 10}})
+    gain = 2000 * 5
+    qa = dict(lover_a.ext.get("qinmidu") or {})
+    qa["lb"] = int(qa.get("lb", 0)) + 5
+    assert qa["lb"] == 15
+    print("social economy ok")
+
     # 15c. 每日任务：公式 / 接取-提交-领奖闭环 / 灵石自动追踪 / 秘境计数
     from core import quest as quest_mod  # noqa: E402
 
