@@ -11,7 +11,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, battle, boss, catalog, cultivate, dibing, equipment, items, linggen, motou, occupation, pet, quest, secret, sect, shenjie, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, battle, boss, catalog, cultivate, dibing, equipment, items, linggen, motou, npc, occupation, pet, quest, secret, sect, shenjie, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -146,6 +146,12 @@ CMD_EVIL_MAGIC = "#修炼魔功"
 CMD_EVIL_MOSHI = "#供奉魔石"
 CMD_EVIL_BREAK = "#冲击魂印"
 CMD_EVIL_REFINE = "#炼化遗蜕"
+CMD_NPC = "#剧情人物"
+CMD_FIERCE_TALK = "#狠人交流"
+CMD_FIERCE_ASK = "#狠人请教"
+CMD_SU_TALK = "#苏灵交流"
+CMD_SU_ASK = "#苏灵请教"
+CMD_ESSENCE = "#凝聚精血"
 CMD_DARK_OPEN = "#开启黑暗动乱"
 CMD_DARK_CLOSE = "#关闭黑暗动乱"
 CMD_DARK_STATUS = "#禁区至尊状态"
@@ -661,6 +667,13 @@ class ZhutianPlugin(Star):
                 (f"{CMD_RAID_SPY} 地点", "花 0.3×价格打探收获"),
                 (f"{CMD_RAID} 地点", "洗劫（强化费+战斗，2h CD，魔道值+）"),
                 (f"{CMD_GIFT} @道侣", "赠百合花篮（亲密度 +10）"),
+            ]},
+            {"title": "剧情人物", "lines": [
+                (CMD_NPC, "狠人大帝 / 苏灵 总览（好感/关系/剧情）"),
+                (f"{CMD_FIERCE_TALK} / {CMD_SU_TALK}", "交流 +5~8 好感（每日 3 次）"),
+                (CMD_FIERCE_ASK, "狠人请教（180 好感，授功法）"),
+                (CMD_SU_ASK, "苏灵请教（240 好感，每日推演，10 次领悟终极）"),
+                (CMD_ESSENCE, "凝聚精血（特殊体质每 7 天 1 份）"),
             ]},
             {"title": "魔头禁术（PvP）", "lines": [
                 (CMD_EVIL, "邪道面板（魔道值/魔功/魂印/魂奴）"),
@@ -4332,6 +4345,129 @@ class ZhutianPlugin(Star):
         d = self._evil_save(doc, s2)
         d.exp += consume["exp"]
         await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    # ---- B6：剧情 NPC（狠人大帝/苏灵）+ 凝聚精血 ----
+
+    def _npc_save(self, doc: PlayerDoc, n: dict) -> PlayerDoc:
+        d = doc.model_copy(deep=True)
+        d.ext["npc"] = n
+        return d
+
+    @filter.command(CMD_NPC, "剧情人物")
+    async def handle_npc(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        n = npc.state_of(doc)
+        async for r in self._smart(event, npc.panel(n, time.time()), "剧情人物"):
+            yield r
+
+    @filter.command(CMD_FIERCE_TALK, "狠人交流")
+    async def handle_fierce_talk(self, event: AstrMessageEvent):
+        async for r in self._npc_talk(event, "ruthless"):
+            yield r
+
+    @filter.command("#狠人状态", "狠人状态")
+    async def handle_fierce_state(self, event: AstrMessageEvent):
+        async for r in self._npc_view(event):
+            yield r
+
+    @filter.command(CMD_SU_TALK, "苏灵交流")
+    async def handle_su_talk(self, event: AstrMessageEvent):
+        async for r in self._npc_talk(event, "suling"):
+            yield r
+
+    @filter.command("#苏灵状态", "苏灵状态")
+    async def handle_su_state(self, event: AstrMessageEvent):
+        async for r in self._npc_view(event):
+            yield r
+
+    async def _npc_view(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        n = npc.state_of(doc)
+        async for r in self._smart(event, npc.panel(n, time.time()), "剧情人物"):
+            yield r
+
+    async def _npc_talk(self, event: AstrMessageEvent, who: str):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        n = npc.state_of(doc)
+        ok, msg, n2 = npc.talk(n, who, time.time())
+        if ok:
+            await self.db.save_player(self._npc_save(doc, n2).model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_FIERCE_ASK, "狠人请教")
+    async def handle_fierce_ask(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        n = npc.state_of(doc)
+        owned = list(doc.ext.get("gongfa") or [])
+        ok, msg, n2, gongfa = npc.teach_ruthless(n, owned)
+        if ok:
+            d = self._npc_save(doc, n2)
+            async with self.db.transaction():
+                await self.db.save_player(d.model_dump())
+                if gongfa:
+                    await self.db.add_items(doc.uid, {gongfa: 1})
+        async for r in self._smart(event, msg, "狠人请教"):
+            yield r
+
+    @filter.command(CMD_SU_ASK, "苏灵请教")
+    async def handle_su_ask(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        n = npc.state_of(doc)
+        ok, msg, n2, gain = npc.teach_suling(n, time.time())
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = self._npc_save(doc, n2)
+        d.exp += int(gain.get("exp", 0))
+        if gain.get("potential"):
+            d.ext["potential"] = float(d.ext.get("potential", 0) or 0) + float(gain["potential"])
+        await self.db.save_player(d.model_dump())
+        async for r in self._smart(event, msg, "苏灵请教"):
+            yield r
+
+    @filter.command(CMD_ESSENCE, "凝聚精血")
+    async def handle_essence(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        n = npc.state_of(doc)
+        ok, msg, n2 = npc.essence(doc, n, time.time())
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = self._npc_save(doc, n2)
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            await self.db.add_items(doc.uid, {npc.ESSENCE_ITEM: 1})
         yield event.plain_result(msg)
 
     @filter.command(CMD_HEAL, "灵石疗伤")

@@ -889,6 +889,51 @@ async def main():
     assert ok and consume["exp"] > 0 and ev2["remains"] is None
     print("motou ok")
 
+    # 15r. 剧情 NPC：好感/关系/请教/终极/精血
+    from core import npc as npc_mod  # noqa: E402
+    ndoc = PlayerDoc(uid="n1", ext={"linggen": {"name": "荒古圣体", "type": "圣体", "eff": 1.2}})
+    n = npc_mod.state_of(ndoc)
+    assert n["ruthless"]["favor"] == 0 and npc_mod.relation_of(0) == "时间长河一瞥"
+    ok, msg, n = npc_mod.talk(n, "ruthless", 1_900_000_000.0)
+    assert ok and 5 <= n["ruthless"]["favor"] <= 8, msg
+    # 每日 3 次
+    for i in range(2):
+        ok, msg, n = npc_mod.talk(n, "ruthless", 1_900_000_000.0 + i)
+        assert ok, msg
+    ok, msg, _ = npc_mod.talk(n, "ruthless", 1_900_000_000.0 + 9)
+    assert not ok and "3 次" in msg
+    # 关系档位
+    assert npc_mod.relation_of(180) == "隔世相知" and npc_mod.relation_of(480) == "护道之约"
+    # 狠人请教：好感不足 → 拒；够 → 授功法
+    ok, msg, _, _ = npc_mod.teach_ruthless(n, [])
+    assert not ok and "隔世相知" in msg
+    n["ruthless"]["favor"] = 200
+    ok, msg, n, g = npc_mod.teach_ruthless(n, [])
+    assert ok and g in npc_mod.RUTHLESS_TEACHINGS, (msg, g)
+    # 苏灵请教：门槛 + 10 次终极
+    ok, msg, _, _ = npc_mod.teach_suling(n, 1_900_000_000.0)
+    assert not ok and "命途相知" in msg
+    n["suling"]["favor"] = 300
+    ok, msg, n, gain = npc_mod.teach_suling(n, 1_900_000_000.0)
+    assert ok and gain["exp"] > 0
+    ok, msg, _, _ = npc_mod.teach_suling(n, 1_900_000_000.0 + 60)
+    assert not ok and "每日一次" in msg
+    n["suling"]["teach_total"] = 9
+    ok, msg, n, gain = npc_mod.teach_suling(n, 1_900_000_000.0 + 86400)
+    assert ok and n["suling"]["ultimate"] and gain["potential"] == 200, msg
+    # 凝聚精血：体质门槛 + 7 天 CD
+    ok, msg, n2 = npc_mod.essence(ndoc, n, 1_900_000_000.0)
+    assert ok and npc_mod.ESSENCE_ITEM in msg, msg
+    ok, msg, _ = npc_mod.essence(ndoc, n2, 1_900_000_000.0 + 60)
+    assert not ok and "静养" in msg
+    plain_doc = PlayerDoc(uid="n2", ext={"linggen": {"name": "凡人", "type": "凡体"}})
+    ok, msg, _ = npc_mod.essence(plain_doc, npc_mod.state_of(plain_doc), 1_900_000_000.0)
+    assert not ok and "特殊体质" in msg
+    # 面板
+    text = npc_mod.panel(n, 1_900_000_000.0)
+    assert "狠人大帝" in text and "苏灵" in text
+    print("npc ok")
+
     # 15i. 师徒/道侣/封禁（纯存档语义验证）
     master = PlayerDoc(uid="m1", ext={"recruit": True})
     disciple = PlayerDoc(uid="d1")
