@@ -1316,6 +1316,74 @@ async def main():
     assert stat_title["atk"] > stat_plain["atk"], (stat_plain, stat_title)
     print("endless shop ok")
 
+    # 16f. 万劫道碑 / 无尽至宝 / 能力重演 / 扫荡
+    md = PlayerDoc(uid="meta", name="碑主", realm_index=30)
+    mst = end_mod.state_of(md)
+    mst["marks_total"] = 100_000
+    mst["clears"] = [1, 2, 3, 4]
+    meta = end_mod.meta_state_of(md)
+    ok, msg, meta, mst = end_mod.upgrade_meta(meta, mst, "攻击")
+    assert ok and meta["nodes"]["attack"] == 1 and mst["marks_total"] == 99_950, msg
+    ok, msg, meta, mst = end_mod.upgrade_meta(meta, mst, "衍算天机")
+    assert ok and meta["nodes"]["choice"] == 1
+    ok, msg, meta, mst = end_mod.upgrade_meta(meta, mst, "破阵师")
+    assert ok and meta["branch"] == "vanguard", msg
+    ok, msg, meta, mst = end_mod.upgrade_meta(meta, mst, "治疗师")
+    assert not ok, "流派锁定后不应可改投"
+    ok, msg, meta, mst = end_mod.upgrade_meta(meta, mst, "三尖两刃刀")
+    assert ok and "three_pointed_blade" in end_mod.meta_effects(meta)["unlocks"], msg
+    eff_m = end_mod.meta_effects(meta)
+    assert eff_m["atk"] > 1 and eff_m["choice"] == 4 and eff_m["crit"] > 0, eff_m
+    ok, msg, meta2, mst2 = end_mod.reset_meta(meta, mst)
+    assert ok and mst2["marks_total"] > mst["marks_total"], "重置应返还道痕"
+
+    tres = {"owned": {}, "equipped": [], "slots": 1}
+    stc = end_mod.state_of(PlayerDoc(uid="treasure", name="宝主", realm_index=30))
+    stc["clears"] = [1, 2]
+    stc["marks_total"] = 100_000
+    tres, name1 = end_mod.grant_treasure(tres, stc)
+    assert name1 == "缘一的斩鬼之刀", name1
+    tres, name2 = end_mod.grant_treasure(tres, stc)
+    assert name2 == "九尾人柱力", name2
+    ok, msg, tres = end_mod.equip_treasure(tres, name1)
+    assert ok, msg
+    ok, msg, tres = end_mod.equip_treasure(tres, name2)
+    assert not ok, "1 槽位不应能装第二件"
+    ok, msg, tres, stc = end_mod.expand_slots(tres, stc)
+    assert ok and tres["slots"] == 2, msg
+    ok, msg, tres = end_mod.equip_treasure(tres, name2)
+    assert ok, msg
+    ok, msg, tres, stc = end_mod.upgrade_treasure(tres, stc, name1)
+    assert ok and tres["owned"][list(tres["owned"])[0]] >= 2, msg
+    stc["treasures"] = end_mod.equipped_treasures(tres)
+    plain_eff = end_mod.treasure_effects({"treasures": [], "abilities": {}})
+    tr_eff = end_mod.treasure_effects(stc)
+    assert tr_eff["atk"] > plain_eff["atk"], (plain_eff, tr_eff)
+    stc["abilities"] = {"anime_sun_breath": 1, "anime_transparent_world": 1}
+    aw_eff = end_mod.treasure_effects(stc)
+    assert aw_eff["atk"] > tr_eff["atk"], "集齐觉醒条件后加成应提高"
+
+    st_r = end_mod.state_of(PlayerDoc(uid="reroll"))
+    st_r["phase"] = "choice"
+    st_r["meta"] = {"choice": 4, "reroll": 1}
+    st_r["rerolls"] = 1
+    st_r["abilities"] = {}
+    st_r["choices"] = end_mod.ability_choices(st_r, content_e, _random.Random(1))
+    assert len(st_r["choices"]) == 4, st_r["choices"]
+    ok, msg, st_r = end_mod.reroll_choices(st_r, content_e, _random.Random(2))
+    assert ok and st_r["rerolls"] == 0 and len(st_r["choices"]) == 4, msg
+    ok, msg, _ = end_mod.reroll_choices(st_r, content_e, _random.Random(3))
+    assert not ok, "重演次数用尽后不应可刷新"
+
+    st_s = end_mod.state_of(PlayerDoc(uid="sweep"))
+    st_s["best_layer"] = 8
+    st_s["marks_total"] = 0
+    ok, msg, st_s = end_mod.sweep(st_s, sat, cel)
+    assert ok and st_s["marks_total"] > 0, msg
+    ok, msg, _ = end_mod.sweep(st_s, sat, cel)
+    assert not ok, "同日不应重复扫荡"
+    print("endless meta ok")
+
     # 17. 宗门纯函数 + 存取
     from core import sect as sect_mod  # noqa: E402
 

@@ -193,6 +193,17 @@ CMD_ENDLESS_TITLES = "#称号"
 CMD_ENDLESS_TITLES_ALIAS = "#我的称号"
 CMD_ENDLESS_TITLE_EQUIP = "#佩戴称号"
 CMD_ENDLESS_WEEKEND = "#周末免费"
+CMD_ENDLESS_META = "#万劫道碑"
+CMD_ENDLESS_META_UP = "#参悟道碑"
+CMD_ENDLESS_META_RESET = "#重置万劫道碑"
+CMD_ENDLESS_META_RESET_YES = "#确认重置万劫道碑"
+CMD_ENDLESS_TREASURE = "#无尽至宝"
+CMD_ENDLESS_TREASURE_UP = "#升级无尽至宝"
+CMD_ENDLESS_TREASURE_EQUIP = "#装备无尽至宝"
+CMD_ENDLESS_TREASURE_UNEQUIP = "#卸下无尽至宝"
+CMD_ENDLESS_TREASURE_SLOT = "#拓展无尽至宝槽"
+CMD_ENDLESS_REROLL = "#重置无尽能力"
+CMD_ENDLESS_SWEEP = "#扫荡无尽劫境"
 CMD_DARK_OPEN = "#开启黑暗动乱"
 CMD_DARK_CLOSE = "#关闭黑暗动乱"
 CMD_DARK_STATUS = "#禁区至尊状态"
@@ -737,6 +748,10 @@ class ZhutianPlugin(Star):
                 (CMD_ENDLESS_WEEKEND, "周末免费入场额度"),
                 (CMD_ENDLESS_CELESTIAL, "今日天象"),
                 (CMD_ENDLESS_RANK, "劫境排名"),
+                (CMD_ENDLESS_META, "万劫道碑（永久强化）｜#参悟道碑 节点名"),
+                (CMD_ENDLESS_TREASURE, "无尽至宝（通关解锁/升级/装备）"),
+                (CMD_ENDLESS_SWEEP, "扫荡（按最高层结算道痕，每日一次）"),
+                (CMD_ENDLESS_REROLL, "劫机重演（需道碑参悟，刷新三选一）"),
             ]},
             {"title": "剧情人物", "lines": [
                 (CMD_NPC, "剧情人物图鉴（11 位 · 立绘/关系/线索）"),
@@ -5405,8 +5420,15 @@ class ZhutianPlugin(Star):
         rng = _random.Random(f"{doc.uid}:endless:{st.get('layer')}:{now}")
         st2, res = endless.resolve_node(st, self._endless_base(doc),
                                         self._endless_content(), now, rng)
-        await self.db.save_player(endless.save(doc, st2).model_dump())
+        d = endless.save(doc, st2)
+        unlock_name = None
+        if res.get("clear"):
+            tres, unlock_name = endless.grant_treasure(endless.treasury_of(doc), st2)
+            d = endless.save_treasury(d, tres)
+        await self.db.save_player(d.model_dump())
         lines = [str(res.get("msg") or "")]
+        if unlock_name:
+            lines.append(f"✦ 解锁无尽至宝【{unlock_name}】（{CMD_ENDLESS_TREASURE} 装备/升级）")
         if res.get("log"):
             lines.append(str(res["log"][-1]))
         idx = endless.index(self._endless_content())
@@ -5731,6 +5753,230 @@ class ZhutianPlugin(Star):
             event, endless.weekend_text(st, time.time()), "周末免费"
         ):
             yield r
+
+    # ---- B8-3：万劫道碑 / 无尽至宝 / 能力重演 / 扫荡 ----
+
+    @filter.command(CMD_ENDLESS_META, "万劫道碑")
+    async def handle_endless_meta(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        text = endless.meta_text(endless.meta_state_of(doc), endless.state_of(doc))
+        async for r in self._smart(event, text, "万劫道碑"):
+            yield r
+
+    @filter.command(CMD_ENDLESS_META_UP, "参悟道碑")
+    async def handle_endless_meta_up(self, event: AstrMessageEvent, node: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        raw = (node or "").strip()
+        if not raw:
+            text = endless.meta_text(endless.meta_state_of(doc), endless.state_of(doc))
+            async for r in self._smart(event, text, "万劫道碑"):
+                yield r
+            return
+        st = endless.state_of(doc)
+        ok, msg, meta2, st2 = endless.upgrade_meta(endless.meta_state_of(doc), st, raw)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = endless.save_meta(doc, meta2)
+        d = endless.save(d, st2)
+        if st2.get("active"):
+            d.ext["endless"]["meta"] = endless.meta_effects(meta2)
+        await self.db.save_player(d.model_dump())
+        async for r in self._smart(event, msg, "参悟道碑"):
+            yield r
+
+    @filter.command(CMD_ENDLESS_META_RESET, "重置万劫道碑")
+    async def handle_endless_meta_reset(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = endless.state_of(doc)
+        if st.get("active"):
+            yield event.plain_result("劫境进行中不可重置道碑，先「#无尽撤离」。")
+            return
+        meta = endless.meta_state_of(doc)
+        if not int(meta.get("spent", 0) or 0):
+            yield event.plain_result("万劫道碑尚未投入道痕。")
+            return
+        refund = int(int(meta["spent"]) * 0.8)
+        yield event.plain_result(
+            f"重置万劫道碑将清空全部节点与流派，返还 80% 道痕（{refund:,}）。\n"
+            f"确认请发送「{CMD_ENDLESS_META_RESET_YES}」。"
+        )
+
+    @filter.command(CMD_ENDLESS_META_RESET_YES, "确认重置万劫道碑")
+    async def handle_endless_meta_reset_yes(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = endless.state_of(doc)
+        if st.get("active"):
+            yield event.plain_result("劫境进行中不可重置道碑，先「#无尽撤离」。")
+            return
+        ok, msg, meta2, st2 = endless.reset_meta(endless.meta_state_of(doc), st)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = endless.save_meta(doc, meta2)
+        d = endless.save(d, st2)
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_ENDLESS_REROLL, "重置无尽能力")
+    async def handle_endless_reroll(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = endless.state_of(doc)
+        if not st.get("active") or st.get("phase") != "choice":
+            yield event.plain_result("现在没有待选的道法。")
+            return
+        import random as _random
+        ok, msg, st2 = endless.reroll_choices(
+            st, self._endless_content(), _random.Random(f"{doc.uid}:reroll:{time.time()}")
+        )
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self.db.save_player(endless.save(doc, st2).model_dump())
+        idx = endless.index(self._endless_content())
+        lines = [msg]
+        for i, aid in enumerate(st2.get("choices") or [], 1):
+            ab = idx["abilities"].get(aid) or {}
+            lines.append(f"{i}. {ab.get('name')}（{ab.get('rarity')}）{ab.get('description', '')}")
+        lines.append(f"选择：{CMD_ENDLESS_PICK} 1-{len(st2.get('choices') or [])}")
+        async for r in self._smart(event, "\n".join(lines), "劫机重演"):
+            yield r
+
+    @filter.command(CMD_ENDLESS_TREASURE, "无尽至宝")
+    async def handle_endless_treasure(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        text = endless.treasury_text(endless.treasury_of(doc), endless.state_of(doc))
+        async for r in self._smart(event, text, "无尽至宝"):
+            yield r
+
+    @filter.command(CMD_ENDLESS_TREASURE_UP, "升级无尽至宝")
+    async def handle_endless_treasure_up(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        raw = (name or "").strip()
+        if not raw:
+            yield event.plain_result(f"格式：{CMD_ENDLESS_TREASURE_UP} 至宝名")
+            return
+        ok, msg, tres, st2 = endless.upgrade_treasure(
+            endless.treasury_of(doc), endless.state_of(doc), raw
+        )
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        if st2.get("active"):
+            st2["treasures"] = endless.equipped_treasures(tres)
+        d = endless.save_treasury(doc, tres)
+        d = endless.save(d, st2)
+        await self.db.save_player(d.model_dump())
+        async for r in self._smart(event, msg, "升级至宝"):
+            yield r
+
+    @filter.command(CMD_ENDLESS_TREASURE_EQUIP, "装备无尽至宝")
+    async def handle_endless_treasure_equip(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        raw = (name or "").strip()
+        if not raw:
+            yield event.plain_result(f"格式：{CMD_ENDLESS_TREASURE_EQUIP} 至宝名")
+            return
+        ok, msg, tres = endless.equip_treasure(endless.treasury_of(doc), raw)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self.db.save_player(endless.save_treasury(doc, tres).model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_ENDLESS_TREASURE_UNEQUIP, "卸下无尽至宝")
+    async def handle_endless_treasure_unequip(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        raw = (name or "").strip()
+        if not raw:
+            yield event.plain_result(f"格式：{CMD_ENDLESS_TREASURE_UNEQUIP} 至宝名")
+            return
+        ok, msg, tres = endless.unequip_treasure(endless.treasury_of(doc), raw)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self.db.save_player(endless.save_treasury(doc, tres).model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_ENDLESS_TREASURE_SLOT, "拓展无尽至宝槽")
+    async def handle_endless_treasure_slot(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, tres, st2 = endless.expand_slots(
+            endless.treasury_of(doc), endless.state_of(doc)
+        )
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = endless.save_treasury(doc, tres)
+        d = endless.save(d, st2)
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_ENDLESS_SWEEP, "扫荡无尽劫境")
+    async def handle_endless_sweep(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = endless.state_of(doc)
+        ok, msg, st2 = endless.sweep(st, time.time(), endless.celestial_of(time.time()))
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self.db.save_player(endless.save(doc, st2).model_dump())
+        yield event.plain_result(msg)
 
     @filter.command(CMD_HEAL, "灵石疗伤")
     async def handle_heal(self, event: AstrMessageEvent):

@@ -69,7 +69,12 @@ def main() -> int:
                    "handle_endless_shop", "handle_endless_buy", "handle_endless_merchant",
                    "handle_endless_merchant_buy", "handle_endless_titles",
                    "handle_endless_titles_alias", "handle_endless_title_equip",
-                   "handle_endless_weekend")),
+                   "handle_endless_weekend", "handle_endless_meta", "handle_endless_meta_up",
+                   "handle_endless_meta_reset", "handle_endless_meta_reset_yes",
+                   "handle_endless_reroll", "handle_endless_treasure",
+                   "handle_endless_treasure_up", "handle_endless_treasure_equip",
+                   "handle_endless_treasure_unequip", "handle_endless_treasure_slot",
+                   "handle_endless_sweep")),
         ("帮助", ("handle_help",)),
     ]
     grouped = {}

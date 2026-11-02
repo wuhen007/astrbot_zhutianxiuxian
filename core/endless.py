@@ -146,6 +146,10 @@ def state_of(doc: Any) -> dict:
     st.setdefault("merchant", [])
     st.setdefault("merchant_layer", 0)
     st.setdefault("weekend_week", "")
+    st.setdefault("sweep_day", "")
+    st.setdefault("rerolls", 0)
+    st.setdefault("meta", {})
+    st.setdefault("treasures", [])
     st.setdefault("best_tier", 1)
     st.setdefault("best_layer", 0)
     st.setdefault("clears", [])
@@ -246,6 +250,20 @@ def run_stats(st: Mapping, base: Mapping, content: Mapping, celestial: Mapping |
         atk += float(title.get("atk", 0) or 0)
         df += float(title.get("def", 0) or 0)
         hp += float(title.get("hp", 0) or 0)
+    meta = st.get("meta") or {}
+    if meta:
+        atk += float(meta.get("atk", 1) or 1) - 1
+        df += float(meta.get("def", 1) or 1) - 1
+        hp += float(meta.get("hp", 1) or 1) - 1
+        crit += float(meta.get("crit", 0) or 0)
+        regen += float(meta.get("regen", 0) or 0)
+    tr = treasure_effects(st)
+    atk += tr["atk"]
+    df += tr["def"]
+    hp += tr["hp"]
+    crit += tr["crit"]
+    regen += tr["regen"]
+    revive = max(revive, tr["revive"])
     return {
         "atk": max(1, int(float(base.get("atk", 1) or 1) * atk)),
         "def": max(0, int(float(base.get("def", 0) or 0) * df)),
@@ -308,6 +326,10 @@ def start_run(st: Mapping, doc: Any, base: Mapping, content: Mapping,
         "celestial": celestial_of(now)["id"], "pending_node": 0, "log": [],
         "tier": tier,
     })
+    meta_eff = meta_effects(meta_state_of(doc))
+    st2["meta"] = meta_eff
+    st2["rerolls"] = int(meta_eff.get("reroll", 0) or 0)
+    st2["treasures"] = equipped_treasures(treasury_of(doc))
     st2["starmap"] = make_starmap(st2, content, random.Random(f"{pick['id']}:{now}"))
     return True, (
         f"【无尽劫境·{pick['name']}】{pick.get('rule', '')}\n"
@@ -570,9 +592,15 @@ def ability_choices(st: Mapping, content: Mapping, rng: random.Random,
     world = str(st.get("world") or "")
     owned = st.get("abilities") or {}
     tier = int(st.get("tier", 1) or 1)
+    meta = st.get("meta") or {}
+    count = max(3, int(meta.get("choice", count) or count))
+    unlocks = set(meta.get("unlocks") or [])
     pool = []
     for a in idx["abilities"].values():
-        if a.get("bossOnly") or a.get("requiredMetaNode"):
+        if a.get("bossOnly"):
+            continue
+        req = a.get("requiredMetaNode")
+        if req and req not in unlocks:
             continue
         if int(a.get("minDifficultyTier", 1) or 1) > tier:
             continue
@@ -623,6 +651,17 @@ def pick_ability(st: Mapping, idx: int, content: Mapping) -> tuple[bool, str, di
     st2["pending_node"] = 0
     lv_txt = f"Lv.{cur + 1}" if cur else "Lv.1"
     return True, (f"你参悟【{ab.get('name')}】{lv_txt}——{ab.get('description', '')}"), st2
+
+
+def reroll_choices(st: Mapping, content: Mapping, rng: random.Random) -> tuple[bool, str, dict]:
+    st2 = copy.deepcopy(dict(st))
+    if st2.get("phase") != "choice":
+        return False, "现在没有待选的道法。", st2
+    if int(st2.get("rerolls", 0) or 0) <= 0:
+        return False, "本次劫境没有剩余的重演次数（需在万劫道碑参悟「劫机重演」）。", st2
+    st2["rerolls"] = int(st2["rerolls"]) - 1
+    st2["choices"] = ability_choices(st2, content, rng)
+    return True, f"劫机重演！剩余重演次数 {st2['rerolls']}。", st2
 
 
 # ---------------------------------------------------------------- 劫后抉择
@@ -751,7 +790,411 @@ def build_text(st: Mapping, base: Mapping, content: Mapping, now: float) -> str:
     boons = st.get("boons") or []
     lines.append("【诸天神器】" + ("、".join(
         (idx["boons"].get(b) or {}).get("name", b) for b in boons) if boons else "无"))
+    trs = st.get("treasures") or []
+    if trs:
+        parts = []
+        for entry in trs:
+            data = TREASURE_MAP.get(str(entry.get("id")))
+            if not data:
+                continue
+            lv = int(entry.get("lv", 1) or 1)
+            parts.append(f"{data['name']} Lv.{lv}"
+                         + ("（已觉醒）" if _treasure_awakened(data, st) else ""))
+        lines.append("【无尽至宝】" + ("、".join(parts) if parts else "无"))
+    if int(st.get("rerolls", 0) or 0) > 0:
+        lines.append(f"【劫机重演】剩余 {int(st['rerolls'])} 次")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------- 万劫道碑
+
+BASE_COSTS = [50, 100, 180, 300, 450, 650, 900, 1200, 1550, 1950]
+BRANCH_COSTS = [400, 800, 1400, 2200, 3200]
+
+META_NODES = [
+    {"id": "attack", "name": "征伐道痕", "alias": ["攻击", "征伐"], "max": 10,
+     "costs": BASE_COSTS, "gate": 0, "atk": 0.05,
+     "desc": "每级永久提高 5% 攻击。"},
+    {"id": "hp", "name": "劫体道痕", "alias": ["生命", "劫体"], "max": 10,
+     "costs": BASE_COSTS, "gate": 0, "hp": 0.06,
+     "desc": "每级永久提高 6% 生命。"},
+    {"id": "defense", "name": "守御道痕", "alias": ["防御", "守御"], "max": 10,
+     "costs": BASE_COSTS, "gate": 0, "def": 0.06,
+     "desc": "每级永久提高 6% 防御。"},
+    {"id": "choice", "name": "衍算天机", "alias": ["四选一", "选项"], "max": 1,
+     "costs": [800], "gate": 1,
+     "desc": "能力三选一变为四选一。"},
+    {"id": "reroll", "name": "劫机重演", "alias": ["刷新", "重置能力"], "max": 1,
+     "costs": [1000], "gate": 1,
+     "desc": "每次劫境可刷新一次能力三选一。"},
+    {"id": "three_pointed_blade", "name": "三尖两刃刀", "alias": ["显圣神兵", "三尖刀"],
+     "max": 1, "costs": [5000], "gate": 4,
+     "desc": "A4 及以上劫境，三尖两刃刀进入能力池。"},
+    {"id": "branch_healer", "name": "治疗师", "alias": ["治疗", "医者"], "branch": "healer",
+     "max": 5, "costs": BRANCH_COSTS, "gate": 1, "regen": 0.05,
+     "desc": "每级每层恢复 5% 气血。首次参悟后锁定流派。"},
+    {"id": "branch_vanguard", "name": "破阵师", "alias": ["输出", "攻伐"], "branch": "vanguard",
+     "max": 5, "costs": BRANCH_COSTS, "gate": 1, "atk": 0.10, "crit": 0.04,
+     "desc": "每级攻击 +10%、暴击 +4%。首次参悟后锁定流派。"},
+    {"id": "branch_guardian", "name": "守护者", "alias": ["坦克", "守护"], "branch": "guardian",
+     "max": 5, "costs": BRANCH_COSTS, "gate": 1, "hp": 0.08, "def": 0.10,
+     "desc": "每级生命 +8%、防御 +10%。首次参悟后锁定流派。"},
+]
+META_MAP = {n["id"]: n for n in META_NODES}
+
+
+def _meta_node(query: str) -> dict | None:
+    q = str(query or "").strip()
+    for n in META_NODES:
+        if q in (n["id"], n["name"]) or q in (n.get("alias") or []):
+            return n
+    return None
+
+
+def meta_state_of(doc: Any) -> dict:
+    ext = getattr(doc, "ext", None)
+    if not isinstance(ext, dict):
+        ext = doc if isinstance(doc, dict) else {}
+    raw = ext.get("endless_meta") if isinstance(ext.get("endless_meta"), Mapping) else {}
+    nodes = {}
+    for n in META_NODES:
+        nodes[n["id"]] = max(0, min(int(n["max"]), int((raw.get("nodes") or {}).get(n["id"], 0) or 0)))
+    branch = str(raw.get("branch") or "")
+    if branch not in ("healer", "vanguard", "guardian"):
+        branch = ""
+    return {"nodes": nodes, "branch": branch,
+            "spent": max(0, int(raw.get("spent", 0) or 0))}
+
+
+def save_meta(doc: Any, meta: dict) -> Any:
+    d = doc.model_copy(deep=True) if hasattr(doc, "model_copy") else copy.deepcopy(doc)
+    d.ext["endless_meta"] = meta
+    return d
+
+
+def meta_effects(meta: Mapping) -> dict:
+    n = (meta or {}).get("nodes") or {}
+
+    def r(k: str) -> int:
+        return int(n.get(k, 0) or 0)
+
+    return {
+        "atk": 1 + 0.05 * r("attack") + 0.10 * r("branch_vanguard"),
+        "hp": 1 + 0.06 * r("hp") + 0.08 * r("branch_guardian"),
+        "def": 1 + 0.06 * r("defense") + 0.10 * r("branch_guardian"),
+        "crit": 0.04 * r("branch_vanguard"),
+        "regen": 0.05 * r("branch_healer"),
+        "choice": 4 if r("choice") else 3,
+        "reroll": 1 if r("reroll") else 0,
+        "unlocks": (["three_pointed_blade"] if r("three_pointed_blade") else []),
+    }
+
+
+def meta_text(meta: Mapping, st: Mapping) -> str:
+    n = (meta or {}).get("nodes") or {}
+    clears = _clears_count(st)
+    lines = ["--- 万劫道碑 ---",
+             f"道痕钱包：{int(st.get('marks_total', 0) or 0):,}｜通关档数：{clears}",
+             f"流派：{meta.get('branch') or '未定（首次参悟分支后锁定）'}"]
+    for node in META_NODES:
+        rank = int(n.get(node["id"], 0) or 0)
+        gate = int(node.get("gate", 0) or 0)
+        lock = "" if clears >= gate else f"🔒需通关 {gate} 档"
+        cost = "" if rank >= int(node["max"]) else f"{node['costs'][rank]:,} 道痕"
+        lines.append(f"· {node['name']} Lv.{rank}/{node['max']} {lock}"
+                     + (f"｜下一级 {cost}" if cost else "｜已满"))
+        lines.append(f"    {node['desc']}")
+    eff = meta_effects(meta)
+    lines.append(f"当前道碑加成：攻 ×{eff['atk']:.2f}｜防 ×{eff['def']:.2f}｜血 ×{eff['hp']:.2f}"
+                 f"｜暴击 +{eff['crit']:.0%}｜每层回血 {eff['regen']:.0%}")
+    lines.append("参悟：#参悟道碑 节点名｜重置：#重置万劫道碑")
+    return "\n".join(lines)
+
+
+def upgrade_meta(meta: Mapping, st: Mapping, query: str) -> tuple[bool, str, dict, dict]:
+    meta2 = copy.deepcopy(dict(meta))
+    st2 = copy.deepcopy(dict(st))
+    node = _meta_node(query)
+    if not node:
+        return False, f"道碑上没有「{query}」。可发「#万劫道碑」查看。", meta2, st2
+    nid = node["id"]
+    rank = int(meta2["nodes"].get(nid, 0) or 0)
+    if rank >= int(node["max"]):
+        return False, f"【{node['name']}】已至满级。", meta2, st2
+    if _clears_count(st2) < int(node.get("gate", 0) or 0):
+        return False, f"【{node['name']}】需通关 {node['gate']} 档劫境。", meta2, st2
+    branch = node.get("branch")
+    if branch:
+        if meta2.get("branch") and meta2["branch"] != branch:
+            return False, f"已锁定「{meta2['branch']}」流派，不可改投。", meta2, st2
+    cost = int(node["costs"][rank])
+    if int(st2.get("marks_total", 0) or 0) < cost:
+        return False, (f"道痕不足：【{node['name']}】下一级需 {cost:,}"
+                       f"（持有 {int(st2.get('marks_total', 0) or 0):,}）。"), meta2, st2
+    st2["marks_total"] = int(st2.get("marks_total", 0) or 0) - cost
+    meta2["nodes"][nid] = rank + 1
+    meta2["spent"] = int(meta2.get("spent", 0) or 0) + cost
+    if branch:
+        meta2["branch"] = branch
+    return True, (f"参悟【{node['name']}】Lv.{rank + 1}，耗道痕 {cost:,}。\n{node['desc']}"
+                  if node.get("desc") else f"参悟【{node['name']}】Lv.{rank + 1}。"), meta2, st2
+
+
+def reset_meta(meta: Mapping, st: Mapping) -> tuple[bool, str, dict, dict]:
+    """重置道碑：返还 80% 已投入道痕，清空节点与流派。"""
+    refund = int(int((meta or {}).get("spent", 0) or 0) * 0.8)
+    st2 = copy.deepcopy(dict(st))
+    st2["marks_total"] = int(st2.get("marks_total", 0) or 0) + refund
+    meta2 = {"nodes": {n["id"]: 0 for n in META_NODES}, "branch": "", "spent": 0}
+    return True, f"万劫道碑已重置，返还道痕 {refund:,}（80%）。", meta2, st2
+
+
+# ---------------------------------------------------------------- 无尽至宝
+
+TREASURES = [
+    {
+        "id": "yoriichi", "name": "缘一的斩鬼之刀", "icon": "🗡️", "rarity": "神话",
+        "base": {"atk": 0.06, "hp": 0.025, "crit": 0.03},
+        "awaken": {"name": "日呼传人", "req": {"anime_sun_breath": 1, "anime_transparent_world": 1},
+                   "effect": {"atk": 0.18, "hp": 0.10, "def": 0.05}},
+        "desc": "继国缘一遗落的日轮刀。集齐日之呼吸与通透世界后觉醒。",
+    },
+    {
+        "id": "ninetails", "name": "九尾人柱力", "icon": "🦊", "rarity": "神话",
+        "base": {"atk": 0.04, "hp": 0.06, "regen": 0.005},
+        "awaken": {"name": "仙狐模式", "req": {"anime_rasengan": 1, "anime_shadow_clone": 1},
+                   "effect": {"atk": 0.15, "hp": 0.15, "def": 0.05}},
+        "desc": "身负九尾查克拉的封印容器。集齐螺旋丸与影分身后觉醒。",
+    },
+    {
+        "id": "domain", "name": "领域展开·无量空处", "icon": "🌀", "rarity": "神话",
+        "base": {"atk": 0.04, "def": 0.045},
+        "awaken": {"name": "无量空处", "min_abilities": 3,
+                   "effect": {"atk": 0.15, "hp": 0.10, "def": 0.05}},
+        "desc": "以咒力构筑生得领域。拥有 3 项能力后展开。",
+    },
+    {
+        "id": "magical_girl", "name": "魔法少女·星光契约", "icon": "✨", "rarity": "史诗",
+        "base": {"atk": 0.04, "hp": 0.04, "def": 0.015},
+        "awaken": {"name": "星光魔法·完全变身", "world_count": ("anime", 2),
+                   "effect": {"atk": 0.12, "hp": 0.08, "def": 0.08}},
+        "desc": "与星光缔结的变身契约。掌握 2 项万象番界能力后完全变身。",
+    },
+    {
+        "id": "wushi_clock", "name": "无始钟·镇压诸天", "icon": "🔔", "rarity": "神话",
+        "base": {"atk": 0.04, "hp": 0.04, "def": 0.03},
+        "awaken": {"name": "无始钟鸣", "min_abilities": 3,
+                   "effect": {"atk": 0.18, "def": 0.09, "rewind": 0.10}},
+        "desc": "无始大帝伴生古钟。拥有 3 项能力后钟鸣镇世。",
+    },
+    {
+        "id": "hogyoku", "name": "崩玉·无限进化", "icon": "💎", "rarity": "禁忌",
+        "base": {"atk": 0.06, "hp": 0.06, "def": 0.06},
+        "awaken": {"name": "崩玉融合·无限进化", "req": {"anime_hogyoku": 3},
+                   "effect": {"atk": 0.22, "hp": 0.20, "def": 0.18, "revive": 0.25}},
+        "desc": "读取灵魂愿望并突破界限的核心。崩玉能力 3 级后融合进化。",
+    },
+]
+TREASURE_MAP = {t["id"]: t for t in TREASURES}
+TREASURE_LEVEL_CAP = 10
+TREASURE_SLOT_COST = 8000
+TREASURE_SLOT_MAX = 3
+
+
+def treasury_of(doc: Any) -> dict:
+    ext = getattr(doc, "ext", None)
+    if not isinstance(ext, dict):
+        ext = doc if isinstance(doc, dict) else {}
+    raw = ext.get("endless_treasure") if isinstance(ext.get("endless_treasure"), Mapping) else {}
+    owned = {}
+    for tid, lv in (raw.get("owned") or {}).items():
+        if tid in TREASURE_MAP:
+            owned[tid] = max(1, min(TREASURE_LEVEL_CAP, int(lv or 1)))
+    equipped = [tid for tid in (raw.get("equipped") or []) if tid in owned]
+    slots = max(1, min(TREASURE_SLOT_MAX, int(raw.get("slots", 1) or 1)))
+    return {"owned": owned, "equipped": equipped[:slots], "slots": slots}
+
+
+def save_treasury(doc: Any, treasury: dict) -> Any:
+    d = doc.model_copy(deep=True) if hasattr(doc, "model_copy") else copy.deepcopy(doc)
+    d.ext["endless_treasure"] = treasury
+    return d
+
+
+def _treasure_awakened(data: Mapping, st: Mapping) -> bool:
+    aw = data.get("awaken") or {}
+    abilities = st.get("abilities") or {}
+    if aw.get("req"):
+        for aid, lv in (aw["req"] or {}).items():
+            if int(abilities.get(aid, 0) or 0) < int(lv):
+                return False
+    if aw.get("min_abilities"):
+        if len(abilities) < int(aw["min_abilities"]):
+            return False
+    if aw.get("world_count"):
+        world, count = aw["world_count"]
+        if sum(1 for aid in abilities if aid.startswith(str(world))) < int(count):
+            return False
+    return True
+
+
+def treasure_effects(st: Mapping, content: Mapping | None = None) -> dict:
+    out = {"atk": 0.0, "def": 0.0, "hp": 0.0, "crit": 0.0, "regen": 0.0, "revive": 0.0}
+    for entry in st.get("treasures") or []:
+        data = TREASURE_MAP.get(str(entry.get("id")))
+        if not data:
+            continue
+        lv = max(1, int(entry.get("lv", 1) or 1))
+        scale = 0.5 + 0.15 * lv
+        for key in ("atk", "def", "hp", "crit", "regen"):
+            out[key] += float((data.get("base") or {}).get(key, 0) or 0) * scale
+        if _treasure_awakened(data, st):
+            eff = (data.get("awaken") or {}).get("effect") or {}
+            out["atk"] += float(eff.get("atk", 0) or 0)
+            out["def"] += float(eff.get("def", 0) or 0)
+            out["hp"] += float(eff.get("hp", 0) or 0)
+            out["crit"] += float(eff.get("crit", 0) or 0)
+            out["regen"] += float(eff.get("regen", 0) or 0)
+            out["revive"] = max(out["revive"], float(eff.get("revive", 0) or 0))
+    return out
+
+
+def equipped_treasures(treasury: Mapping) -> list[dict]:
+    owned = treasury.get("owned") or {}
+    return [{"id": tid, "lv": int(owned.get(tid, 1))} for tid in (treasury.get("equipped") or [])]
+
+
+def grant_treasure(treasury: Mapping, st: Mapping) -> tuple[dict, str | None]:
+    t2 = copy.deepcopy(dict(treasury))
+    cleared = _clears_count(st)
+    if cleared <= 0:
+        return t2, None
+    owned = t2.setdefault("owned", {})
+    for i in range(min(cleared, len(TREASURES))):
+        data = TREASURES[i]
+        if data["id"] not in owned:
+            owned[data["id"]] = 1
+            return t2, data["name"]
+    return t2, None
+
+
+def treasury_text(treasury: Mapping, st: Mapping) -> str:
+    owned = treasury.get("owned") or {}
+    equipped = treasury.get("equipped") or []
+    lines = ["--- 无尽至宝 ---",
+             f"槽位：{len(equipped)}/{treasury.get('slots', 1)}｜通关档数：{_clears_count(st)}",
+             f"劫境道痕：{int(st.get('marks_total', 0) or 0):,}"]
+    if not owned:
+        lines.append("尚无至宝。每通关一档劫境，解锁一件至宝（A1 起）。")
+    for data in TREASURES:
+        tid = data["id"]
+        lv = int(owned.get(tid, 0) or 0)
+        if not lv:
+            need = TREASURES.index(data) + 1
+            lines.append(f"🔒 {data['name']}｜需通关 {need} 档")
+            continue
+        mark = "✅" if tid in equipped else "·"
+        cost = 1000 + 750 * (lv - 1)
+        lines.append(f"{mark} {data['icon']} {data['name']} Lv.{lv}/{TREASURE_LEVEL_CAP}"
+                     f"｜升级 {cost:,} 道痕")
+        lines.append(f"    基础：{_effect_txt(data.get('base'))}"
+                     f"｜觉醒【{data['awaken']['name']}】：{_effect_txt(data['awaken'].get('effect'))}")
+    lines.append("指令：#升级无尽至宝 名｜#装备无尽至宝 名｜#卸下无尽至宝 名｜#拓展无尽至宝槽")
+    return "\n".join(lines)
+
+
+def _effect_txt(eff: Mapping | None) -> str:
+    if not eff:
+        return "无"
+    names = {"atk": "攻", "def": "防", "hp": "血", "crit": "暴击",
+             "regen": "回血", "revive": "涅槃", "rewind": "回溯"}
+    parts = []
+    for k, v in eff.items():
+        if not v:
+            continue
+        parts.append(f"{names.get(k, k)}+{float(v):.0%}")
+    return "、".join(parts) or "无"
+
+
+def upgrade_treasure(treasury: Mapping, st: Mapping, name: str) -> tuple[bool, str, dict, dict]:
+    t2 = copy.deepcopy(dict(treasury))
+    st2 = copy.deepcopy(dict(st))
+    data = next((t for t in TREASURES if t["name"] == name), None)
+    if not data:
+        return False, f"没有「{name}」这件至宝。", t2, st2
+    lv = int((t2.get("owned") or {}).get(data["id"], 0) or 0)
+    if not lv:
+        return False, f"尚未拥有【{data['name']}】。", t2, st2
+    if lv >= TREASURE_LEVEL_CAP:
+        return False, f"【{data['name']}】已满级。", t2, st2
+    cost = 1000 + 750 * (lv - 1)
+    if int(st2.get("marks_total", 0) or 0) < cost:
+        return False, f"道痕不足：升级需 {cost:,}（持有 {int(st2.get('marks_total', 0) or 0):,}）。", t2, st2
+    st2["marks_total"] = int(st2.get("marks_total", 0) or 0) - cost
+    t2["owned"][data["id"]] = lv + 1
+    return True, f"【{data['name']}】升至 Lv.{lv + 1}，耗道痕 {cost:,}。", t2, st2
+
+
+def equip_treasure(treasury: Mapping, name: str) -> tuple[bool, str, dict]:
+    t2 = copy.deepcopy(dict(treasury))
+    data = next((t for t in TREASURES if t["name"] == name), None)
+    if not data:
+        return False, f"没有「{name}」这件至宝。", t2
+    if data["id"] not in (t2.get("owned") or {}):
+        return False, f"尚未拥有【{data['name']}】。", t2
+    if data["id"] in (t2.get("equipped") or []):
+        return False, f"【{data['name']}】已在槽位中。", t2
+    if len(t2.get("equipped") or []) >= int(t2.get("slots", 1) or 1):
+        return False, f"至宝槽已满（{t2['slots']}/{t2['slots']}），先卸下或拓展槽位。", t2
+    t2["equipped"] = list(t2.get("equipped") or []) + [data["id"]]
+    return True, f"已装备【{data['name']}】（下次入境生效）。", t2
+
+
+def unequip_treasure(treasury: Mapping, name: str) -> tuple[bool, str, dict]:
+    t2 = copy.deepcopy(dict(treasury))
+    data = next((t for t in TREASURES if t["name"] == name), None)
+    if not data:
+        return False, f"没有「{name}」这件至宝。", t2
+    if data["id"] not in (t2.get("equipped") or []):
+        return False, f"【{data['name']}】未装备。", t2
+    t2["equipped"] = [x for x in t2["equipped"] if x != data["id"]]
+    return True, f"已卸下【{data['name']}】。", t2
+
+
+def expand_slots(treasury: Mapping, st: Mapping) -> tuple[bool, str, dict, dict]:
+    t2 = copy.deepcopy(dict(treasury))
+    st2 = copy.deepcopy(dict(st))
+    slots = int(t2.get("slots", 1) or 1)
+    if slots >= TREASURE_SLOT_MAX:
+        return False, "至宝槽已至上限（3 个）。", t2, st2
+    if int(st2.get("marks_total", 0) or 0) < TREASURE_SLOT_COST:
+        return False, f"拓展槽位需 {TREASURE_SLOT_COST:,} 道痕（持有 {int(st2.get('marks_total', 0) or 0):,}）。", t2, st2
+    st2["marks_total"] = int(st2.get("marks_total", 0) or 0) - TREASURE_SLOT_COST
+    t2["slots"] = slots + 1
+    return True, f"至宝槽拓展至 {slots + 1} 个，耗道痕 {TREASURE_SLOT_COST:,}。", t2, st2
+
+
+# ---------------------------------------------------------------- 扫荡
+
+
+def sweep(st: Mapping, now: float, celestial: Mapping) -> tuple[bool, str, dict]:
+    st2 = copy.deepcopy(dict(st))
+    if st2.get("active"):
+        return False, "劫境进行中，无法扫荡（先撤离）。", st2
+    best = int(st2.get("best_layer", 0) or 0)
+    if best < 3:
+        return False, "最高层数不足 3 层，无法扫荡。", st2
+    today = time_key(now)
+    if str(st2.get("sweep_day") or "") == today:
+        return False, "今日已扫荡过，明日再来。", st2
+    tier = tier_of(int(st2.get("tier", 1) or 1))
+    gain = max(1, int(120 * best * float(tier["reward"])
+                      * float(celestial.get("token", 1) or 1)))
+    st2["sweep_day"] = today
+    st2["marks_total"] = int(st2.get("marks_total", 0) or 0) + gain
+    st2["marks_earned"] = int(st2.get("marks_earned", 0) or 0) + gain
+    return True, (f"扫荡完成：按最高 {best} 层结算，获得劫境道痕 {gain:,}"
+                  f"（每日一次）。"), st2
 
 
 # ---------------------------------------------------------------- 称号
