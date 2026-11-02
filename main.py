@@ -745,37 +745,91 @@ class ZhutianPlugin(Star):
 
     # ---- 物品 / 坊市 ----
 
-    async def _bag_text(self, doc: PlayerDoc) -> str:
+    # 稀有度 → 分组 [下界, 上界)/标签/颜色（修仙配色：凡→仙递进）
+    _RARITY_TIERS = (
+        (9, 99, "仙品 · 九阶以上", "#e88a8a"),
+        (8, 9, "八阶 · 淬金", "#f0d78c"),
+        (7, 8, "七阶 · 流紫", "#b48ce8"),
+        (6, 7, "六阶 · 凝蓝", "#6fb8e8"),
+        (4, 6, "四五行 · 凝碧", "#7ec97f"),
+        (0, 4, "凡阶 · 一至三阶", "#9aa5b5"),
+    )
+
+    async def _bag_data(self, doc: PlayerDoc) -> dict:
+        """纳戒数据（出图与文本回退同源）：按稀有度降序分组。"""
         inv = await self.db.get_inventory(doc.uid)
-        if not inv:
-            return "纳戒空空如也。坊市在等你：#商店"
-        kinds = len(inv)
-        lines = [f"--- 道友的纳戒（共 {kinds} 种）---"]
-        for name, qty in list(inv.items())[:20]:
+        rows = []
+        for name, qty in inv.items():
             item = self.item_index.get(name, {})
-            lines.append(f"· {name} ×{qty}（{item.get('class', '?')}/{item.get('稀有度', '?')}阶）")
-        if kinds > 20:
-            lines.append(f"…其余 {kinds - 20} 种略")
+            try:
+                rar = int(float(item.get("稀有度") or 0))
+            except (TypeError, ValueError):
+                rar = 0
+            rows.append({
+                "name": name, "qty": int(qty),
+                "cls": item.get("class", "?"),
+                "typ": (item.get("type") or "")[:6],
+                "rar": rar,
+            })
+        rows.sort(key=lambda r: (-r["rar"], -r["qty"], r["name"]))
+        groups = []
+        for lo, hi, label, color in self._RARITY_TIERS:
+            picked = [r for r in rows if lo <= r["rar"] < hi]
+            if picked:
+                groups.append({
+                    "label": label, "color": color,
+                    "cells": [{k: r[k] for k in ("name", "qty", "cls", "typ")} for r in picked],
+                })
+        return {
+            "kinds": len(rows),
+            "total": sum(r["qty"] for r in rows),
+            "groups": groups,
+            "rows": rows,
+        }
+
+    async def _bag_text(self, doc: PlayerDoc) -> str:
+        data = await self._bag_data(doc)
+        if not data["rows"]:
+            return "纳戒空空如也。坊市在等你：#商店"
+        lines = [f"--- 道友的纳戒（共 {data['kinds']} 种 · {data['total']} 件）---"]
+        for r in data["rows"][:40]:
+            meta = f"{r['cls']}/{r['rar'] or '?'}阶" if r["rar"] else r["cls"]
+            lines.append(f"· {r['name']} ×{r['qty']}（{meta}）")
+        if len(data["rows"]) > 40:
+            lines.append(f"…其余 {len(data['rows']) - 40} 种详见面板")
         return "\n".join(lines)
 
     @filter.command(CMD_BAG, "查看纳戒")
     async def handle_bag(self, event: AstrMessageEvent):
-        if not self._allowed(event):
-            return
-        doc, err = await self._require_player(event)
-        if err:
-            yield event.plain_result(err)
-            return
-        yield event.plain_result(await self._bag_text(doc))
+        async for r in self._bag_view(event):
+            yield r
 
     @filter.command(CMD_BAG_ALIAS, "查看纳戒（短指令）")
     async def handle_bag_alias(self, event: AstrMessageEvent):
+        async for r in self._bag_view(event):
+            yield r
+
+    async def _bag_view(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
         doc, err = await self._require_player(event)
         if err:
             yield event.plain_result(err)
             return
+        data = await self._bag_data(doc)
+        if not data["rows"]:
+            yield event.plain_result("纳戒空空如也。坊市在等你：#商店")
+            return
+        if self.render_on:
+            png = await render.render_panel(
+                "bag",
+                {"title": "诸天万界 · 纳戒", "sub": f"{data['kinds']} 种",
+                 "footer": "稀有序 · 品阶配色", **data},
+                self.panel_dir,
+            )
+            if png:
+                yield event.image_result(str(png))
+                return
         yield event.plain_result(await self._bag_text(doc))
 
     @filter.command(CMD_SHOP, "坊市货架")

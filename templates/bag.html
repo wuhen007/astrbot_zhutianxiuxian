@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="row"><span class="k">纳戒</span><span class="v">{{ kinds }} 种物品{% if total %} · 共 {{ total }} 件{% endif %}</span></div>
+{% if groups %}
+  {% for g in groups %}
+  <div class="section">
+    <div class="head" style="color: {{ g.color }}">{{ g.label }}</div>
+    <div class="grid">
+      {% for it in g.cells %}
+      <div class="cell">
+        <div class="iname" style="color: {{ g.color }}">{{ it.name }}</div>
+        <div class="imeta">{{ it.cls }}{% if it.typ %} · {{ it.typ }}{% endif %}</div>
+        <div class="iqty">×{{ it.qty }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+{% else %}
+  <div class="empty">纳戒空空如也。坊市在等你：#商店</div>
+{% endif %}
+<div class="section"><div class="chip plain">使用：#使用 物品名 · 装备：#装备 物品名</div></div>
+{% endblock %}

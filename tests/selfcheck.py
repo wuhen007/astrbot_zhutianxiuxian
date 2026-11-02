@@ -922,6 +922,28 @@ async def main():
           "final": {"amount": 48000, "task_exp": 72, "key_n": 3}}
     png_q = await render_mod.render_panel("quest", qv, tmp)
     assert png_q and png_q.exists() and png_q.stat().st_size > 2000
+
+    # 纳戒面板：分组互斥 + 渲染
+    bag_data = {"title": "诸天万界 · 纳戒", "sub": "4 种", "footer": "test",
+                "kinds": 4, "total": 37,
+                "groups": [
+                    {"label": "八阶 · 淬金", "color": "#f0d78c",
+                     "cells": [{"name": "万兽神药", "qty": 1, "cls": "丹药", "typ": "神药"}]},
+                    {"label": "凡阶 · 一至三阶", "color": "#9aa5b5",
+                     "cells": [{"name": "定魂草", "qty": 5, "cls": "草药", "typ": "灵根"},
+                               {"name": "神石", "qty": 30, "cls": "道具", "typ": ""},
+                               {"name": "世界石", "qty": 1, "cls": "材料", "typ": "开辟小世界"}]}],
+                "rows": []}
+    html_b = render_mod._jinja().get_template("bag.html").render(**bag_data)
+    assert "万兽神药" in html_b and "定魂草" in html_b and "37 件" in html_b, "bag 模板变量未注入"
+    png_b = await render_mod.render_panel("bag", bag_data, tmp)
+    assert png_b and png_b.exists() and png_b.stat().st_size > 2000
+
+    # 分组区间互斥：物品只落一组
+    tiers = [(9, 99), (8, 9), (7, 8), (6, 7), (4, 6), (0, 4)]
+    for rar in range(0, 12):
+        hits = [1 for lo, hi in tiers if lo <= rar < hi]
+        assert len(hits) == 1, f"稀有度 {rar} 分组不互斥"
     bad = await render_mod.render_panel("不存在模板", status_data, tmp)
     assert bad is None, "未知模板应返回 None 触发回退"
     await render_mod.shutdown()
