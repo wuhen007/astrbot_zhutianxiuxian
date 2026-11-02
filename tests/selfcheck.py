@@ -842,6 +842,53 @@ async def main():
     assert ok and y6["amount"] == 1000
     print("yuanshi ok")
 
+    # 15q. 魔头禁术：魔功/镇魂资格/处置/魂印
+    from core import motou as mt_mod  # noqa: E402
+    now_e = 1_900_000_000.0
+    ev = mt_mod.state_of(PlayerDoc(uid="e1", ext={"modao": 200.0}))
+    assert ev["modao"] == 200.0
+    # 魔功：消耗递增（cost(0)=80，cost(1)=120）、上限 10
+    ok, msg, ev = mt_mod.train_magic(ev)
+    assert ok and ev["magic"] == 1 and ev["modao"] == 120.0, (msg, ev["modao"])
+    assert abs(mt_mod.magic_bonus(ev) - 0.08) < 1e-9
+    ok, msg, ev = mt_mod.train_magic(ev)  # 剩 120，cost(1)=120 → 成功升 2 层
+    assert ok and ev["magic"] == 2 and ev["modao"] == 0.0, (msg, ev["modao"])
+    ok, msg, _ = mt_mod.train_magic(ev)  # 魔道 0 < cost(2)=180 → 拒
+    assert not ok and "魔道值不足" in msg
+    # 资格：魔道不足 → 拒；境界差保护；保护期（重置 ev 为魔道充足状态）
+    ev = mt_mod.state_of(PlayerDoc(uid="e1", ext={"modao": 200.0}))
+    weak = mt_mod.state_of(PlayerDoc(uid="e2", ext={"modao": 10.0}))
+    ok, why = mt_mod.can_slay(weak, 40, 100, mt_mod.state_of(PlayerDoc(uid="t1")), 40, 100, now_e)
+    assert not ok and "邪道" in why
+    ok, why = mt_mod.can_slay(ev, 20, 100, mt_mod.state_of(PlayerDoc(uid="t1")), 20, 100, now_e)
+    assert not ok and "境界不足" in why
+    ok, why = mt_mod.can_slay(ev, 40, 100, mt_mod.state_of(PlayerDoc(uid="t1")), 30, 100, now_e)
+    assert not ok and "天道弱者" in why  # 40-30 > 8？差 10 > 8 → 保护
+    ok, why = mt_mod.can_slay(ev, 40, 100, mt_mod.state_of(PlayerDoc(uid="t1")), 35, 100, now_e)
+    assert ok, why
+    # 记录战果 → 处置烙印 → 对方魂印 + 保护期
+    ev = mt_mod.record_result(ev, "受害者", True, now_e)
+    assert ev["pending"] and ev["slay_ts"] == now_e
+    target_ev = mt_mod.state_of(PlayerDoc(uid="t1"))
+    ok, msg, ev, patch = mt_mod.dispose(ev, "烙印", target_ev, now_e + 60)
+    assert ok and ev["soul_slave"]["name"] == "受害者", msg
+    assert patch["brand"]["until"] == now_e + 60 + mt_mod.BRAND_DURATION
+    assert patch["protected_until"] == now_e + 60 + mt_mod.PROTECTION
+    # 魂印惩罚 / 魂奴加成
+    branded = {"brand": {"until": now_e + 100}}
+    assert abs(mt_mod.brand_penalty(branded, now_e) - 0.7) < 1e-9
+    assert abs(mt_mod.slave_bonus(ev, now_e + 60) - 0.10) < 1e-9
+    # 冲击魂印
+    ok, msg, s2 = mt_mod.break_brand(PlayerDoc(uid="t1"), dict(branded), now_e, 1_000_000)
+    assert ok and s2["brand"] is None
+    # 灭魂 → 遗蜕 → 炼化
+    ev2 = mt_mod.record_result(mt_mod.state_of(PlayerDoc(uid="e3", ext={"modao": 300.0})), "猎物", True, now_e)
+    ok, msg, ev2, _ = mt_mod.dispose(ev2, "灭魂", mt_mod.state_of(PlayerDoc(uid="t9")), now_e + 60)
+    assert ok and ev2["remains"]["name"] == "猎物"
+    ok, msg, ev2, consume = mt_mod.refine_remains(ev2, 40)
+    assert ok and consume["exp"] > 0 and ev2["remains"] is None
+    print("motou ok")
+
     # 15i. 师徒/道侣/封禁（纯存档语义验证）
     master = PlayerDoc(uid="m1", ext={"recruit": True})
     disciple = PlayerDoc(uid="d1")

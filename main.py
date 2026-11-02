@@ -11,7 +11,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, battle, boss, catalog, cultivate, dibing, equipment, items, linggen, occupation, pet, quest, secret, sect, shenjie, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, battle, boss, catalog, cultivate, dibing, equipment, items, linggen, motou, occupation, pet, quest, secret, sect, shenjie, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -140,6 +140,12 @@ CMD_STONE_MARKET = "#源石坊"
 CMD_STONE_INSPECT = "#勘石"
 CMD_STONE_BUY = "#购石"
 CMD_STONE_EXCHANGE = "#源石兑换"
+CMD_EVIL_SLAY = "#镇魂"
+CMD_EVIL_DISPOSE = "#处置"
+CMD_EVIL_MAGIC = "#修炼魔功"
+CMD_EVIL_MOSHI = "#供奉魔石"
+CMD_EVIL_BREAK = "#冲击魂印"
+CMD_EVIL_REFINE = "#炼化遗蜕"
 CMD_DARK_OPEN = "#开启黑暗动乱"
 CMD_DARK_CLOSE = "#关闭黑暗动乱"
 CMD_DARK_STATUS = "#禁区至尊状态"
@@ -455,10 +461,19 @@ class ZhutianPlugin(Star):
                 return self.item_index.get(n)
         else:
             lookup = self.item_index.get
-        return equipment.aggregate(
+        st = equipment.aggregate(
             doc, self.content.table(doc.realm_table), lookup,
             doc.ext.get("enh"), set(doc.ext.get("imperial") or []),
         )
+        # 魔头禁术：魔功 + 魂奴 三维加成（乘法叠加）
+        ev = motou.state_of(doc)
+        mult = 1.0 + motou.magic_bonus(ev) + motou.slave_bonus(ev, time.time())
+        if abs(mult - 1.0) > 1e-9:
+            st = equipment.Stats(
+                atk=int(st.atk * mult), defense=int(st.defense * mult),
+                hp=int(st.hp * mult), bao=st.bao, set_lines=st.set_lines,
+            )
+        return st
 
     def _hp_pair(self, doc: PlayerDoc) -> tuple[int, int]:
         """(当前气血, 上限)。ext 缺失视为满血；上限缩小时自动钳制。"""
@@ -646,6 +661,15 @@ class ZhutianPlugin(Star):
                 (f"{CMD_RAID_SPY} 地点", "花 0.3×价格打探收获"),
                 (f"{CMD_RAID} 地点", "洗劫（强化费+战斗，2h CD，魔道值+）"),
                 (f"{CMD_GIFT} @道侣", "赠百合花篮（亲密度 +10）"),
+            ]},
+            {"title": "魔头禁术（PvP）", "lines": [
+                (CMD_EVIL, "邪道面板（魔道值/魔功/魂印/魂奴）"),
+                (CMD_EVIL_MAGIC, "修炼魔功（魔道值换三维永久加成，10 层）"),
+                (f"{CMD_EVIL_MOSHI} 数量", "供奉魔石（每颗魔道值 +20）"),
+                (f"{CMD_EVIL_SLAY} @目标", "镇魂（魔道100+境界30+，24h CD，7 天保护期）"),
+                (f"{CMD_EVIL_DISPOSE} 烙印/灭魂", "处置战果（烙印=对方魂印3天+你的魂奴 / 灭魂=遗蜕）"),
+                (CMD_EVIL_REFINE, "炼化遗蜕（修为+魔道值）"),
+                (CMD_EVIL_BREAK, "冲击魂印（50 万灵石，12h CD）"),
             ]},
             {"title": "源石坊赌石", "lines": [
                 (f"{CMD_STONE_MARKET} [外园/地字号/天字号]", "当日 5 块原石（外园 5 万灵石起）"),
@@ -883,6 +907,10 @@ class ZhutianPlugin(Star):
         # 对齐原版 biguan_jiesuan：每周期基础修为 = size(默认10) × 境界id × 效率乘区
         base_per_min = int(self._val("CULTIVATE_EXP_PER_REALM", 10)) * (max(0, doc.realm_index) + 1)
         eff_rate = max(1, int(base_per_min * (1 + ling_bonus + gongfa_bonus + biguan_bonus)))
+        # 魔头禁术：魂印缠身 → 闭关效率 -30%
+        brand_mult = motou.brand_penalty(motou.state_of(doc), time.time())
+        if brand_mult < 1.0:
+            eff_rate = max(1, int(eff_rate * brand_mult))
         ok, msg, d = cultivate.end_cultivate(
             doc, time.time(), eff_rate,
             int(self._val("CULTIVATE_MAX_MINUTES", 7200)),
@@ -1847,7 +1875,9 @@ class ZhutianPlugin(Star):
         if err:
             yield event.plain_result(err)
             return
-        yield event.plain_result("【邪道录】\n" + shenjie.evil_profile(doc.model_dump()))
+        s = motou.state_of(doc)
+        async for r in self._smart(event, motou.panel(s, time.time()), "邪道 · 魔头之路"):
+            yield r
 
     # ---- 小世界（对齐原版 Garden/xiaoshijie.js 核心链） ----
 
@@ -4132,6 +4162,175 @@ class ZhutianPlugin(Star):
         d = doc.model_copy(deep=True)
         d.ext["yuanshi"] = y2
         d.stones += num * 10
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    # ---- B5：魔头禁术 ----
+
+    def _evil_save(self, doc: PlayerDoc, s: dict) -> PlayerDoc:
+        d = doc.model_copy(deep=True)
+        s = dict(s)
+        d.ext["evil"] = s
+        d.ext["modao"] = float(s.get("modao", 0))
+        return d
+
+    @filter.command(CMD_EVIL_MAGIC, "修炼魔功")
+    async def handle_evil_magic(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        s = motou.state_of(doc)
+        ok, msg, s2 = motou.train_magic(s)
+        if ok:
+            await self.db.save_player(self._evil_save(doc, s2).model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_EVIL_MOSHI, "供奉魔石")
+    async def handle_evil_moshi(self, event: AstrMessageEvent, n: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        try:
+            qty = max(1, int(n))
+        except (TypeError, ValueError):
+            qty = 1
+        have = dict(await self.db.get_inventory(doc.uid)).get("魔石", 0)
+        if have < qty:
+            yield event.plain_result(f"纳戒中魔石不足（有 {have}）。")
+            return
+        s = motou.state_of(doc)
+        ok, msg, s2 = motou.offer_moshi(s, qty)
+        d = self._evil_save(doc, s2)
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            if not await self.db.remove_item(doc.uid, "魔石", qty):
+                raise RuntimeError("INSUFFICIENT")
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_EVIL_SLAY, "镇魂")
+    async def handle_evil_slay(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        target_uid = self._at_target(event)
+        if not target_uid:
+            yield event.plain_result("格式：#镇魂 @目标")
+            return
+        raw = await self.db.get_player(target_uid)
+        if not raw:
+            yield event.plain_result("目标尚未踏入修行。")
+            return
+        tgt = PlayerDoc(**raw)
+        now = time.time()
+        s = motou.state_of(doc)
+        ts = motou.state_of(tgt)
+        hp_cur, _ = self._hp_pair(doc)
+        t_hp_cur, _ = self._hp_pair(tgt)
+        ok, why = motou.can_slay(s, doc.realm_index, hp_cur, ts, tgt.realm_index, t_hp_cur, now)
+        if not ok:
+            yield event.plain_result(why)
+            return
+        # 战斗（镜像对拼，复用切磋引擎）
+        import random as _random
+        rng = _random.Random(f"{doc.uid}:slay:{now}")
+        st_a, st_t = self._stats(doc), self._stats(tgt)
+        me = battle.Unit(doc.name, st_a.atk, st_a.defense, hp_cur, st_a.bao)
+        foe = battle.Unit(tgt.name, st_t.atk, st_t.defense, t_hp_cur, st_t.bao)
+        result, log, hp_left, _ = battle.spar_full(me, foe, rng)
+        won = result == 0
+        s2 = motou.record_result(s, tgt.name, won, now)
+        d = self._evil_save(doc, s2)
+        d.ext["hp"] = max(1, hp_left)
+        await self.db.save_player(d.model_dump())
+        head = "禁术得手！" if won else "镇魂反噬！"
+        tail = ("你压制了对方的真灵——#处置 烙印 / #处置 灭魂（10 分钟内）。" if won
+                else "对方真灵顽强反扑，你落败退走（魔道值已消耗）。")
+        async for r in self._smart(event, f"{head}\n" + "\n".join(log[-5:]) + f"\n{tail}", "镇魂"):
+            yield r
+
+    @filter.command(CMD_EVIL_DISPOSE, "处置战果")
+    async def handle_evil_dispose(self, event: AstrMessageEvent, kind: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        kind = (kind or "").strip()
+        s = motou.state_of(doc)
+        p = s.get("pending")
+        if not p:
+            yield event.plain_result("没有待处置的镇魂战果（先 #镇魂 @目标 取胜）。")
+            return
+        tname = p.get("target")
+        raw = None
+        for uid in await self.db.all_player_uids():
+            r = await self.db.get_player(uid)
+            if r and r.get("name") == tname:
+                raw = r
+                break
+        if not raw:
+            yield event.plain_result(f"目标「{tname}」的档案已不存在。")
+            return
+        tgt = PlayerDoc(**raw)
+        ts = motou.state_of(tgt)
+        ok, msg, s2, tpatch = motou.dispose(s, kind, ts, time.time())
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = self._evil_save(doc, s2)
+        dt = tgt.model_copy(deep=True)
+        te = dict(dt.ext.get("evil") or {})
+        te.update(tpatch)
+        dt.ext["evil"] = te
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            await self.db.save_player(dt.model_dump())
+        async for r in self._smart(event, msg, "禁术处置"):
+            yield r
+
+    @filter.command(CMD_EVIL_BREAK, "冲击魂印")
+    async def handle_evil_break(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        s = motou.state_of(doc)
+        ok, msg, s2 = motou.break_brand(doc, s, time.time(), doc.stones)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = self._evil_save(doc, s2)
+        d.stones -= 500_000
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_EVIL_REFINE, "炼化遗蜕")
+    async def handle_evil_refine(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        s = motou.state_of(doc)
+        ok, msg, s2, consume = motou.refine_remains(s, doc.realm_index)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = self._evil_save(doc, s2)
+        d.exp += consume["exp"]
         await self.db.save_player(d.model_dump())
         yield event.plain_result(msg)
 
