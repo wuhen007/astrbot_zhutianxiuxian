@@ -154,9 +154,9 @@ async def main():
     ok, _, _ = items_mod.sell(inv_doc, junk, 1)
     assert not ok, "出售价 0 不可出售"
 
-    # 10. 迁移版本 = 7
+    # 10. 迁移版本 = 8
     async with db.conn.execute("SELECT version FROM db_info") as cur:
-        assert (await cur.fetchone())[0] == 7
+        assert (await cur.fetchone())[0] == 8
 
     # 11. 装备：穿戴/换位/卸下 + 比例与固定加成聚合
     from core import battle as battle_mod   # noqa: E402
@@ -417,6 +417,33 @@ async def main():
     r1 = occ_mod.forge_rate(0.5, 1, tbl)
     assert 0.01 <= r1 < 1.0, r1
     print("occupation ok")
+
+    # 15f. 黑暗动乱 + 炼神魄（对齐 BOSS2 / pata DSC）
+    from core import boss as boss_mod2  # noqa: E402
+
+    h, rw, a, df = boss_mod2.dark_specs(1000000, 5)
+    assert rw == 12_000_000 and h == int(10000 * 150 * 5 * 200), (h, rw)
+    assert boss_mod2.dark_specs(1000000, 3)[1] == 6_000_000  # <5 人奖池减半
+    dmg_win = boss_mod2.dark_damage(True, 1000000, df, h, _random.Random(1))
+    dmg_lose = boss_mod2.dark_damage(False, 1000000, df, h, _random.Random(1))
+    assert dmg_win > dmg_lose > 0, (dmg_win, dmg_lose)
+    # 锻神池：段数缩放 + 逐回合胜负
+    sh, sa, sd, sr = boss_mod2.shenpo_specs(10)
+    assert sh == 1_000_000 and sa == 2_500_000 and sd == 2_000_000 and sr == 12_000, (sh, sa, sd, sr)
+    sr_cap = boss_mod2.shenpo_specs(1000)[3]
+    assert sr_cap == 400_000, sr_cap  # 奖励封顶
+    # 黑暗 Boss 存储生命周期（复用 world_boss 模式）
+    await db.init_dark_boss(1, 1000, 50000, 3000, 1500)
+    await db.damage_dark_boss(1, "u1", "甲", 400)
+    left = await db.damage_dark_boss(1, "u2", "乙", 700)
+    assert left <= 0
+    row = await db.get_dark_boss()
+    assert not row["alive"] and row["round"] == 1, row
+    led = await db.dark_ledger(1)
+    assert dict((k, v[1]) for k, v in led.items())["u1"] == 400, led
+    await db.init_dark_boss(2, 2000, 60000, 3000, 1500)
+    assert (await db.get_dark_boss())["alive"]
+    print("dark boss & shenpo ok")
 
     # 15c. 每日任务：公式 / 接取-提交-领奖闭环 / 灵石自动追踪 / 秘境计数
     from core import quest as quest_mod  # noqa: E402

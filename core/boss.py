@@ -67,3 +67,37 @@ def split_rewards(
             out.append((uid, name, share))
     out.sort(key=lambda x: -x[2])
     return out
+
+
+# ---- 黑暗动乱帝战（对齐原版 BOSS2） ----
+
+def dark_specs(avg_atk: int, player_count: int) -> tuple[int, int, int, int]:
+    """黑暗 Boss 数值（对齐 InitWorldBoss2）：返回 (血量, 奖池, 攻击, 防御)。
+
+    基数 = 均伤×0.01；血量 = 基数×150×人数×200；奖池 1200 万（<5 人 600 万）；
+    攻/防取基数的 2.2/1.1 倍（原版 Boss 攻防来自幻影生成，此处定标）。
+    """
+    base = max(1, int(avg_atk)) * 0.01
+    count = max(1, int(player_count))
+    health = int(base * 150 * count * 200)
+    reward = 12_000_000 if count >= 5 else 6_000_000
+    atk = int(base * 2.2) + 1
+    defense = int(base * 1.1) + 1
+    return health, reward, atk, defense
+
+
+def dark_damage(won: bool, atk: int, boss_def: int, health_max: int, rng) -> int:
+    """平定黑暗动乱单次伤害（对齐 WorldBossBattle）：
+    胜 = 血上限×16% + Harm(攻×0.85, Boss防)×10；败 = 血上限×4% + Harm×6。
+    """
+    base_harm = harm(int(atk * 0.85), boss_def, rng)[0]
+    if won:
+        return int(health_max * 0.16 + base_harm * 10)
+    return int(health_max * 0.04 + base_harm * 6)
+
+
+def shenpo_specs(seg: int) -> tuple[int, int, int, int]:
+    """锻神池 Boss 数值（对齐 pata DSC）：段数缩放。返回 (血, 攻, 防, 奖励)。"""
+    s = max(1, int(seg))
+    reward = min(400_000, 1200 * s)
+    return 100_000 * s, 250_000 * s, 200_000 * s, reward

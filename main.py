@@ -91,6 +91,13 @@ CMD_PLANT_END = "#结束采药"
 CMD_MINE = "#采矿"
 CMD_MINE_END = "#结束采矿"
 CMD_MAKE = "#制作"
+CMD_DARK_OPEN = "#开启黑暗动乱"
+CMD_DARK_CLOSE = "#关闭黑暗动乱"
+CMD_DARK_STATUS = "#禁区至尊状态"
+CMD_DARK_FIGHT = "#平定黑暗动乱"
+CMD_DARK_RANK = "#黑暗动乱帝战贡献榜"
+CMD_SHENPO = "#炼神魄"
+CMD_SHENPO_ALL = "#一键炼神魄"
 CMD_IMPERIAL = "#认主"
 CMD_IMPERIAL_MY = "#已认主"
 CMD_SECT_SECRET = "#宗门秘境"
@@ -440,6 +447,14 @@ class ZhutianPlugin(Star):
                 (f"{CMD_MINE} 分钟", "采矿（采矿师，30 分钟周期）"),
                 (CMD_MINE_END, "结束采矿结算"),
                 (f"{CMD_MAKE} 符名 数量", "制作符箓（符师，必成）"),
+            ]},
+            {"title": "黑暗动乱 · 神魄", "lines": [
+                (f"{CMD_DARK_OPEN} / {CMD_DARK_CLOSE}", "管理员开启/关闭黑暗动乱"),
+                (CMD_DARK_STATUS, "禁区至尊状态"),
+                (CMD_DARK_FIGHT, "平定黑暗动乱（12 境+，5 分钟 CD，败则气血归零）"),
+                (CMD_DARK_RANK, "帝战贡献榜"),
+                (CMD_SHENPO, "炼神魄（锻神池，2 分钟 CD，胜则神魄+5 血气+）"),
+                (CMD_SHENPO_ALL, "一键炼神魄（连破到败）"),
             ]},
             {"title": "图鉴查询", "lines": [
                 (f"{CMD_LOU} 类目 页码", "丹药楼/装备楼/功法楼/道具楼/仙宠楼/锻造材料楼/灵根图鉴等"),
@@ -1123,6 +1138,256 @@ class ZhutianPlugin(Star):
         elif left <= b["health_max"] * 0.25:
             lines.append("妖王已濒死，血条见底！")
         yield event.plain_result("\n".join(lines))
+
+    # ---- 黑暗动乱帝战（对齐原版 BOSS2） ----
+
+    async def _avg_atk(self) -> tuple[int, int]:
+        """全服玩家平均攻击（黑暗 Boss 血量基数）→ (avg_atk, 人数)。"""
+        uids = await self.db.all_player_uids()
+        atks = []
+        for uid in uids:
+            raw = await self.db.get_player(uid)
+            if raw:
+                p = PlayerDoc(**raw)
+                atks.append(self._stats(p).atk)
+        if not atks:
+            return 0, 0
+        return int(sum(atks) / len(atks)), len(atks)
+
+    @filter.command(CMD_DARK_OPEN, "开启黑暗动乱")
+    async def handle_dark_open(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not event.is_admin:
+            yield event.plain_result("唯有道祖级人物（管理员）才能撼动岁月，唤出禁区至尊。")
+            return
+        cur = await self.db.get_dark_boss()
+        if cur and cur["alive"]:
+            yield event.plain_result("各大禁区至尊早已出世。")
+            return
+        avg_atk, count = await self._avg_atk()
+        if count == 0:
+            yield event.plain_result("没有符合条件的玩家，黑暗动乱开启失败。")
+            return
+        health, reward, atk, defense = boss.dark_specs(avg_atk, count)
+        nxt_round = (cur["round"] + 1) if cur else 1
+        await self.db.init_dark_boss(nxt_round, health, reward, atk, defense)
+        yield event.plain_result(
+            f"禁区至尊提前出世，黑暗动乱开启！（第 {nxt_round} 轮）\n"
+            f"血量 {health}｜奖池 {reward}｜参战人数基准 {count}\n"
+            f"强者可「{CMD_DARK_FIGHT}」参与帝战。"
+        )
+
+    @filter.command(CMD_DARK_CLOSE, "关闭黑暗动乱")
+    async def handle_dark_close(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not event.is_admin:
+            yield event.plain_result("此权柄唯管理员可执。")
+            return
+        cur = await self.db.get_dark_boss()
+        if not cur or not cur["alive"]:
+            yield event.plain_result("黑暗动乱早已结束。")
+            return
+        await self.db.init_dark_boss(cur["round"], cur["health_max"], cur["reward"], cur["atk"], cur["defense"])
+        # 关闭 = 掐断时间线：直接置为死亡态（保留账本）
+        raw = await self.db.get_dark_boss()
+        if raw:
+            import sqlite3 as _s
+            conn = self.db.conn
+            await conn.execute(
+                "UPDATE dark_boss SET alive = 0, killed_at = ? WHERE id = 1", (time.time(),))
+            await conn.commit()
+        yield event.plain_result("如梦道祖睁眼望向诸天，将这段黑暗动乱的历史直接抹去。")
+
+    @filter.command(CMD_DARK_STATUS, "禁区至尊状态")
+    async def handle_dark_status(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        cur = await self.db.get_dark_boss()
+        if not cur or (not cur["alive"] and time.time() - cur["killed_at"] < 86400):
+            if cur and not cur["alive"]:
+                nxt = time.strftime("%H:%M", time.localtime(cur["killed_at"] + 86400))
+                yield event.plain_result(f"黑暗动乱刚被平定，至尊恢复元气中，下次开启约 {nxt}。")
+            else:
+                yield event.plain_result("黑暗动乱还未到来！")
+            return
+        if not cur:
+            yield event.plain_result("黑暗动乱还未到来！（管理员可「#开启黑暗动乱」）")
+            return
+        if not cur["alive"]:
+            yield event.plain_result("黑暗动乱刚被平定，可由管理员重新开启。")
+            return
+        ledger = await self.db.dark_ledger(cur["round"])
+        top = sorted(ledger.items(), key=lambda kv: -kv[1][1])[:5]
+        lines = [
+            f"--- 黑暗动乱 · 第 {cur['round']} 轮 ---",
+            f"禁区至尊血量：{cur['health']} / {cur['health_max']}",
+            f"奖池：{cur['reward']} 灵石",
+        ]
+        if top:
+            lines.append("贡献榜：" + "、".join(f"{n}({d})" for n, d in top))
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command(CMD_DARK_RANK, "黑暗动乱贡献榜")
+    async def handle_dark_rank(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        cur = await self.db.get_dark_boss()
+        if not cur:
+            yield event.plain_result("黑暗动乱还未到来！")
+            return
+        ledger = await self.db.dark_ledger(cur["round"])
+        if not ledger:
+            yield event.plain_result("尚无人参战。")
+            return
+        top = sorted(ledger.items(), key=lambda kv: -kv[1][1])[:10]
+        lines = [f"--- 帝战贡献榜 · 第 {cur['round']} 轮 ---"]
+        for i, (uid, (n, dmg)) in enumerate(top, 1):
+            lines.append(f"{i}. {n}：{dmg}")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command(CMD_DARK_FIGHT, "平定黑暗动乱")
+    async def handle_dark_fight(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        b = await self.db.get_dark_boss()
+        if not b or not b["alive"]:
+            yield event.plain_result("黑暗动乱还未到来！")
+            return
+        if not b["alive"] and time.time() - b["killed_at"] < 86400:
+            yield event.plain_result("黑暗动乱刚刚被平定，至尊还在恢复元气（24 小时冷却）。")
+            return
+        realm_id = max(0, doc.realm_index) + 1
+        if realm_id < 12:
+            yield event.plain_result("境界未至（需第 12 境），尚无资格参与帝战。")
+            return
+        now = time.time()
+        if now - float(doc.ext.get("dark_ts") or 0) < 300:
+            left = int(300 - (now - float(doc.ext["dark_ts"])))
+            yield event.plain_result(f"刚刚一战消耗了太多法力，{left} 秒后再战。")
+            return
+        hp_cur, hp_max = self._hp_pair(doc)
+        if hp_cur <= hp_max * 0.1:
+            yield event.plain_result("生命如风中残烛，先疗伤吧，别急着参战帝战。")
+            return
+        st = self._stats(doc)
+        name = doc.name or doc.uid[:8] + "…"
+        import random as _random
+        rng = _random.Random(f"{doc.uid}:dark:{b['round']}:{now}")
+        shadow = battle.Unit(f"禁区至尊·第{b['round']}轮", b["atk"], b["defense"], max(1, b["health_max"] // 50), 0.05)
+        me = battle.Unit(name, st.atk, st.defense, hp_cur, st.bao)
+        won, log, hp_left, _ = battle.spar_full(me, shadow, rng, max_rounds=20)
+        won_bool = won == 0
+        dmg = boss.dark_damage(won_bool, st.atk, b["defense"], b["health_max"], rng)
+        doc.ext["dark_ts"] = now
+        doc.ext["hp"] = hp_left if won_bool else 0  # 战败代价：血量清零（原版语义）
+        await self.db.save_player(doc.model_dump())
+        left = await self.db.damage_dark_boss(b["round"], doc.uid, name, dmg)
+        verdict = (
+            f"{name}击败了禁区至尊法身，撼动大道，造成伤害 {dmg}！"
+            if won_bool else
+            f"{name}被至尊法身击败，只留下了 {dmg} 伤害的血痕。"
+        )
+        lines = [verdict, f"至尊剩余血量：{max(0, left)} / {b['health_max']}"]
+        if not won_bool:
+            lines.append("你重伤倒地（气血归零），快「#疗伤」恢复。")
+        if left <= 0:
+            ledger = await self.db.dark_ledger(b["round"])
+            shares = boss.split_rewards(b["reward"], ledger, doc.uid)
+            paid = []
+            for uid, _n, share in shares:
+                raw2 = await self.db.get_player(uid)
+                if raw2:
+                    t = PlayerDoc(**raw2)
+                    t.stones += share
+                    await self.db.save_player(t.model_dump())
+                    paid.append(f"· {_n} +{share} 灵石")
+            lines.append(
+                f"【全服公告】黑暗动乱被 {name} 率先平定！成仙之路开启！\n"
+                f"奖池 {b['reward']} 灵石按贡献分配：\n" + "\n".join(paid[:8])
+            )
+        yield event.plain_result("\n".join(lines))
+
+    # ---- 锻神池 · 炼神魄（对齐原版 pata/DSC） ----
+
+    @filter.command(CMD_SHENPO, "炼神魄")
+    async def handle_shenpo(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        async for r in self._shenpo_round(event, one_shot=True):
+            yield r
+
+    @filter.command(CMD_SHENPO_ALL, "一键炼神魄")
+    async def handle_shenpo_all(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        async for r in self._shenpo_round(event, one_shot=False):
+            yield r
+
+    async def _shenpo_round(self, event: AstrMessageEvent, one_shot: bool):
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        seg = int(doc.ext.get("shenpo", 0) or 0)
+        if seg >= 50000:
+            yield event.plain_result("神魄已臻圆满（50000 段上限）。")
+            return
+        now = time.time()
+        if now - float(doc.ext.get("shenpo_ts") or 0) < 120:
+            left = int(120 - (now - float(doc.ext["shenpo_ts"])))
+            yield event.plain_result(f"锻神池灵力未复，{left} 秒后再来。")
+            return
+        st = self._stats(doc)
+        name = doc.name or doc.uid[:8] + "…"
+        import random as _random
+        rng = _random.Random(f"{doc.uid}:shenpo:{now}")
+        rounds_won = 0
+        seg_gain = 0
+        xueqi_gain = 0
+        exp_lost = 0
+        log: list[str] = []
+        while True:
+            seg_cur = seg + seg_gain
+            health, atk_b, def_b, reward = boss.shenpo_specs(max(1, seg_cur))
+            boss_hp = health
+            alive = True
+            # 逐回合：玩家每回合回满血（原版语义），看能否在倒下前炼化此段
+            while boss_hp > 0:
+                dmg_p = battle.harm(st.atk, def_b, rng)[0]
+                boss_hp -= dmg_p
+                dmg_b = battle.harm(atk_b, max(1, int(st.defense * 0.1)), rng)[0]
+                if dmg_b >= st.hp:
+                    alive = False
+                    break
+            doc.ext["shenpo_ts"] = now
+            if alive:
+                rounds_won += 1
+                seg_gain += 5
+                xueqi_gain += reward
+                log.append(f"第 {rounds_won} 段（{seg_cur}）：炼化成功，血气 +{reward}")
+                if one_shot:
+                    break
+            else:
+                exp_lost = reward * 2
+                log.append(f"第 {rounds_won + 1} 段（{seg_cur}）：锻神池中神魂受创，修为 -{exp_lost}")
+                break
+        d = doc.model_copy(deep=True)
+        d.ext["shenpo"] = min(50000, seg + seg_gain)
+        d.ext["xueqi"] = int(d.ext.get("xueqi", 0) or 0) + xueqi_gain
+        d.exp = max(0, d.exp - exp_lost)
+        await self.db.save_player(d.model_dump())
+        head = (
+            f"锻神池修行归来：神魄 {seg} → {d.ext['shenpo']} 段"
+            + (f"（连破 {rounds_won} 段）" if rounds_won > 1 else "")
+        )
+        tail = f"血气累计 +{xueqi_gain}" if xueqi_gain else f"修为 -{exp_lost}（参悟失败）"
+        yield event.plain_result(head + "\n" + "\n".join(log[-5:]) + f"\n{tail}")
 
     @filter.command(CMD_HEAL, "灵石疗伤")
     async def handle_heal(self, event: AstrMessageEvent):

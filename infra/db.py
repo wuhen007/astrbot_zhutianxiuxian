@@ -10,7 +10,7 @@ from typing import Any, AsyncIterator, Optional
 
 import aiosqlite
 
-LATEST_DB_VERSION = 7
+LATEST_DB_VERSION = 8
 
 
 def _shanghai_date_key(ts: float) -> str:
@@ -69,11 +69,12 @@ class DataBase:
                 await _v5_auction(self.conn)
                 await _v6_sect_score(self.conn)
                 await _v7_daily_tasks(self.conn)
+                await _v8_dark_boss(self.conn)
                 await self.conn.execute("INSERT INTO db_info (version) VALUES (?)", (LATEST_DB_VERSION,))
             return
 
         # 后续版本在此登记：MIGRATIONS[n] = upgrade_fn
-        MIGRATIONS = {2: _v2_inventory, 3: _v3_world_boss, 4: _v4_sects, 5: _v5_auction, 6: _v6_sect_score, 7: _v7_daily_tasks}
+        MIGRATIONS = {2: _v2_inventory, 3: _v3_world_boss, 4: _v4_sects, 5: _v5_auction, 6: _v6_sect_score, 7: _v7_daily_tasks, 8: _v8_dark_boss}
         for version in sorted(v for v in MIGRATIONS if v > current):
             async with self.transaction():
                 await MIGRATIONS[version](self.conn)
@@ -216,7 +217,77 @@ class DataBase:
         return cur.rowcount > 0
 
 
+    # ---- 黑暗动乱帝战 ----
+
+    async def get_dark_boss(self) -> Optional[dict[str, Any]]:
+        assert self.conn is not None
+        async with self.conn.execute(
+            "SELECT round, health, health_max, reward, atk, defense, alive, killed_at"
+            " FROM dark_boss WHERE id = 1"
+        ) as cur:
+            row = await cur.fetchone()
+            if not row:
+                return None
+            return {
+                "round": row[0], "health": row[1], "health_max": row[2],
+                "reward": row[3], "atk": row[4], "defense": row[5],
+                "alive": bool(row[6]), "killed_at": row[7],
+            }
+
+    async def init_dark_boss(self, round_no: int, health: int, reward: int,
+                             atk: int, defense: int) -> None:
+        assert self.conn is not None
+        owned = not self.conn.in_transaction
+        await self.conn.execute(
+            "INSERT INTO dark_boss (id, round, health, health_max, reward, atk, defense, alive, killed_at)"
+            " VALUES (1, ?, ?, ?, ?, ?, ?, 1, -1)"
+            " ON CONFLICT(id) DO UPDATE SET round = excluded.round, health = excluded.health,"
+            " health_max = excluded.health_max, reward = excluded.reward, atk = excluded.atk,"
+            " defense = excluded.defense, alive = 1, killed_at = -1",
+            (round_no, health, health, reward, atk, defense),
+        )
+        if owned:
+            await self.conn.commit()
+
+    async def damage_dark_boss(self, round_no: int, uid: str, name: str, dmg: int) -> int:
+        """对黑暗 Boss 扣血并记账。返回剩余血量（≤0 = 已被击杀）。"""
+        assert self.conn is not None
+        owned = not self.conn.in_transaction
+        await self.conn.execute(
+            "UPDATE dark_boss SET health = health - ? WHERE id = 1 AND alive = 1", (dmg,)
+        )
+        await self.conn.execute(
+            "INSERT INTO dark_ledger (boss_round, uid, name, damage) VALUES (?, ?, ?, ?)"
+            " ON CONFLICT(boss_round, uid) DO UPDATE SET"
+            " damage = damage + excluded.damage, name = excluded.name",
+            (round_no, uid, name, dmg),
+        )
+        async with self.conn.execute("SELECT health FROM dark_boss WHERE id = 1") as cur:
+            left = (await cur.fetchone())[0]
+        if left <= 0:
+            await self.conn.execute(
+                "UPDATE dark_boss SET health = 0, alive = 0, killed_at = ? WHERE id = 1",
+                (time.time(),),
+            )
+        if owned:
+            await self.conn.commit()
+        return left
+
+    async def dark_ledger(self, round_no: int) -> dict[str, tuple[str, int]]:
+        assert self.conn is not None
+        async with self.conn.execute(
+            "SELECT uid, name, damage FROM dark_ledger WHERE boss_round = ? ORDER BY damage DESC",
+            (round_no,),
+        ) as cur:
+            return {row[0]: (row[1], row[2]) for row in await cur.fetchall()}
+
+    async def all_player_uids(self) -> list[str]:
+        assert self.conn is not None
+        async with self.conn.execute("SELECT uid FROM players") as cur:
+            return [row[0] for row in await cur.fetchall()]
+
     # ---- 世界 Boss ----
+
 
     async def get_boss(self) -> Optional[dict[str, Any]]:
         assert self.conn is not None
@@ -487,4 +558,28 @@ async def _v7_daily_tasks(conn: aiosqlite.Connection) -> None:
         " date TEXT NOT NULL DEFAULT '',"        # 接取日期键（上海时区）
         " gained INTEGER NOT NULL DEFAULT 0,"    # 今日灵石获取滚动累计（提交时并入 j2）
         " spent INTEGER NOT NULL DEFAULT 0)"     # 今日灵石消耗滚动累计（提交时并入 j1）
+    )
+
+
+async def _v8_dark_boss(conn: aiosqlite.Connection) -> None:
+    """黑暗动乱帝战（对齐原版 BOSS2：单行状态 + 贡献账本，结构同 world_boss）。"""
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS dark_boss ("
+        " id INTEGER PRIMARY KEY CHECK (id = 1),"
+        " round INTEGER NOT NULL,"
+        " health INTEGER NOT NULL,"
+        " health_max INTEGER NOT NULL,"
+        " reward INTEGER NOT NULL,"
+        " atk INTEGER NOT NULL DEFAULT 0,"
+        " defense INTEGER NOT NULL DEFAULT 0,"
+        " alive INTEGER NOT NULL DEFAULT 1,"
+        " killed_at REAL NOT NULL DEFAULT -1)"
+    )
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS dark_ledger ("
+        " boss_round INTEGER NOT NULL,"
+        " uid TEXT NOT NULL,"
+        " name TEXT NOT NULL,"
+        " damage INTEGER NOT NULL,"
+        " PRIMARY KEY (boss_round, uid))"
     )
