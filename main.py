@@ -11,7 +11,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import alchemy, battle, boss, catalog, cultivate, equipment, items, linggen, occupation, pet, quest, secret, sect, shenjie, xiaoshijie, zhutian
+from .core import alchemy, battle, boss, catalog, cultivate, equipment, items, linggen, occupation, pet, quest, secret, sect, shenjie, universe, xiaoshijie, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -100,6 +100,14 @@ CMD_MIRROR_EXIT = "#退出投影"
 CMD_MIRROR_AVATAR = "#诸天化身"
 CMD_MIRROR_LOAD = "#装载化身"
 CMD_XT_USE = "#使用诸天镜"
+CMD_UNI = "#大宇宙"
+CMD_UNI_ASCEND = "#升格大宇宙"
+CMD_UNI_LAW = "#完善宇宙法则"
+CMD_UNI_AURA = "#炼化宇宙灵韵"
+CMD_UNI_FORGE = "#铸造宇宙秘境"
+CMD_UNI_LIST = "#宇宙秘境"
+CMD_UNI_ENTER = "#进入宇宙秘境"
+CMD_UNI_DERIVE = "#演绎宇宙秘境"
 CMD_DARK_OPEN = "#开启黑暗动乱"
 CMD_DARK_CLOSE = "#关闭黑暗动乱"
 CMD_DARK_STATUS = "#禁区至尊状态"
@@ -561,6 +569,15 @@ class ZhutianPlugin(Star):
                 ("#1 / #2 / #3 / #选择 序号", "投影剧情抉择（慧/勇/仁）"),
                 ("#探索友枝町/#探索见泷原/#探索骑士世界 地点", "世界探索（镜能 -1，掉材料/卡牌/印记）"),
                 (f"{CMD_MIRROR_AVATAR} / {CMD_MIRROR_LOAD} 名", "化身谱与装载（灵根替换+三维加成）"),
+            ]},
+            {"title": "大宇宙终局", "lines": [
+                (CMD_UNI_ASCEND, "小世界 5 级+金仙+潜力151 → 升格大宇宙"),
+                (f"{CMD_UNI} / #我的大宇宙", "宇宙面板（法则/灵韵/秘境）"),
+                (f"{CMD_UNI_LAW}", "完善法则（承载真仙→帝光仙王）"),
+                (f"{CMD_UNI_AURA} 物品*数量", "纳戒物品炼化灵韵"),
+                (f"{CMD_UNI_FORGE} 名*简介*守关者", "铸造宇宙秘境（100 灵韵）"),
+                (f"{CMD_UNI_DERIVE} 名", "演绎万物轮回生成秘境"),
+                (f"{CMD_UNI_ENTER} 名", "挑战秘境（8h CD，胜得灵韵）"),
             ]},
             {"title": "图鉴查询", "lines": [
                 (f"{CMD_LOU} 类目 页码", "丹药楼/装备楼/功法楼/道具楼/仙宠楼/锻造材料楼/灵根图鉴等"),
@@ -2909,6 +2926,231 @@ class ZhutianPlugin(Star):
                 d.ext["avatar_buff"] = buff
             else:
                 d.ext.pop("avatar_buff", None)
+            await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    # ---- 大宇宙（小世界升格终局玩法，对齐原版 Garden/GrandUniverse） ----
+
+    @filter.command(CMD_UNI, "大宇宙面板")
+    async def handle_uni(self, event: AstrMessageEvent):
+        async for r in self._uni_view(event):
+            yield r
+
+    @filter.command("#我的大宇宙", "大宇宙面板（别名）")
+    async def handle_uni_alias(self, event: AstrMessageEvent):
+        async for r in self._uni_view(event):
+            yield r
+
+    async def _uni_view(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        u = universe.system_of(doc)
+        if not u:
+            check = universe.can_ascend(doc)
+            tips = {
+                "world": "尚未开辟小世界（#开辟小世界）。",
+                "ascended": "",
+                "world-level": f"小世界演化 {check.get('current', 0)}/5 级（#演化小世界）。",
+                "authority": f"境界不足：需金仙 {check['required']} 境（当前 {check.get('current', 0)} 境）。",
+                "potential": f"仙道潜力不足：{check.get('current', 0):g}/{check['required']}（凝聚精血类丹药提升）。",
+            }
+            yield event.plain_result(
+                "尚未升格大宇宙。升格条件：\n· 小世界演化圆满（5 级）\n· 境界 ≥ 金仙\n· 仙道潜力 ≥ 151\n"
+                + tips.get(check["reason"], "")
+            )
+            return
+        stage = universe.LAW_STAGES[int(u.get("law", 0))]
+        lines = [
+            f"--- 大宇宙 · {u.get('name')} ---",
+            f"法则：{stage['name']}（承载上限 {stage['capacity']}）｜完善 {u.get('law_refined', 0)} 次",
+            f"宇宙灵韵：{u.get('aura', 0)}｜对外开放：{'是' if u.get('open') else '否'}",
+            f"秘境（{len(u.get('dungeons') or [])}/{universe.MAX_DUNGEONS}）："
+            + ("、".join(d["name"] for d in u.get("dungeons", [])) or "（无）"),
+        ]
+        nxt = universe.LAW_STAGES[int(u.get("law", 0)) + 1] if int(u.get("law", 0)) + 1 < len(universe.LAW_STAGES) else None
+        if nxt:
+            lines.append(f"下一阶【{nxt['name']}】需：潜力 {nxt['potential']}｜修为血气各 {nxt['cultivation']:,}｜灵韵 {nxt['aura']}")
+        lines.append("炼化：#炼化宇宙灵韵 物品*数量｜铸造：#铸造宇宙秘境 名*简介*守关者｜挑战：#进入宇宙秘境 名")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command(CMD_UNI_ASCEND, "升格大宇宙")
+    async def handle_uni_ascend(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, u = universe.ascend(doc, time.time())
+        if ok:
+            d = doc.model_copy(deep=True)
+            d.ext["universe"] = u
+            await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_UNI_LAW, "完善宇宙法则")
+    async def handle_uni_law(self, event: AstrMessageEvent, grade: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        u = universe.system_of(doc)
+        if not u:
+            yield event.plain_result("尚未升格大宇宙（#升格大宇宙）。")
+            return
+        ok, msg, u, consume = universe.refine_law(doc, u)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = doc.model_copy(deep=True)
+        d.ext["universe"] = u
+        d.exp = max(0, d.exp - consume["exp"])
+        d.ext["xueqi"] = max(0.0, float(d.ext.get("xueqi", 0) or 0) - consume["xueqi"])
+        d.ext["potential"] = float(d.ext.get("potential", 0) or 0) - consume["potential"]
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_UNI_AURA, "炼化宇宙灵韵")
+    async def handle_uni_aura(self, event: AstrMessageEvent, *, args: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        u = universe.system_of(doc)
+        if not u:
+            yield event.plain_result("尚未升格大宇宙（#升格大宇宙）。")
+            return
+        # 格式：物品名*数量 或 物品名 数量
+        raw = (args or "").strip().replace("＊", "*")
+        if "*" in raw:
+            name, _, qty_s = raw.partition("*")
+        else:
+            parts = raw.rsplit(" ", 1)
+            name, qty_s = (parts + ["1"])[:2] if parts[0] else ("", "1")
+        try:
+            qty = max(1, min(9999, int(qty_s.strip() or 1)))
+        except ValueError:
+            qty = 1
+        name = name.strip()
+        if not name:
+            yield event.plain_result("格式：#炼化宇宙灵韵 物品名*数量")
+            return
+        item = self.item_index.get(name)
+        if not item or item.get("class") not in universe.AURA_CATEGORIES:
+            yield event.plain_result(f"「{name}」不可炼化（类别限：{'、'.join(sorted(universe.AURA_CATEGORIES))}）。")
+            return
+        have = dict(await self.db.get_inventory(doc.uid)).get(name, 0)
+        if have < qty:
+            yield event.plain_result(f"纳戒中「{name}」不足：需 {qty}，当前 {have}。")
+            return
+        gain = universe.refine_aura(item, qty)
+        d = doc.model_copy(deep=True)
+        d.ext["universe"] = {**u, "aura": int(u.get("aura", 0)) + gain}
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            if not await self.db.remove_item(doc.uid, name, qty):
+                raise RuntimeError("INSUFFICIENT")
+        yield event.plain_result(f"炼化 {name} ×{qty} → 宇宙灵韵 +{gain}（当前 {d.ext['universe']['aura']}）。")
+
+    @filter.command(CMD_UNI_FORGE, "铸造宇宙秘境")
+    async def handle_uni_forge(self, event: AstrMessageEvent, *, args: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        u = universe.system_of(doc)
+        if not u:
+            yield event.plain_result("尚未升格大宇宙（#升格大宇宙）。")
+            return
+        parts = (args or "").split("*")
+        if len(parts) != 3 or not all(p.strip() for p in parts):
+            yield event.plain_result("格式：#铸造宇宙秘境 秘境名*简介*守关者名")
+            return
+        ok, msg, u = universe.forge_dungeon(u, parts[0].strip(), parts[1].strip(), parts[2].strip())
+        if ok:
+            d = doc.model_copy(deep=True)
+            d.ext["universe"] = u
+            await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_UNI_LIST, "宇宙秘境列表")
+    async def handle_uni_list(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        u = universe.system_of(doc)
+        ds = u.get("dungeons") or []
+        if not ds:
+            yield event.plain_result("大宇宙中尚无秘境（#铸造宇宙秘境 名*简介*守关者）。")
+            return
+        lines = [f"--- 宇宙秘境（{len(ds)}/{universe.MAX_DUNGEONS}）---"]
+        for d in ds:
+            lines.append(f"· {d['name']}｜守关者【{d['enemy']}】｜通关 {d.get('cleared', 0)} 次")
+            if d.get("intro"):
+                lines.append(f"  {d['intro']}")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command(CMD_UNI_ENTER, "进入宇宙秘境")
+    async def handle_uni_enter(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        u = universe.system_of(doc)
+        if not u:
+            yield event.plain_result("尚未升格大宇宙（#升格大宇宙）。")
+            return
+        st = self._stats(doc)
+        me = {"atk": st.atk, "defense": st.defense, "hp": st.hp, "bao": st.bao}
+        import random as _random
+        rng = _random.Random(f"{doc.uid}:ud:{time.time()}")
+        ok, msg, u, result = universe.enter_dungeon(doc, u, (name or "").strip(), time.time(), me, rng)
+        if ok:
+            d = doc.model_copy(deep=True)
+            d.ext["universe"] = u
+            if result:
+                d.ext["udungeon_ts"] = time.time()
+            await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_UNI_DERIVE, "演绎宇宙秘境")
+    async def handle_uni_derive(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        u = universe.system_of(doc)
+        if not u:
+            yield event.plain_result("尚未升格大宇宙（#升格大宇宙）。")
+            return
+        if not name:
+            yield event.plain_result("格式：#演绎宇宙秘境 秘境名")
+            return
+        import random as _random
+        rng = _random.Random(f"{doc.uid}:udv:{time.time()}")
+        ok, msg, u, consume = universe.derive_dungeon(u, name.strip(), rng)
+        if ok:
+            d = doc.model_copy(deep=True)
+            d.ext["universe"] = u
+            d.exp = max(0, d.exp - consume["exp"])
+            d.ext["xueqi"] = max(0.0, float(d.ext.get("xueqi", 0) or 0) - consume["xueqi"])
             await self.db.save_player(d.model_dump())
         yield event.plain_result(msg)
 

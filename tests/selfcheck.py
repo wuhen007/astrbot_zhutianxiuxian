@@ -573,6 +573,59 @@ async def main():
     loaded_doc.ext["avatar_buff"] = {"atk": 0.5, "def": 0.5, "hp": 0.5}
     print("zhutian mirror ok")
 
+    # 15k. 大宇宙：升格门槛→灵韵折算→铸造→挑战→演绎
+    from core import universe as uni_mod  # noqa: E402
+    u_doc = PlayerDoc(uid="u9", exp=100_000_000, ext={"potential": 200.0})
+    u_doc.realm_index = 46
+    assert uni_mod.can_ascend(u_doc)["reason"] == "world"  # 无小世界
+    u_doc.ext["xiaoshijie"] = {"name": "紫霄界", "level": 3}
+    assert uni_mod.can_ascend(u_doc)["reason"] == "world-level"
+    u_doc.ext["xiaoshijie"]["level"] = 5
+    ok, msg, u = uni_mod.ascend(u_doc, 1000.0)
+    assert ok and u["law"] == 0 and u["aura"] == 0, msg
+    # 灵韵折算：稀有度 8、售 1000 万 → 20+200+80=300
+    item = {"稀有度": 8, "出售价": 10_000_000}
+    assert uni_mod.aura_value(item) == 290, uni_mod.aura_value(item)  # 20+8×25+log10(1e7)×10=290
+    assert uni_mod.aura_value({"稀有度": 0, "出售价": 0}) == 20  # 无稀有度无售价 = 基础 20
+    # 法则完善：潜力不足 → 灵韵不足 → 补齐 → 升 1 阶
+    ok, msg, _, _ = uni_mod.refine_law(u_doc, dict(u))
+    assert not ok and "潜力不足" in msg, msg
+    u_doc.ext["potential"] = 900.0
+    ok, msg, _, _ = uni_mod.refine_law(u_doc, dict(u))
+    assert not ok and "灵韵不足" in msg, msg
+    u["aura"] = 290
+    ok, msg, u2, consume = uni_mod.refine_law(u_doc, dict(u))
+    assert ok and u2["law"] == 1 and consume["exp"] == 5_000_000, msg
+    # 铸造：灵韵不足 → 补齐 → 成功 → 重名拒绝
+    ok, msg, _ = uni_mod.forge_dungeon(dict(u2), "轮回古路", "试炼之地", "古道残魂")
+    assert not ok and "灵韵不足" in msg
+    u2["aura"] = 250
+    ok, msg, u3 = uni_mod.forge_dungeon(dict(u2), "轮回古路", "试炼之地", "古道残魂")
+    assert ok and len(u3["dungeons"]) == 1, msg
+    ok, msg, _ = uni_mod.forge_dungeon(dict(u3), "轮回古路", "x", "y")
+    assert not ok and "同名" in msg
+    # 挑战：战胜 → 灵韵入账、通关数+1
+    u_doc.ext["universe"] = dict(u3)
+    from core.player import PlayerDoc as _PD
+    fighter = _PD(uid="u9", exp=1)
+    fighter.realm_index = 50
+    ok, msg, u4, result = uni_mod.enter_dungeon(
+        fighter, dict(u3), "轮回古路", 100_000.0,
+        {"atk": 9_999_999, "defense": 9_999_999, "hp": 999_999_999, "bao": 0.5},
+        _random.Random(3))
+    assert ok and result["won"] and u4["dungeons"][0]["cleared"] == 1, msg
+    assert u4["aura"] > u3["aura"]  # 战胜得灵韵
+    # CD 拦截
+    u_doc.ext["udungeon_ts"] = 100_000.0
+    ok, msg, _, _ = uni_mod.enter_dungeon(u_doc, dict(u4), "轮回古路", 100_100.0,
+                                          {"atk": 1, "defense": 1, "hp": 1, "bao": 0}, _random.Random(4))
+    assert not ok and "小时" in msg
+    # 演绎
+    u4["aura"] = 2000
+    ok, msg, u5, consume = uni_mod.derive_dungeon(dict(u4), "寂灭星海", _random.Random(5))
+    assert ok and len(u5["dungeons"]) == 2 and consume["exp"] == 10_000_000, msg
+    print("grand universe ok")
+
     # 15i. 师徒/道侣/封禁（纯存档语义验证）
     master = PlayerDoc(uid="m1", ext={"recruit": True})
     disciple = PlayerDoc(uid="d1")
