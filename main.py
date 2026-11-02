@@ -11,7 +11,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, battle, boss, catalog, cultivate, dibing, equipment, items, linggen, occupation, pet, quest, secret, sect, shenjie, universe, world_deep, xiaoshijie, zhutian
+from .core import adventure, alchemy, battle, boss, catalog, cultivate, dibing, equipment, items, linggen, occupation, pet, quest, secret, sect, shenjie, universe, wenxian, world_deep, xiaoshijie, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -129,6 +129,13 @@ CMD_SAKURA_ADV = "#小樱进阶"
 CMD_DECADE_DECK = "#编组骑士卡片"
 CMD_FINAL_RIDE = "#最终攻击驾驭"
 CMD_REDEEM = "#救赎"
+CMD_WXL = "#问仙令"
+CMD_WXL_CLUE = "#重金求取问仙线索"
+CMD_WXL_EXPLORE = "#探索问仙线索"
+CMD_WXL_ACT = "#激活问仙令"
+CMD_WXL_DAILY = "#问仙令任务"
+CMD_WXL_CLAIM = "#领取问仙令"
+CMD_WXL_WEEKLY = "#领取每周任务"
 CMD_DARK_OPEN = "#开启黑暗动乱"
 CMD_DARK_CLOSE = "#关闭黑暗动乱"
 CMD_DARK_STATUS = "#禁区至尊状态"
@@ -629,6 +636,15 @@ class ZhutianPlugin(Star):
                 (f"{CMD_RAID} 地点", "洗劫（强化费+战斗，2h CD，魔道值+）"),
                 (f"{CMD_GIFT} @道侣", "赠百合花篮（亲密度 +10）"),
             ]},
+            {"title": "问仙令", "lines": [
+                (CMD_WXL, "通行证面板（激活后：等级/经验/任务）"),
+                (CMD_WXL_CLUE, "求取问仙线索（300 万灵石）"),
+                (CMD_WXL_EXPLORE, "循迹线索（3 处）"),
+                (CMD_WXL_ACT, "激活问仙令"),
+                (CMD_WXL_DAILY, "领取已完成的每日任务（每项 500 经验）"),
+                (f"{CMD_WXL_CLAIM} 等级", "领取升级奖励"),
+                (CMD_WXL_WEEKLY, "领取每周任务（3000 经验）"),
+            ]},
             {"title": "诸天世界深度", "lines": [
                 (f"{CMD_CLOW_DECK} 风*翔*影", "库洛牌编组（无参查看 4 组合）"),
                 (CMD_MOON_TRIAL, "月之审判（10 牌+境界，两次失败保底）"),
@@ -855,6 +871,7 @@ class ZhutianPlugin(Star):
             int(self._val("CULTIVATE_MAX_MINUTES", 7200)),
         )
         if ok:
+            self._wxl_track(d, "seclusion")  # 问仙令每日任务
             await self.db.save_player(d.model_dump())
         yield event.plain_result(msg)
 
@@ -1350,6 +1367,7 @@ class ZhutianPlugin(Star):
 
         doc.ext["boss_ts"] = now
         doc.ext["hp"] = hp_left
+        self._wxl_track(doc, "raid")  # 问仙令每日任务
         await self.db.save_player(doc.model_dump())
         left = await self.db.damage_boss(b["round"], doc.uid, name, dmg_to_boss)
 
@@ -3839,6 +3857,154 @@ class ZhutianPlugin(Star):
             await self.db.save_player(self._zt_save(doc, zt2).model_dump())
         yield event.plain_result(msg)
 
+    # ---- B3：问仙令通行证 ----
+
+    def _wxl_track(self, doc: PlayerDoc, kind: str) -> None:
+        """任务进度埋桩（写回 doc.ext，调用方负责落盘）。"""
+        w = wenxian.system_of(doc)
+        if not w.get("active"):
+            return
+        wenxian.track(w, kind)
+        doc.ext["wenxian"] = w
+
+    @filter.command(CMD_WXL, "问仙令面板")
+    async def handle_wxl(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = wenxian.system_of(doc)
+        async for r in self._smart(event, wenxian.panel(w, time.time()), "问仙令"):
+            yield r
+
+    @filter.command(CMD_WXL_CLUE, "求取问仙线索")
+    async def handle_wxl_clue(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = wenxian.system_of(doc)
+        ok, msg, w2 = wenxian.buy_clue(w, doc.stones)
+        if ok:
+            d = doc.model_copy(deep=True)
+            d.stones -= wenxian.CLUE_COST
+            d.ext["wenxian"] = w2
+            await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_WXL_EXPLORE, "探索问仙线索")
+    async def handle_wxl_explore(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = wenxian.system_of(doc)
+        ok, msg, w2 = wenxian.explore_clue(w)
+        if ok:
+            d = doc.model_copy(deep=True)
+            d.ext["wenxian"] = w2
+            await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_WXL_ACT, "激活问仙令")
+    async def handle_wxl_act(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = wenxian.system_of(doc)
+        ok, msg, w2 = wenxian.activate(w, doc.realm_index)
+        if ok:
+            d = doc.model_copy(deep=True)
+            d.ext["wenxian"] = w2
+            await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_WXL_DAILY, "领取问仙令每日任务")
+    async def handle_wxl_daily(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = wenxian.system_of(doc)
+        if not w.get("active"):
+            yield event.plain_result("问仙令未激活（#问仙令 查看流程）。")
+            return
+        now = time.time()
+        msgs: list[str] = []
+        total = 0
+        for key in wenxian.DAILY_GOALS:
+            ok, m, w = wenxian.claim_daily(w, key, now)
+            if ok:
+                msgs.append(m)
+                total += 1
+        if not total:
+            yield event.plain_result(msgs[0] if msgs else "暂无已完成的每日任务（进度见 #问仙令）。")
+            return
+        d = doc.model_copy(deep=True)
+        d.ext["wenxian"] = w
+        await self.db.save_player(d.model_dump())
+        async for r in self._smart(event, "\n".join(msgs), "问仙令 · 每日"):
+            yield r
+
+    @filter.command(CMD_WXL_CLAIM, "领取问仙令等级奖励")
+    async def handle_wxl_claim(self, event: AstrMessageEvent, level: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = wenxian.system_of(doc)
+        try:
+            lv = int(level)
+        except (TypeError, ValueError):
+            lv = 0
+        if lv <= 0:
+            yield event.plain_result("格式：#领取问仙令 等级（如 #领取问仙令 3）")
+            return
+        ok, msg, w2, r = wenxian.claim_level(w, lv)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = doc.model_copy(deep=True)
+        d.ext["wenxian"] = w2
+        d.exp += r["exp_gain"]
+        d.stones += r["stones"]
+        d.ext["xueqi"] = float(d.ext.get("xueqi", 0) or 0) + r["xueqi"]
+        if r["potential"]:
+            d.ext["potential"] = float(d.ext.get("potential", 0) or 0) + r["potential"]
+        await self.db.save_player(d.model_dump())
+        async for rr in self._smart(event, msg, "问仙令 · 领奖"):
+            yield rr
+
+    @filter.command(CMD_WXL_WEEKLY, "领取每周任务")
+    async def handle_wxl_weekly(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = wenxian.system_of(doc)
+        ok, msg, w2 = wenxian.claim_weekly(w, time.time())
+        if ok:
+            d = doc.model_copy(deep=True)
+            d.ext["wenxian"] = w2
+            await self.db.save_player(d.model_dump())
+        async for r in self._smart(event, msg, "问仙令 · 周任务"):
+            yield r
+
     @filter.command(CMD_HEAL, "灵石疗伤")
     async def handle_heal(self, event: AstrMessageEvent):
         if not self._allowed(event):
@@ -4602,6 +4768,7 @@ class ZhutianPlugin(Star):
                 gain[f"{tier}{recipe['name']}"] = n
                 parts.append(f"{tier}{recipe['name']} ×{n}")
         async with self.db.transaction():
+            self._wxl_track(d, "alchemy")  # 问仙令每日任务
             await self.db.save_player(d.model_dump())
             for name, n in consume.items():
                 if not await self.db.remove_item(doc.uid, name, n):

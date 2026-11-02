@@ -753,6 +753,50 @@ async def main():
     assert ok and zt_r["hopes"] == 20, (msg, zt_r)
     print("world deep ok")
 
+    # 15o. 问仙令：线索→激活→任务→升级→领奖
+    from core import wenxian as wx_mod  # noqa: E402
+    wdoc = PlayerDoc(uid="wx", exp=1)
+    w = wx_mod.system_of(wdoc)
+    ok, msg, _ = wx_mod.explore_clue(w)
+    assert not ok  # 无线索
+    ok, msg, _ = wx_mod.buy_clue(w, 100)
+    assert not ok and "灵石" in msg
+    ok, msg, w = wx_mod.buy_clue(w, 10_000_000)
+    assert ok and w["clue"]
+    for _ in range(3):
+        ok, msg, w = wx_mod.explore_clue(w)
+        assert ok, msg
+    ok, msg, _ = wx_mod.activate(w, 3)
+    assert not ok and "境界" in msg
+    ok, msg, w = wx_mod.activate(w, 10)
+    assert ok and w["active"] and w["level"] == 1, msg
+    # 任务埋桩 + 领取（每日 3 项各 500；统一用真实时间，避免跨日 key 重置）
+    now = wx_mod.time.time()
+    wx_mod.track(w, "seclusion", 5, now)
+    wx_mod.track(w, "raid", 5, now)
+    for k in ("seclusion", "raid"):
+        ok, msg, w = wx_mod.claim_daily(w, k, now)
+        assert ok, msg
+    ok, msg, w = wx_mod.claim_daily(w, "seclusion", now)
+    assert not ok and "已领" in msg
+    # 2 项 1000 经验 → 升到 2 级
+    assert w["level"] == 2 and w["exp"] == 0, (w["level"], w["exp"])
+    # 领奖：1 级可领，重复拒
+    ok, msg, w, r = wx_mod.claim_level(w, 1)
+    assert ok and r["exp_gain"] > 0, msg
+    ok, msg, _, _ = wx_mod.claim_level(w, 1)
+    assert not ok and "已领" in msg
+    ok, msg, _, _ = wx_mod.claim_level(w, 5)
+    assert not ok and "已达到" in msg
+    # 每日期数 → 每周 daily 进度
+    assert wx_mod.weekly_of(w, now)["prog"]["daily"] == 1
+    # 50 级节点奖励潜力
+    assert wx_mod.level_reward(50)["potential"] == 80
+    # 面板渲染文本
+    text = wx_mod.panel(w, now)
+    assert "每日任务" in text and "1500" not in text
+    print("wenxian ok")
+
     # 15i. 师徒/道侣/封禁（纯存档语义验证）
     master = PlayerDoc(uid="m1", ext={"recruit": True})
     disciple = PlayerDoc(uid="d1")
