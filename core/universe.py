@@ -76,13 +76,21 @@ def ascend(doc: Mapping, now: float) -> tuple[bool, str, dict]:
     """小世界升格大宇宙。"""
     check = can_ascend(doc)
     if not check["ok"]:
-        why = {
-            "world": "你尚未开辟小世界（#开辟小世界）。",
-            "ascended": "你的小世界早已升格为大宇宙。",
-            "world-level": f"小世界尚未演化圆满（当前 {check.get('current', 0)}/5 级）。",
-            "authority": f"境界不足：需金仙（{check['required']} 境），当前 {check.get('current', 0)} 境。",
-            "potential": f"仙道潜力不足：当前 {check.get('current', 0):g}，需 {check['required']}（凝聚精血可提升）。",
-        }.get(check["reason"], "条件未满足。")
+        reason = check["reason"]
+        cur = check.get("current", 0)
+        req = check.get("required", 0)
+        if reason == "world":
+            why = "你尚未开辟小世界（#开辟小世界）。"
+        elif reason == "ascended":
+            why = "你的小世界早已升格为大宇宙。"
+        elif reason == "world-level":
+            why = f"小世界尚未演化圆满（当前 {cur}/5 级）。"
+        elif reason == "authority":
+            why = f"境界不足：需金仙（{req} 境），当前 {cur} 境。"
+        elif reason == "potential":
+            why = f"仙道潜力不足：当前 {cur:g}，需 {req}（凝聚精血可提升）。"
+        else:
+            why = "条件未满足。"
         return False, why, {}
     world = doc.ext.get("xiaoshijie") or {}
     u = {
