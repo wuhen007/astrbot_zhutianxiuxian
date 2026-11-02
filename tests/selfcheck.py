@@ -700,6 +700,59 @@ async def main():
     assert card["type"] == "帝兵" and card["atk"] == w3["atk"] and card["品阶"] == "通灵"
     print("dibing ok")
 
+    # 15n. 世界深度：组合/月之审判/试炼/帝骑
+    from core import world_deep as wd_mod  # noqa: E402
+    assert wd_mod.combo_of(["风", "翔", "影"]) == "疾风封印"
+    assert wd_mod.combo_of(["风", "翔"]) == ""
+    zt_w = {"clow_cards": ["风", "翔", "影", "光", "暗", "盾", "镜", "梦", "时", "火"],
+            "rider_cards": ["空我", "龙骑", "Faiz"], "tier": 3, "hopes": 30}
+    ok, msg, s = wd_mod.set_clow_deck(zt_w, ["风", "翔", "影"])
+    assert ok and s["combo"] == "疾风封印", msg
+    ok, msg, _ = wd_mod.set_clow_deck(zt_w, ["风", "翔", "泰"])
+    assert not ok and "尚未封印" in msg
+    ok, msg, _ = wd_mod.set_clow_deck(zt_w, ["风", "翔"])
+    assert not ok and "3 张" in msg
+    zt_w["sakura"] = s
+    # 月之审判：门槛（牌够10、境界够）→ 走流程（两次失败后必成）
+    ok, msg, s2 = wd_mod.moon_trial(zt_w, 40, _random.Random(1))
+    assert ok and ("成功率" in msg or "必定" in msg), msg
+    zt_w["sakura"] = s2
+    for _ in range(3):
+        ok, msg, s2 = wd_mod.moon_trial(zt_w, 40, _random.Random(9))
+        zt_w["sakura"] = s2
+        if s2["moon_pass"]:
+            break
+    assert zt_w["sakura"]["moon_pass"], "三次内应有保底通过"
+    assert zt_w["sakura"]["prof"] >= 30
+    # 梦之试炼：52 牌不足 → 拒
+    ok, msg, _ = wd_mod.dream_trial(zt_w, 40)
+    assert not ok and "52" in msg
+    zt_w["clow_cards"] = [f"牌{i}" for i in range(52)] + ["镜"]
+    zt_w["sakura"]["prof"] = 100
+    ok, msg, s3 = wd_mod.dream_trial(zt_w, 40)
+    assert ok, msg  # 第一重（镜牌在）
+    zt_w["sakura"] = s3
+    ok, msg, s3 = wd_mod.dream_trial(zt_w, 40)
+    assert ok, msg
+    zt_w["sakura"] = s3
+    ok, msg, s3 = wd_mod.dream_trial(zt_w, 40)
+    assert ok and s3["dream_pass"] and s3["wand"] == "梦之杖", msg
+    # 帝骑：编组/融合度/最终驾驭
+    zt_w["decade"] = {"deck": [], "fusion": 50, "explore": 0, "resonance": 0}
+    ok, msg, d = wd_mod.set_decade_deck(zt_w, ["空我", "龙骑", "Faiz"])
+    assert ok and len(d["deck"]) == 3, msg
+    ok, msg, _ = wd_mod.final_ride({"decade": d, "tier": 3}, 3)
+    assert not ok and "融合度" in msg
+    d["fusion"] = 80
+    ok, msg, d2 = wd_mod.final_ride({"decade": d, "tier": 3}, 3)
+    assert ok and d2["fusion"] == 10, msg
+    # 救赎：非鹿目圆化身拒；装了且碎片够 → 扣碎片
+    ok, msg, _ = wd_mod.redeem({"hopes": 30}, "木之本樱", True)
+    assert not ok and "鹿目圆" in msg
+    ok, msg, zt_r = wd_mod.redeem({"hopes": 30}, "鹿目圆", True)
+    assert ok and zt_r["hopes"] == 20, (msg, zt_r)
+    print("world deep ok")
+
     # 15i. 师徒/道侣/封禁（纯存档语义验证）
     master = PlayerDoc(uid="m1", ext={"recruit": True})
     disciple = PlayerDoc(uid="d1")

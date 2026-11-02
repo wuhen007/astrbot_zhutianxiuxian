@@ -11,7 +11,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, battle, boss, catalog, cultivate, dibing, equipment, items, linggen, occupation, pet, quest, secret, sect, shenjie, universe, xiaoshijie, zhutian
+from .core import adventure, alchemy, battle, boss, catalog, cultivate, dibing, equipment, items, linggen, occupation, pet, quest, secret, sect, shenjie, universe, world_deep, xiaoshijie, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -122,6 +122,13 @@ CMD_DB_TRIB = "#雷劫洗礼帝兵"
 CMD_DB_NURTURE = "#蕴养帝兵"
 CMD_DB_RENAME = "#为帝兵更名"
 CMD_DB_MY = "#我的帝兵"
+CMD_CLOW_DECK = "#库洛牌组合"
+CMD_MOON_TRIAL = "#月之审判"
+CMD_DREAM_TRIAL = "#梦之试炼"
+CMD_SAKURA_ADV = "#小樱进阶"
+CMD_DECADE_DECK = "#编组骑士卡片"
+CMD_FINAL_RIDE = "#最终攻击驾驭"
+CMD_REDEEM = "#救赎"
 CMD_DARK_OPEN = "#开启黑暗动乱"
 CMD_DARK_CLOSE = "#关闭黑暗动乱"
 CMD_DARK_STATUS = "#禁区至尊状态"
@@ -621,6 +628,15 @@ class ZhutianPlugin(Star):
                 (f"{CMD_RAID_SPY} 地点", "花 0.3×价格打探收获"),
                 (f"{CMD_RAID} 地点", "洗劫（强化费+战斗，2h CD，魔道值+）"),
                 (f"{CMD_GIFT} @道侣", "赠百合花篮（亲密度 +10）"),
+            ]},
+            {"title": "诸天世界深度", "lines": [
+                (f"{CMD_CLOW_DECK} 风*翔*影", "库洛牌编组（无参查看 4 组合）"),
+                (CMD_MOON_TRIAL, "月之审判（10 牌+境界，两次失败保底）"),
+                (CMD_DREAM_TRIAL, "梦之试炼（52 牌+熟练度 100 三重梦境）"),
+                (CMD_SAKURA_ADV, "小樱进阶（星之杖→梦之杖）"),
+                (f"{CMD_DECADE_DECK} 空我*龙骑*Faiz", "骑士卡编组"),
+                (CMD_FINAL_RIDE, "最终攻击驾驭（镜3阶+卡组+融合度60）"),
+                (f"{CMD_REDEEM} / {CMD_REDEEM} @道友", "救赎（鹿目圆化身+希望碎片）"),
             ]},
             {"title": "诸天镜主线", "lines": [
                 ("#使用诸天镜", "绑定诸天镜（天机阁 2 仙兽玉兑换）"),
@@ -2952,6 +2968,16 @@ class ZhutianPlugin(Star):
         rng = _random.Random(f"{doc.uid}:explore:{time.time()}")
         ok, msg, zt = zhutian.explore(doc, world, place.strip(), rng)
         if ok:
+            # B2 联动：友枝町探索积累魔法熟练度；骑士世界积累融合度/探索度
+            if world == "魔卡少女樱":
+                s = world_deep.sakura_of(zt)
+                s["prof"] = int(s["prof"]) + 2
+                zt["sakura"] = s
+            elif world == "假面骑士帝骑":
+                dd = world_deep.decade_of(zt)
+                dd["fusion"] = min(world_deep.FUSION_MAX, int(dd["fusion"]) + 8)
+                dd["explore"] = min(100, int(dd["explore"]) + 8)
+                zt["decade"] = dd
             await self.db.save_player(self._zt_save(doc, zt).model_dump())
         yield event.plain_result(msg)
 
@@ -3650,6 +3676,167 @@ class ZhutianPlugin(Star):
             return
         d = self._db_sync(doc, w2)
         await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    # ---- B2：诸天世界深度（库洛牌/月之审判/梦之试炼/帝骑/救赎） ----
+
+    def _zt_load(self, doc: PlayerDoc) -> tuple[dict, str | None]:
+        zt = zhutian.system_of(doc)
+        if not zt.get("bound"):
+            return zt, "尚未绑定诸天镜（#使用诸天镜）。"
+        return zt, None
+
+    @filter.command(CMD_CLOW_DECK, "库洛牌编组")
+    async def handle_clow_deck(self, event: AstrMessageEvent, *, args: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        zt, err2 = self._zt_load(doc)
+        if err2:
+            yield event.plain_result(err2)
+            return
+        raw = (args or "").strip()
+        if not raw:
+            owned = zt.get("clow_cards") or []
+            combos = "\n".join(f"· {k}：{'、'.join(v)}" for k, v in world_deep.CARD_COMBOS.items())
+            sel = world_deep.sakura_of(zt)
+            async for r in self._smart(
+                event,
+                f"--- 库洛牌组合 ---\n{combos}\n\n"
+                f"已封印 {len(owned)} 张：{'、'.join(owned) or '（无）'}\n"
+                f"当前卡组：{'、'.join(sel['deck']) or '（未编组）'}｜组合：{sel['combo'] or '无'}\n"
+                f"编组：#库洛牌组合 风*翔*影",
+                "库洛牌组合",
+            ):
+                yield r
+            return
+        cards = [c.strip() for c in raw.replace("、", "*").replace(" ", "*").split("*") if c.strip()]
+        s = world_deep.sakura_of(zt)
+        ok, msg, s2 = world_deep.set_clow_deck(zt, cards)
+        if ok:
+            zt["sakura"] = s2
+            await self.db.save_player(self._zt_save(doc, zt).model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_MOON_TRIAL, "月之审判")
+    async def handle_moon_trial(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        zt, err2 = self._zt_load(doc)
+        if err2:
+            yield event.plain_result(err2)
+            return
+        import random as _random
+        rng = _random.Random(f"{doc.uid}:moon:{time.time()}")
+        ok, msg, s = world_deep.moon_trial(zt, doc.realm_index, rng)
+        if ok:
+            zt["sakura"] = s
+            d = self._zt_save(doc, zt)
+            if int(s["moon_tries"]) > 0 and not s["moon_pass"]:
+                d.exp = int(d.exp * 0.9)  # 失败罚修为 10%
+            await self.db.save_player(d.model_dump())
+        async for r in self._smart(event, msg, "月之审判"):
+            yield r
+
+    @filter.command(CMD_DREAM_TRIAL, "梦之试炼")
+    async def handle_dream_trial(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        zt, err2 = self._zt_load(doc)
+        if err2:
+            yield event.plain_result(err2)
+            return
+        ok, msg, s = world_deep.dream_trial(zt, doc.realm_index)
+        if ok:
+            zt["sakura"] = s
+            await self.db.save_player(self._zt_save(doc, zt).model_dump())
+        async for r in self._smart(event, msg, "梦之试炼"):
+            yield r
+
+    @filter.command(CMD_SAKURA_ADV, "小樱进阶")
+    async def handle_sakura_adv(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        zt, err2 = self._zt_load(doc)
+        if err2:
+            yield event.plain_result(err2)
+            return
+        ok, msg, s = world_deep.advance_sakura(zt, doc.realm_index)
+        if ok:
+            zt["sakura"] = s
+            await self.db.save_player(self._zt_save(doc, zt).model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_DECADE_DECK, "编组骑士卡片")
+    async def handle_decade_deck(self, event: AstrMessageEvent, *, args: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        zt, err2 = self._zt_load(doc)
+        if err2:
+            yield event.plain_result(err2)
+            return
+        raw = (args or "").strip().replace("、", "*").replace(" ", "*")
+        cards = [c.strip() for c in raw.split("*") if c.strip()]
+        ok, msg, d2 = world_deep.set_decade_deck(zt, cards)
+        if ok:
+            zt["decade"] = d2
+            await self.db.save_player(self._zt_save(doc, zt).model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_FINAL_RIDE, "最终攻击驾驭")
+    async def handle_final_ride(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        zt, err2 = self._zt_load(doc)
+        if err2:
+            yield event.plain_result(err2)
+            return
+        ok, msg, d2 = world_deep.final_ride(zt, int(zt.get("tier", 0)))
+        if ok:
+            zt["decade"] = d2
+            await self.db.save_player(self._zt_save(doc, zt).model_dump())
+        async for r in self._smart(event, msg, "最终攻击驾驭"):
+            yield r
+
+    @filter.command(CMD_REDEEM, "救赎")
+    async def handle_redeem(self, event: AstrMessageEvent, *, args: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        zt, err2 = self._zt_load(doc)
+        if err2:
+            yield event.plain_result(err2)
+            return
+        is_self = not (args or "").strip().lstrip("@").strip()
+        ok, msg, zt2 = world_deep.redeem(zt, str(zt.get("current") or ""), is_self)
+        if ok:
+            await self.db.save_player(self._zt_save(doc, zt2).model_dump())
         yield event.plain_result(msg)
 
     @filter.command(CMD_HEAL, "灵石疗伤")
