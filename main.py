@@ -2951,7 +2951,12 @@ class ZhutianPlugin(Star):
         u = universe.system_of(doc)
         if not u:
             check = universe.can_ascend(doc)
-            reason = check["reason"]
+            if check.get("ok"):
+                yield event.plain_result(
+                    "升格条件已全部满足！发送「#升格大宇宙」即可开辟大宇宙。"
+                )
+                return
+            reason = check.get("reason", "")
             cur = check.get("current", 0)
             req = check.get("required", 0)
             if reason == "world":
