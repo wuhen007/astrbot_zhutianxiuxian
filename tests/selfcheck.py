@@ -1181,6 +1181,87 @@ async def main():
     assert (await db.active_raid_of("raid_u3")) is None
     print("raid ok")
 
+    # 16d. 无尽劫境：开局 / 星图 / 推进 / 能力 / 劫后 / 通关 / 战败 / 排名
+    from core import endless as end_mod  # noqa: E402
+
+    content_e = store.table("无尽劫境")
+    assert len(content_e["worlds"]) == 6 and len(content_e["abilities"]) == 57, "劫境数据不完整"
+    c1 = end_mod.celestial_of(1_800_000_000)
+    assert c1["id"] == end_mod.celestial_of(1_800_000_100)["id"], "天象应当每日固定"
+
+    base_e = {"atk": 1_000_000, "def": 800_000, "hp": 2_000_000, "bao": 0.1}
+    edoc = PlayerDoc(uid="endless", name="劫客", realm_index=20)
+    st = end_mod.state_of(edoc)
+    ok, msg, st = end_mod.start_run(st, edoc, base_e, content_e, "乱古界海", 1_800_000_000)
+    assert ok and st["active"] and len(st["starmap"]) == 3, msg
+    assert st["hp"] == base_e["hp"] and st["hp_max"] == base_e["hp"]
+    assert end_mod.select_node(st, 1)[0]
+    st = end_mod.select_node(st, 1)[2]
+    st, res = end_mod.resolve_node(st, base_e, content_e, 1_800_000_000, _random.Random(7))
+    assert res["ok"] and res["layer"] == 1 and st["layer"] == 1
+    assert st["phase"] in ("choice", "ready"), st["phase"]
+    if st["phase"] == "choice":
+        ok, _, st = end_mod.pick_ability(st, 1, content_e)
+        assert ok and len(st["abilities"]) == 1
+
+    for _ in range(2):
+        if st["phase"] == "choice":
+            st = end_mod.pick_ability(st, 1, content_e)[2]
+        elif st["phase"] == "checkpoint":
+            st = end_mod.apply_checkpoint(st, 1, content_e, base_e, _random.Random(1), 1_800_000_000)[2]
+        st = end_mod.select_node(st, 1)[2]
+        st, _res = end_mod.resolve_node(st, base_e, content_e, 1_800_000_000, _random.Random(8))
+    assert st["layer"] == 3 and st["phase"] == "checkpoint", (st["layer"], st["phase"])
+    ok, msg, st = end_mod.apply_checkpoint(st, 1, content_e, base_e, _random.Random(2), 1_800_000_000)
+    assert ok and st["phase"] == "ready", msg
+
+    # 强属性跑完 10 层，验证通关/解锁/道痕入账
+    base_win = {"atk": 200_000_000, "def": 5_000_000, "hp": 3_000_000_000, "bao": 1.0}
+    st2 = end_mod.state_of(PlayerDoc(uid="endless2", name="劫客二", realm_index=30))
+    ok, msg, st2 = end_mod.start_run(
+        st2, PlayerDoc(uid="endless2", name="劫客二", realm_index=30),
+        base_win, content_e, "葬帝星路", 1_800_000_000,
+    )
+    assert ok, msg
+    guard = 0
+    while st2["active"] and guard < 40:
+        guard += 1
+        if st2["phase"] == "choice":
+            st2 = end_mod.pick_ability(st2, 1, content_e)[2]
+        elif st2["phase"] == "checkpoint":
+            st2 = end_mod.apply_checkpoint(
+                st2, 3, content_e, base_win, _random.Random(3), 1_800_000_000)[2]
+        elif st2["phase"] == "ready":
+            st2 = end_mod.select_node(st2, 1)[2]
+            st2, _r = end_mod.resolve_node(
+                st2, base_win, content_e, 1_800_000_000, _random.Random(st2["layer"] + 10))
+        else:
+            break
+    assert not st2["active"] and st2["best_layer"] == 10, st2
+    assert 1 in st2["clears"] and end_mod.unlocked_tier(st2) == 2, st2
+    assert st2["marks_total"] > 0 and st2["marks"] == 0
+
+    # 战败：只保留一半道痕
+    weak_doc = PlayerDoc(uid="endless3", name="劫客三", realm_index=20)
+    st3 = end_mod.state_of(weak_doc)
+    ok, msg, st3 = end_mod.start_run(
+        st3, weak_doc, {"atk": 1000, "def": 0, "hp": 100, "bao": 0},
+        content_e, "", 1_800_000_000)
+    assert ok, msg
+    st3["starmap"] = [{"type": "battle", "name": "测试劫兽", "trait": "", "desc": ""}]
+    st3 = end_mod.select_node(st3, 1)[2]
+    st3, res3 = end_mod.resolve_node(
+        st3, {"atk": 1000, "def": 0, "hp": 100, "bao": 0}, content_e,
+        1_800_000_000, _random.Random(5))
+    assert not res3["win"] and not st3["active"], res3
+
+    rows = end_mod.rank_rows([
+        {"uid": "a", "name": "甲", "ext": {"endless": {"best_tier": 1, "best_layer": 10, "marks_total": 100}}},
+        {"uid": "b", "name": "乙", "ext": {"endless": {"best_tier": 2, "best_layer": 3, "marks_total": 50}}},
+    ])
+    assert rows and rows[0]["name"] == "乙", rows
+    print("endless ok")
+
     # 17. 宗门纯函数 + 存取
     from core import sect as sect_mod  # noqa: E402
 
@@ -1502,6 +1583,29 @@ async def main():
     assert png_r and png_r.exists() and png_r.stat().st_size > 2000
     html_r = render_mod._jinja().get_template("raid.html").render(**raid_data)
     assert "若陀龙王" in html_r and "7,750,000" in html_r and "甲" in html_r
+
+    # 无尽劫境面板：星图/血条/道法
+    endless_data = {
+        "title": "无尽劫境 · 乱古界海", "footer": "A1·本初劫境",
+        "tier": "A1·本初劫境", "layer": 3, "phase": "星图待定",
+        "hp": "1,200,000", "hp_max": "2,000,000", "pct": 60.0,
+        "atk": "1,500,000", "def": "900,000", "bao": "25%",
+        "marks": "320", "total": "1,820",
+        "rule": "极境：凶兽擅长狂暴与再生，拖延战斗会越来越危险。",
+        "nodes": [
+            {"no": 1, "name": "界海黑兽", "type": "遭遇战", "desc": "第 4 层遭遇，胜则前行。", "selected": True},
+            {"no": 2, "name": "诸天遗珍", "type": "诸天遗珍", "desc": "直接获得一项能力，无需战斗。", "selected": False},
+            {"no": 3, "name": "涅槃温泉", "type": "涅槃温泉", "desc": "回复 40% 气血，稳妥前行。", "selected": False},
+        ],
+        "choices": [], "checkpoints": [],
+        "abilities": [{"name": "至尊骨", "lv": 1, "max": 3, "rarity": "稀有"},
+                      {"name": "雷帝宝术", "lv": 2, "max": 3, "rarity": "核心"}],
+        "boons": ["如意金箍棒"], "hint": "#星图定途 1-3 → #无尽下一关",
+    }
+    png_e = await render_mod.render_panel("endless", endless_data, tmp)
+    assert png_e and png_e.exists() and png_e.stat().st_size > 2000
+    html_e = render_mod._jinja().get_template("endless.html").render(**endless_data)
+    assert "乱古界海" in html_e and "界海黑兽" in html_e and "至尊骨" in html_e
 
     # 分组区间互斥：物品只落一组
     tiers = [(9, 99), (8, 9), (7, 8), (6, 7), (4, 6), (0, 4)]

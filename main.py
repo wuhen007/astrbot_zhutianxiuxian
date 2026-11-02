@@ -11,7 +11,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, battle, boss, catalog, cultivate, dibing, equipment, items, linggen, motou, npc, occupation, pet, quest, raid, secret, sect, shenjie, story_npc, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, battle, boss, catalog, cultivate, dibing, equipment, items, linggen, endless, motou, npc, occupation, pet, quest, raid, secret, sect, shenjie, story_npc, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -173,6 +173,18 @@ CMD_TR_INFO = "#查看队伍信息"
 CMD_TR_LIST = "#团本列表"
 CMD_TR_DISMISS = "#解散队伍"
 CMD_TR_CLAIM = "#结算团本奖励"
+CMD_ENDLESS = "#无尽劫境"
+CMD_ENDLESS_START = "#开启无尽劫境"
+CMD_ENDLESS_MAP = "#劫途星图"
+CMD_ENDLESS_ROUTE = "#星图定途"
+CMD_ENDLESS_NEXT = "#无尽下一关"
+CMD_ENDLESS_PICK = "#无尽选择"
+CMD_ENDLESS_CHECKPOINT = "#劫后抉择"
+CMD_ENDLESS_BUILD = "#无尽构筑"
+CMD_ENDLESS_QUIT = "#无尽撤离"
+CMD_ENDLESS_TIER = "#无尽难度"
+CMD_ENDLESS_CELESTIAL = "#今日天象"
+CMD_ENDLESS_RANK = "#无尽排名"
 CMD_DARK_OPEN = "#开启黑暗动乱"
 CMD_DARK_CLOSE = "#关闭黑暗动乱"
 CMD_DARK_STATUS = "#禁区至尊状态"
@@ -698,6 +710,19 @@ class ZhutianPlugin(Star):
                 (CMD_TR_LIST, "招募中的团本"),
                 (CMD_TR_CLAIM, "结算明细（击杀时已自动发放）"),
                 (CMD_TR_DISMISS, "解散队伍（队长）"),
+            ]},
+            {"title": "无尽劫境", "lines": [
+                (f"{CMD_ENDLESS_START} [世界]", f"开启 10 层劫环（{endless.ENTRY_COST:,} 灵石，第 {endless.ENTRY_REALM} 境）"),
+                (CMD_ENDLESS_MAP, "劫途星图：三途选一"),
+                (f"{CMD_ENDLESS_ROUTE} 1-3", "定途"),
+                (CMD_ENDLESS_NEXT, "推进当前层（战斗/机缘/休整）"),
+                (f"{CMD_ENDLESS_PICK} 1-3", "道法三选一"),
+                (f"{CMD_ENDLESS_CHECKPOINT} 1-3", "劫后问道（第 3/6/9 层）"),
+                (CMD_ENDLESS_BUILD, "本局道法/神器/三维"),
+                (CMD_ENDLESS_QUIT, "撤离，带出劫境道痕"),
+                (CMD_ENDLESS_TIER, "难度 A1-A10（通关解锁）"),
+                (CMD_ENDLESS_CELESTIAL, "今日天象"),
+                (CMD_ENDLESS_RANK, "劫境排名"),
             ]},
             {"title": "剧情人物", "lines": [
                 (CMD_NPC, "剧情人物图鉴（11 位 · 立绘/关系/线索）"),
@@ -5141,6 +5166,397 @@ class ZhutianPlugin(Star):
             lines.append(f"每位参战者另得【{cfg['loot']}】×{int(cfg.get('loot_qty', 1))}")
         lines.append("奖励已于击杀时自动发放，无需重复领取。")
         async for r in self._smart(event, "\n".join(lines), "团本结算"):
+            yield r
+
+    # ---- B8-1：无尽劫境（单人劫环核心） ----
+
+    def _endless_content(self) -> dict:
+        return self.content.table("无尽劫境") or {}
+
+    def _endless_base(self, doc: PlayerDoc) -> dict:
+        st = self._stats(doc)
+        return {"atk": st.atk, "def": st.defense, "hp": st.hp, "bao": st.bao}
+
+    def _endless_panel_data(self, st: dict, base: dict, content: dict, now: float) -> dict:
+        stats = endless.run_stats(st, base, content, endless.celestial_of(now))
+        world = endless.world_of(content, str(st.get("world") or ""))
+        tier = endless.tier_of(int(st.get("tier", 1) or 1))
+        idx = endless.index(content)
+        sel = int(st.get("pending_node", 0) or 0)
+        nodes = []
+        for i, n in enumerate(st.get("starmap") or [], 1):
+            nodes.append({
+                "no": i, "name": n.get("name") or "",
+                "type": endless.NODE_LABEL.get(str(n.get("type")), str(n.get("type"))),
+                "desc": n.get("desc") or "", "selected": i == sel,
+            })
+        choices = []
+        for i, aid in enumerate(st.get("choices") or [], 1):
+            ab = idx["abilities"].get(aid) or {}
+            cur = int((st.get("abilities") or {}).get(aid, 0) or 0)
+            max_lv = int(ab.get("maxLevel", 3) or 3)
+            choices.append({
+                "no": i, "name": ab.get("name", aid), "rarity": ab.get("rarity", ""),
+                "lv": (f"Lv.{cur}→{min(max_lv, cur + 1)}" if cur else "新悟"),
+                "desc": ab.get("description", ""),
+            })
+        checkpoints = [
+            {"no": i, "name": c.get("name", ""), "sub": c.get("sub", ""),
+             "desc": c.get("desc", "")}
+            for i, c in enumerate(st.get("checkpoint") or [], 1)
+        ]
+        abilities = []
+        for aid, lv in sorted((st.get("abilities") or {}).items(),
+                              key=lambda kv: -int(kv[1])):
+            ab = idx["abilities"].get(aid) or {}
+            abilities.append({
+                "name": ab.get("name", aid), "lv": int(lv),
+                "max": int(ab.get("maxLevel", 3) or 3), "rarity": ab.get("rarity", ""),
+            })
+        boons = [(idx["boons"].get(b) or {}).get("name", b) for b in (st.get("boons") or [])]
+        phase = {"ready": "星图待定", "choice": "道法三选一",
+                 "checkpoint": "劫后问道"}.get(str(st.get("phase")), str(st.get("phase")))
+        if str(st.get("phase")) == "ready":
+            hint = "#星图定途 1-3 → #无尽下一关｜撤离：#无尽撤离"
+        elif str(st.get("phase")) == "choice":
+            hint = "#无尽选择 1-3"
+        elif str(st.get("phase")) == "checkpoint":
+            hint = "#劫后抉择 1-3"
+        else:
+            hint = "#无尽构筑"
+        hp_max = max(1, int(stats["hp"]))
+        hp = max(0, min(int(st.get("hp", 0) or 0), hp_max))
+        return {
+            "title": f"无尽劫境 · {world.get('name')}",
+            "footer": f"{tier['code']}·{tier['name']}",
+            "tier": f"{tier['code']}·{tier['name']}",
+            "layer": int(st.get("layer", 0) or 0), "phase": phase,
+            "hp": f"{hp:,}", "hp_max": f"{hp_max:,}",
+            "pct": round(hp * 100 / hp_max, 1),
+            "atk": f"{stats['atk']:,}", "def": f"{stats['def']:,}",
+            "bao": f"{stats['bao']:.0%}",
+            "marks": f"{int(st.get('marks', 0) or 0):,}",
+            "total": f"{int(st.get('marks_total', 0) or 0):,}",
+            "rule": world.get("rule", ""),
+            "nodes": nodes, "choices": choices, "checkpoints": checkpoints,
+            "abilities": abilities, "boons": boons, "hint": hint,
+        }
+
+    async def _endless_send(self, event: AstrMessageEvent, doc: PlayerDoc, st: dict):
+        base = self._endless_base(doc)
+        content = self._endless_content()
+        now = time.time()
+        if self.render_on:
+            png = await render.render_panel(
+                "endless", self._endless_panel_data(st, base, content, now), self.panel_dir
+            )
+            if png:
+                yield event.image_result(str(png))
+                return
+        async for r in self._smart(
+            event, endless.status_text(st, base, content, now), "无尽劫境"
+        ):
+            yield r
+
+    @filter.command(CMD_ENDLESS, "无尽劫境")
+    async def handle_endless(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = endless.state_of(doc)
+        if st.get("active"):
+            async for r in self._endless_send(event, doc, st):
+                yield r
+            return
+        content = self._endless_content()
+        worlds = "、".join(w.get("name", "") for w in (content.get("worlds") or []))
+        lines = [
+            "--- 无尽劫境 ---",
+            f"入场：{endless.ENTRY_COST:,} 灵石｜第 {endless.ENTRY_REALM} 境",
+            f"难度：{endless.TIERS[min(len(endless.TIERS) - 1, int(st.get('tier', 1)) - 1)]['code']}"
+            f"·{endless.TIERS[min(len(endless.TIERS) - 1, int(st.get('tier', 1)) - 1)]['name']}"
+            f"｜已解锁至 {endless.TIERS[endless.unlocked_tier(st) - 1]['code']}",
+            f"世界：{worlds}",
+            f"累计道痕：{int(st.get('marks_total', 0) or 0):,}｜最高 A{st.get('best_tier', 1)} 第 {st.get('best_layer', 0)} 层",
+            "流程：#开启无尽劫境 [世界] → #劫途星图 → #星图定途 N → #无尽下一关",
+            "　　　每 3 层 #劫后抉择，每层后 #无尽选择，随时 #无尽撤离",
+            "其他：#无尽构筑 / #无尽难度 A2 / #今日天象 / #无尽排名",
+        ]
+        async for r in self._smart(event, "\n".join(lines), "无尽劫境"):
+            yield r
+
+    @filter.command(CMD_ENDLESS_START, "开启无尽劫境")
+    async def handle_endless_start(self, event: AstrMessageEvent, world: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = endless.state_of(doc)
+        if st.get("active"):
+            yield event.plain_result("你已在一场劫境之中（#无尽构筑 / #无尽撤离）。")
+            return
+        ok, msg = endless.check_entry(doc)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        if doc.stones < endless.ENTRY_COST:
+            yield event.plain_result(
+                f"开启劫境需 {endless.ENTRY_COST:,} 灵石（当前 {doc.stones:,}）。"
+            )
+            return
+        base = self._endless_base(doc)
+        ok, msg, st2 = endless.start_run(
+            st, doc, base, self._endless_content(), (world or "").strip(), time.time()
+        )
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = endless.save(doc, st2)
+        d.stones -= endless.ENTRY_COST
+        await self.db.save_player(d.model_dump())
+        async for r in self._smart(event, msg, "无尽劫境"):
+            yield r
+
+    @filter.command(CMD_ENDLESS_MAP, "劫途星图")
+    async def handle_endless_map(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = endless.state_of(doc)
+        if not st.get("active"):
+            yield event.plain_result(f"尚未开启劫境（{CMD_ENDLESS_START}）。")
+            return
+        if st.get("phase") != "ready":
+            yield event.plain_result("先处理当前的道法/劫后抉择。")
+            return
+        async for r in self._endless_send(event, doc, st):
+            yield r
+
+    @filter.command(CMD_ENDLESS_ROUTE, "星图定途")
+    async def handle_endless_route(self, event: AstrMessageEvent, idx: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = endless.state_of(doc)
+        if not st.get("active"):
+            yield event.plain_result(f"尚未开启劫境（{CMD_ENDLESS_START}）。")
+            return
+        raw = (idx or "").strip()
+        if not raw.isdigit():
+            yield event.plain_result(f"格式：{CMD_ENDLESS_ROUTE} 1-3（先看 {CMD_ENDLESS_MAP}）")
+            return
+        ok, msg, st2 = endless.select_node(st, int(raw))
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self.db.save_player(endless.save(doc, st2).model_dump())
+        yield event.plain_result(msg + f"\n前进：{CMD_ENDLESS_NEXT}")
+
+    @filter.command(CMD_ENDLESS_NEXT, "无尽下一关")
+    async def handle_endless_next(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = endless.state_of(doc)
+        if not st.get("active"):
+            yield event.plain_result(f"尚未开启劫境（{CMD_ENDLESS_START}）。")
+            return
+        if st.get("phase") != "ready":
+            hint = ("#无尽选择 1-3" if st.get("phase") == "choice" else "#劫后抉择 1-3")
+            yield event.plain_result(f"先处理当前阶段：{hint}")
+            return
+        import random as _random
+        now = time.time()
+        rng = _random.Random(f"{doc.uid}:endless:{st.get('layer')}:{now}")
+        st2, res = endless.resolve_node(st, self._endless_base(doc),
+                                        self._endless_content(), now, rng)
+        await self.db.save_player(endless.save(doc, st2).model_dump())
+        lines = [str(res.get("msg") or "")]
+        if res.get("log"):
+            lines.append(str(res["log"][-1]))
+        idx = endless.index(self._endless_content())
+        if res.get("choices"):
+            lines.append("【道法三选一】")
+            for i, aid in enumerate(res["choices"], 1):
+                ab = idx["abilities"].get(aid) or {}
+                lines.append(f"{i}. {ab.get('name')}（{ab.get('rarity')}）{ab.get('description', '')}")
+            lines.append(f"选择：{CMD_ENDLESS_PICK} 1-{len(res['choices'])}")
+        if res.get("checkpoint"):
+            lines.append("【劫后问道】")
+            for i, c in enumerate(endless.CHECKPOINT_CHOICES, 1):
+                lines.append(f"{i}. {c['name']}——{c['desc']}")
+            lines.append(f"选择：{CMD_ENDLESS_CHECKPOINT} 1-3")
+        if res.get("clear"):
+            lines.append(f"下一档：#无尽难度 A{min(10, int(st2.get('tier', 1)) + 1)}")
+        async for r in self._smart(event, "\n".join(x for x in lines if x), "无尽劫境"):
+            yield r
+
+    @filter.command(CMD_ENDLESS_PICK, "无尽选择")
+    async def handle_endless_pick(self, event: AstrMessageEvent, idx: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = endless.state_of(doc)
+        if not st.get("active") or st.get("phase") != "choice":
+            yield event.plain_result("现在没有待选的道法。")
+            return
+        raw = (idx or "").strip()
+        if not raw.isdigit():
+            yield event.plain_result(f"格式：{CMD_ENDLESS_PICK} 1-3")
+            return
+        ok, msg, st2 = endless.pick_ability(st, int(raw), self._endless_content())
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self.db.save_player(endless.save(doc, st2).model_dump())
+        yield event.plain_result(msg + f"\n继续：{CMD_ENDLESS_MAP}")
+
+    @filter.command(CMD_ENDLESS_CHECKPOINT, "劫后抉择")
+    async def handle_endless_checkpoint(self, event: AstrMessageEvent, idx: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = endless.state_of(doc)
+        if not st.get("active") or st.get("phase") != "checkpoint":
+            yield event.plain_result("现在不是劫后抉择的时候。")
+            return
+        raw = (idx or "").strip()
+        if not raw.isdigit():
+            yield event.plain_result(f"格式：{CMD_ENDLESS_CHECKPOINT} 1-3")
+            return
+        import random as _random
+        ok, msg, st2 = endless.apply_checkpoint(
+            st, int(raw), self._endless_content(), self._endless_base(doc),
+            _random.Random(f"{doc.uid}:cp:{st.get('layer')}:{time.time()}"), time.time(),
+        )
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self.db.save_player(endless.save(doc, st2).model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_ENDLESS_BUILD, "无尽构筑")
+    async def handle_endless_build(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = endless.state_of(doc)
+        if not st.get("active"):
+            yield event.plain_result(f"当前没有进行中的劫境（{CMD_ENDLESS_START}）。")
+            return
+        text = endless.build_text(st, self._endless_base(doc),
+                                  self._endless_content(), time.time())
+        async for r in self._smart(event, text, "无尽构筑"):
+            yield r
+
+    @filter.command(CMD_ENDLESS_QUIT, "无尽撤离")
+    async def handle_endless_quit(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = endless.state_of(doc)
+        if not st.get("active"):
+            yield event.plain_result("你不在劫境之中。")
+            return
+        msg, st2 = endless.withdraw(st, time.time())
+        await self.db.save_player(endless.save(doc, st2).model_dump())
+        async for r in self._smart(event, msg, "无尽撤离"):
+            yield r
+
+    @filter.command(CMD_ENDLESS_TIER, "无尽难度")
+    async def handle_endless_tier(self, event: AstrMessageEvent, tier: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = endless.state_of(doc)
+        raw = (tier or "").strip().upper().replace("A", "")
+        if not raw:
+            lines = ["--- 无尽难度 ---"]
+            unlocked = endless.unlocked_tier(st)
+            for t in endless.TIERS:
+                mark = "✅" if t["tier"] <= unlocked else "🔒"
+                lines.append(
+                    f"{mark} {t['code']}·{t['name']}｜敌血 ×{t['hp']:.2f}"
+                    f"｜敌攻 ×{t['atk']:.2f}｜道痕 ×{t['reward']:.2f}"
+                )
+            lines.append(f"当前：A{st.get('tier', 1)}｜切换：#无尽难度 A2")
+            async for r in self._smart(event, "\n".join(lines), "无尽难度"):
+                yield r
+            return
+        if not raw.isdigit():
+            yield event.plain_result(f"格式：{CMD_ENDLESS_TIER} A1-A10")
+            return
+        ok, msg, st2 = endless.set_tier(st, int(raw))
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self.db.save_player(endless.save(doc, st2).model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_ENDLESS_CELESTIAL, "今日天象")
+    async def handle_endless_celestial(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        c = endless.celestial_of(time.time())
+        st = endless.state_of(doc)
+        lines = [
+            "--- 今日天象 ---",
+            f"【{c['name']}】{c.get('desc', '')}",
+            "影响："
+            + ("能力加成 ×%.2f｜" % float(c["ability"]) if c.get("ability") else "")
+            + ("道痕收益 ×%.2f" % float(c["token"]) if c.get("token") else "道痕收益 ×1.00"),
+            f"当前难度：A{st.get('tier', 1)}｜每日 0 点轮换（上海时区）",
+        ]
+        async for r in self._smart(event, "\n".join(lines), "今日天象"):
+            yield r
+
+    @filter.command(CMD_ENDLESS_RANK, "无尽排名")
+    async def handle_endless_rank(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        rows = endless.rank_rows(await self.db.all_players(), 10)
+        if not rows:
+            yield event.plain_result("还没有人踏入劫境。")
+            return
+        lines = ["--- 无尽劫境 · 排名 ---"]
+        for i, r in enumerate(rows, 1):
+            lines.append(
+                f"{i}. {r['name']}｜A{r['tier']} 第 {r['layer']} 层｜道痕 {r['marks']:,}"
+            )
+        async for r in self._smart(event, "\n".join(lines), "无尽排名"):
             yield r
 
     @filter.command(CMD_HEAL, "灵石疗伤")

@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block body %}
+<style>
+  .hpbar { height: 10px; border-radius: 5px; background: #231c2e; overflow: hidden; margin: 6px 0 4px; }
+  .hpbar > div { height: 100%; border-radius: 5px;
+    background: linear-gradient(90deg, #a86fd3, #6f7fd3); }
+  .rule { font-size: 11px; color: #7a8aa0; line-height: 1.6; margin: 2px 0 10px; }
+  .node { background: rgba(0,0,0,.24); border: 1px solid rgba(122,138,160,.16);
+    border-radius: 9px; padding: 9px 11px; margin-bottom: 7px; position: relative; }
+  .node .no { position: absolute; left: 9px; top: 9px; width: 18px; height: 18px;
+    border-radius: 5px; background: rgba(212,175,55,.15); color: #f0d78c;
+    font-size: 11px; text-align: center; line-height: 18px; font-weight: 700; }
+  .node .nname { font-size: 13.5px; font-weight: 700; color: #e8edf4; margin-left: 26px; }
+  .node .ntype { font-size: 10.5px; color: #9adfd6; margin-left: 6px; font-weight: 400; }
+  .node .ndesc { font-size: 11px; color: #8a97ab; margin: 3px 0 0 26px; line-height: 1.55; }
+  .node.sel { border-color: rgba(212,175,55,.5); background: rgba(212,175,55,.06); }
+  .node.sel .nname { color: #f0d78c; }
+  .abili { font-size: 11.5px; color: #c3cdd9; line-height: 1.7; }
+  .abili .lv { color: #6fd3c7; }
+  .abili .rar { color: #e8a87c; }
+</style>
+<div class="row"><span class="k">难度</span><span class="v gold">{{ tier }}</span></div>
+<div class="row"><span class="k">已过层数</span><span class="v">{{ layer }} / 10</span></div>
+<div class="row"><span class="k">阶段</span><span class="v">{{ phase }}</span></div>
+<div class="hpbar"><div style="width: {{ pct }}%"></div></div>
+<div class="row"><span class="k">气血</span><span class="v">{{ hp }} / {{ hp_max }}</span></div>
+<div class="row"><span class="k">三维</span><span class="v">攻 {{ atk }} · 防 {{ def }} · 暴 {{ bao }}</span></div>
+<div class="row"><span class="k">道痕</span><span class="v gold">{{ marks }}（未带出）· 累计 {{ total }}</span></div>
+<div class="rule">{{ rule }}</div>
+
+{% if nodes %}
+<div class="section">
+  <div class="head">劫途星图</div>
+  {% for n in nodes %}
+  <div class="node{% if n.selected %} sel{% endif %}">
+    <div class="no">{{ n.no }}</div>
+    <div class="nname">{{ n.name }}<span class="ntype">{{ n.type }}</span></div>
+    <div class="ndesc">{{ n.desc }}</div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if choices %}
+<div class="section">
+  <div class="head">道法三选一</div>
+  {% for c in choices %}
+  <div class="node">
+    <div class="no">{{ c.no }}</div>
+    <div class="nname">{{ c.name }}<span class="ntype">{{ c.rarity }}{% if c.lv %} · {{ c.lv }}{% endif %}</span></div>
+    <div class="ndesc">{{ c.desc }}</div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if checkpoints %}
+<div class="section">
+  <div class="head">劫后问道</div>
+  {% for c in checkpoints %}
+  <div class="node">
+    <div class="no">{{ c.no }}</div>
+    <div class="nname">{{ c.name }}<span class="ntype">{{ c.sub }}</span></div>
+    <div class="ndesc">{{ c.desc }}</div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if abilities %}
+<div class="section">
+  <div class="head">已构筑道法 · {{ abilities|length }}</div>
+  <div class="abili">
+    {% for a in abilities %}
+    · {{ a.name }} <span class="lv">Lv.{{ a.lv }}/{{ a.max }}</span>
+    <span class="rar">{{ a.rarity }}</span>{% if not loop.last %}<br>{% endif %}
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+{% if boons %}
+<div class="section">
+  <div class="head">诸天神器 · {{ boons|length }}</div>
+  <div class="abili">{{ boons|join('、') }}</div>
+</div>
+{% endif %}
+<div class="section"><div class="chip plain">{{ hint }}</div></div>
+{% endblock %}

@@ -62,6 +62,10 @@ def main() -> int:
         ("团本讨伐", ("handle_team_create", "handle_team_join", "handle_team_start",
                    "handle_team_hit", "handle_team_info", "handle_team_list",
                    "handle_team_dismiss", "handle_team_claim")),
+        ("无尽劫境", ("handle_endless", "handle_endless_start", "handle_endless_map",
+                   "handle_endless_route", "handle_endless_next", "handle_endless_pick",
+                   "handle_endless_checkpoint", "handle_endless_build", "handle_endless_quit",
+                   "handle_endless_tier", "handle_endless_celestial", "handle_endless_rank")),
         ("帮助", ("handle_help",)),
     ]
     grouped = {}
