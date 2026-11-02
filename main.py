@@ -104,6 +104,23 @@ CMD_STONE = "#敲开闪闪发光的石头"
 CMD_SHENJIE = "#踏入神界"
 CMD_SHENJIE_END = "#神界归来"
 CMD_EVIL = "#我的邪道"
+CMD_RECRUIT_ON = "#开启收徒"
+CMD_RECRUIT_OFF = "#关闭收徒"
+CMD_BAISHI = "#拜师"
+CMD_SHITU_END = "#解除师徒关系"
+CMD_MY_TUDI = "#我的弟子"
+CMD_MY_SHIFU = "#我的师门"
+CMD_SHIFU_LIST = "#查看师傅列表"
+CMD_MARRY = "#结为道侣"
+CMD_MARRY_YES = "我愿意"
+CMD_MARRY_NO = "我拒绝"
+CMD_DIVORCE = "#断绝姻缘"
+CMD_QINMI = "#查询亲密度"
+CMD_GIVE_STONES = "#补发灵石"
+CMD_VIEW_PLAYER = "#查看玩家"
+CMD_RESET_TASK = "#重置每日任务"
+CMD_BAN = "#封禁修仙"
+CMD_UNBAN = "#解封修仙"
 CMD_WORLD_CREATE = "#开辟小世界"
 CMD_WORLD_UP = "#演化小世界"
 CMD_WORLD_MY = "#我的小世界"
@@ -306,6 +323,8 @@ class ZhutianPlugin(Star):
         doc = await self._find_player(event)
         if not doc:
             return None, f"道友尚未踏入仙途，请发送「{CMD_START}」。"
+        if doc.ext.get("banned"):
+            return None, "道友已被打入天牢，静候管理员赦免。"
         return doc, None
 
     # ---- 指令 ----
@@ -488,6 +507,21 @@ class ZhutianPlugin(Star):
                 (f"{CMD_WORLD_PLANT} 种子名", "栽种神药（#种植指南 查看）"),
                 (f"{CMD_WORLD_BATCH} 种子名", "一键种植"),
                 (CMD_WORLD_WATER, "一键浇灌（生长-30 分，6h 冷却）"),
+            ]},
+            {"title": "师徒道侣", "lines": [
+                (f"{CMD_RECRUIT_ON} / {CMD_RECRUIT_OFF}", "开启/关闭收徒"),
+                (f"{CMD_BAISHI} @师傅", "拜师（师傅须开收徒，解除后 3h CD）"),
+                (CMD_SHITU_END, "解除师徒关系"),
+                (f"{CMD_MY_TUDI} / {CMD_MY_SHIFU}", "我的弟子 / 我的师门"),
+                (CMD_SHIFU_LIST, "查看收徒中的前辈"),
+                ("结为道侣 @道友", "求婚（定情信物×1，对方 60 秒内我愿意）"),
+                ("断绝姻缘 / #查询亲密度", "道侣解除与亲密度"),
+            ]},
+            {"title": "管理", "lines": [
+                (f"{CMD_GIVE_STONES} @玩家 数量", "补发灵石（管理员）"),
+                (f"{CMD_VIEW_PLAYER} @玩家", "查看玩家档案（管理员）"),
+                (f"{CMD_RESET_TASK} @玩家", "重置每日任务（管理员）"),
+                (f"{CMD_BAN} / {CMD_UNBAN} @玩家", "打入天牢 / 赦免（管理员）"),
             ]},
             {"title": "图鉴查询", "lines": [
                 (f"{CMD_LOU} 类目 页码", "丹药楼/装备楼/功法楼/道具楼/仙宠楼/锻造材料楼/灵根图鉴等"),
@@ -1805,6 +1839,391 @@ class ZhutianPlugin(Star):
             d.ext["xiaoshijie"] = nw
             await self.db.save_player(d.model_dump())
         yield event.plain_result(msg)
+
+    # ---- 师徒 / 道侣 / 管理（对齐原版 shitu / Daolv / AdminSuper） ----
+
+    @filter.command(CMD_RECRUIT_ON, "开启收徒")
+    async def handle_recruit_on(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        d = doc.model_copy(deep=True)
+        d.ext["recruit"] = True
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result("已开启收徒，道友可「#拜师 @你」拜入你门下。")
+
+    @filter.command(CMD_RECRUIT_OFF, "关闭收徒")
+    async def handle_recruit_off(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        d = doc.model_copy(deep=True)
+        d.ext["recruit"] = False
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result("已关闭收徒。")
+
+    @filter.command(CMD_BAISHI, "拜师")
+    async def handle_baishi(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        target_uid = self._at_target(event)
+        if not target_uid:
+            yield event.plain_result(f"格式：{CMD_BAISHI} @师傅")
+            return
+        if target_uid == doc.uid:
+            yield event.plain_result("不能拜自己为师。")
+            return
+        if doc.ext.get("shifu"):
+            yield event.plain_result("你已有师承，先「#解除师徒关系」再拜新师。")
+            return
+        if now := time.time():
+            if now - float(doc.ext.get("shitu_cd") or 0) < 3 * 3600:
+                left = int(3 * 3600 - (now - float(doc.ext.get("shitu_cd") or 0)))
+                yield event.plain_result(f"距离再次拜师还需 {left // 60} 分钟。")
+                return
+        raw = await self.db.get_player(target_uid)
+        if not raw:
+            yield event.plain_result("目标尚未踏入修行。")
+            return
+        master = PlayerDoc(**raw)
+        if not master.ext.get("recruit"):
+            yield event.plain_result(f"{master.name} 尚未开启收徒。")
+            return
+        dm = master.model_copy(deep=True)
+        tudi = list(dm.ext.get("tudi") or [])
+        if doc.uid in tudi:
+            yield event.plain_result("你已在对方门下。")
+            return
+        tudi.append(doc.uid)
+        dm.ext["tudi"] = tudi
+        d = doc.model_copy(deep=True)
+        d.ext["shifu"] = target_uid
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            await self.db.save_player(dm.model_dump())
+        yield event.plain_result(f"拜师成功！{doc.name} 位列 {master.name} 门下。")
+
+    @filter.command(CMD_SHITU_END, "解除师徒关系")
+    async def handle_shitu_end(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        shifu_uid = doc.ext.get("shifu")
+        tudi = list(doc.ext.get("tudi") or [])
+        if not shifu_uid and not tudi:
+            yield event.plain_result("你并无师徒关系。")
+            return
+        d = doc.model_copy(deep=True)
+        d.ext["shifu"] = None
+        d.ext["shitu_cd"] = time.time()
+        if tudi:
+            d.ext["tudi"] = []
+        await self.db.save_player(d.model_dump())
+        # 双向清理
+        other_uid = shifu_uid or (tudi[0] if tudi else None)
+        if other_uid:
+            raw = await self.db.get_player(other_uid)
+            if raw:
+                other = PlayerDoc(**raw)
+                do = other.model_copy(deep=True)
+                if shifu_uid == other.uid:
+                    do.ext["tudi"] = [u for u in (do.ext.get("tudi") or []) if u != doc.uid]
+                else:
+                    do.ext["shifu"] = None
+                await self.db.save_player(do.model_dump())
+        yield event.plain_result("师徒关系已解除（3 小时内不可再拜师）。")
+
+    @filter.command(CMD_MY_TUDI, "我的弟子")
+    async def handle_my_tudi(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        tudi = list(doc.ext.get("tudi") or [])
+        if not tudi:
+            yield event.plain_result("你尚无弟子（#开启收徒 后可收徒）。")
+            return
+        lines = ["--- 我的弟子 ---"]
+        for uid in tudi:
+            raw = await self.db.get_player(uid)
+            if raw:
+                p = PlayerDoc(**raw)
+                lines.append(f"· {p.name}（第 {max(0, p.realm_index) + 1} 境）")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command(CMD_MY_SHIFU, "我的师门")
+    async def handle_my_shifu(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        shifu_uid = doc.ext.get("shifu")
+        if not shifu_uid:
+            yield event.plain_result("你尚未拜师。")
+            return
+        raw = await self.db.get_player(shifu_uid)
+        name = PlayerDoc(**raw).name if raw else "（已失联）"
+        yield event.plain_result(f"师尊：{name}")
+
+    @filter.command(CMD_SHIFU_LIST, "查看师傅列表")
+    async def handle_shifu_list(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        uids = await self.db.all_player_uids()
+        lines = ["--- 收徒中的前辈 ---"]
+        for uid in uids:
+            raw = await self.db.get_player(uid)
+            if raw:
+                p = PlayerDoc(**raw)
+                if p.ext.get("recruit"):
+                    lines.append(f"· {p.name}（第 {max(0, p.realm_index) + 1} 境）")
+        yield event.plain_result("\n".join(lines) if len(lines) > 1 else "目前无人开启收徒。")
+
+    # ---- 道侣 ----
+
+    async def _marry_apply(self, event: AstrMessageEvent, target_uid: str):
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if target_uid == doc.uid:
+            yield event.plain_result("精神分裂?")
+            return
+        if doc.ext.get("daolv"):
+            yield event.plain_result("你已有道侣。")
+            return
+        raw = await self.db.get_player(target_uid)
+        if not raw:
+            yield event.plain_result("目标尚未踏入修行。")
+            return
+        target = PlayerDoc(**raw)
+        if target.ext.get("daolv"):
+            yield event.plain_result(f"{target.name} 已有道侣。")
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        if int(inv.get("定情信物", 0)) < 1:
+            yield event.plain_result("你没有【定情信物】。")
+            return
+        self._pending_marriage = {"from": doc.uid, "to": target_uid, "ts": time.time()}
+        yield event.plain_result(
+            f"{doc.name} 向 {target.name} 送上定情信物，愿结为道侣！\n"
+            f"{target.name} 请在 60 秒内回复「我愿意」或「我拒绝」。"
+        )
+
+    @filter.command(CMD_MARRY, "结为道侣")
+    async def handle_marry(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        target_uid = self._at_target(event)
+        if not target_uid:
+            yield event.plain_result("格式：结为道侣 @道友")
+            return
+        async for r in self._marry_apply(event, target_uid):
+            yield r
+
+    @filter.command(CMD_MARRY_YES, "答应求婚")
+    async def handle_marry_yes(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        pending = getattr(self, "_pending_marriage", None)
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if not pending or pending.get("to") != doc.uid or time.time() - pending.get("ts", 0) > 60:
+            self._pending_marriage = None
+            return
+        raw = await self.db.get_player(pending["from"])
+        if not raw:
+            self._pending_marriage = None
+            return
+        lover = PlayerDoc(**raw)
+        dl = lover.model_copy(deep=True)
+        dd = doc.model_copy(deep=True)
+        dl.ext["daolv"] = doc.uid
+        dd.ext["daolv"] = lover.uid
+        self._pending_marriage = None
+        async with self.db.transaction():
+            await self.db.save_player(dl.model_dump())
+            await self.db.save_player(dd.model_dump())
+            await self.db.remove_item(lover.uid, "定情信物", 1)
+        yield event.plain_result(f"{doc.name} 应允了！二人结为道侣，共赴仙途。")
+
+    @filter.command(CMD_MARRY_NO, "拒绝求婚")
+    async def handle_marry_no(self, event: AstrMessageEvent):
+        pending = getattr(self, "_pending_marriage", None)
+        if not pending or pending.get("to") != event.get_sender_id():
+            return
+        self._pending_marriage = None
+        yield event.plain_result("这段姻缘被婉拒了。")
+
+    @filter.command(CMD_DIVORCE, "断绝姻缘")
+    async def handle_divorce(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        lover_uid = doc.ext.get("daolv")
+        if not lover_uid:
+            yield event.plain_result("你并无道侣。")
+            return
+        d = doc.model_copy(deep=True)
+        d.ext["daolv"] = None
+        await self.db.save_player(d.model_dump())
+        raw = await self.db.get_player(lover_uid)
+        if raw:
+            other = PlayerDoc(**raw)
+            do = other.model_copy(deep=True)
+            do.ext["daolv"] = None
+            await self.db.save_player(do.model_dump())
+            yield event.plain_result(f"与 {other.name} 的姻缘就此斩断。")
+        else:
+            yield event.plain_result("姻缘已断。")
+
+    @filter.command(CMD_QINMI, "查询亲密度")
+    async def handle_qinmi(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        qm = dict(doc.ext.get("qinmidu") or {})
+        if not qm:
+            yield event.plain_result("暂无亲密度记录（道侣同修将提升亲密度）。")
+            return
+        lines = ["--- 亲密度 ---"]
+        for uid, n in sorted(qm.items(), key=lambda kv: -kv[1]):
+            raw = await self.db.get_player(uid)
+            name = PlayerDoc(**raw).name if raw else uid[:8]
+            lines.append(f"· {name}：{n}")
+        yield event.plain_result("\n".join(lines))
+
+    # ---- 管理（对齐原版 AdminSuper 精选） ----
+
+    async def _target_doc(self, event: AstrMessageEvent) -> tuple[PlayerDoc | None, str | None]:
+        target_uid = self._at_target(event)
+        if not target_uid:
+            return None, "格式：指令 @玩家"
+        raw = await self.db.get_player(target_uid)
+        if not raw:
+            return None, "目标尚未踏入修行。"
+        return PlayerDoc(**raw), None
+
+    @filter.command(CMD_GIVE_STONES, "补发灵石")
+    async def handle_give_stones(self, event: AstrMessageEvent, amount: int = 0):
+        if not self._allowed(event):
+            return
+        if not event.is_admin:
+            yield event.plain_result("此权柄唯管理员可执。")
+            return
+        target, terr = await self._target_doc(event)
+        if terr:
+            yield event.plain_result(terr)
+            return
+        amount = int(amount or 0)
+        if amount <= 0:
+            yield event.plain_result("格式：#补发灵石 @玩家 数量")
+            return
+        dt = target.model_copy(deep=True)
+        dt.stones += amount
+        await self.db.save_player(dt.model_dump())
+        yield event.plain_result(f"已为 {target.name} 补发灵石 ×{amount}。")
+
+    @filter.command(CMD_VIEW_PLAYER, "查看玩家档案")
+    async def handle_view_player(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not event.is_admin:
+            yield event.plain_result("此权柄唯管理员可执。")
+            return
+        target, terr = await self._target_doc(event)
+        if terr:
+            yield event.plain_result(terr)
+            return
+        st = self._stats(target)
+        hp_cur, hp_max = self._hp_pair(target)
+        yield event.plain_result(
+            f"【{target.name}】uid {target.uid[:12]}…\n"
+            f"境界：第 {max(0, target.realm_index) + 1} 境｜修为 {target.exp}｜灵石 {target.stones}\n"
+            f"攻 {st.atk} 防 {st.defense} 血 {hp_cur}/{hp_max}｜职业 {target.ext.get('occupation') or '无'}\n"
+            f"封禁：{'是' if target.ext.get('banned') else '否'}｜每日任务：{target.ext.get('date', '未接')}"
+        )
+
+    @filter.command(CMD_RESET_TASK, "重置每日任务")
+    async def handle_reset_task(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not event.is_admin:
+            yield event.plain_result("此权柄唯管理员可执。")
+            return
+        target, terr = await self._target_doc(event)
+        if terr:
+            yield event.plain_result(terr)
+            return
+        dt = target.model_copy(deep=True)
+        dt.ext["date"] = ""
+        dt.ext["renwu"] = 0
+        await self.db.save_player(dt.model_dump())
+        # 任务表也重置
+        rec = await self.db.get_daily_task(target.uid)
+        if rec:
+            rec2 = dict(rec)
+            rec2["date"] = ""
+            rec2["renwu"] = 0
+            await self.db.upsert_daily_task(rec2)
+        yield event.plain_result(f"已重置 {target.name} 的每日任务（可重新 #获取每日任务）。")
+
+    @filter.command(CMD_BAN, "封禁修仙")
+    async def handle_ban(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not event.is_admin:
+            yield event.plain_result("此权柄唯管理员可执。")
+            return
+        target, terr = await self._target_doc(event)
+        if terr:
+            yield event.plain_result(terr)
+            return
+        dt = target.model_copy(deep=True)
+        dt.ext["banned"] = True
+        await self.db.save_player(dt.model_dump())
+        yield event.plain_result(f"{target.name} 已被打入天牢。")
+
+    @filter.command(CMD_UNBAN, "解封修仙")
+    async def handle_unban(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not event.is_admin:
+            yield event.plain_result("此权柄唯管理员可执。")
+            return
+        target, terr = await self._target_doc(event)
+        if terr:
+            yield event.plain_result(terr)
+            return
+        dt = target.model_copy(deep=True)
+        dt.ext["banned"] = False
+        await self.db.save_player(dt.model_dump())
+        yield event.plain_result(f"{target.name} 已被赦免，重获自由。")
 
     @filter.command(CMD_HEAL, "灵石疗伤")
     async def handle_heal(self, event: AstrMessageEvent):

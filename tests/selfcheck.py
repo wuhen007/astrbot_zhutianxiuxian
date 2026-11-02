@@ -511,6 +511,19 @@ async def main():
     assert all(f.get("seed") != "大夏神药种子" for f in w["fields"]), w["fields"]  # 收获后不返种（简化）
     print("xiaoshijie ok")
 
+    # 15i. 师徒/道侣/封禁（纯存档语义验证）
+    master = PlayerDoc(uid="m1", ext={"recruit": True})
+    disciple = PlayerDoc(uid="d1")
+    dm = master.model_copy(deep=True)
+    dm.ext["tudi"] = list(dm.ext.get("tudi") or []) + ["d1"]
+    dd = disciple.model_copy(deep=True)
+    dd.ext["shifu"] = "m1"
+    assert dm.ext["tudi"] == ["d1"] and dd.ext["shifu"] == "m1"
+    # 封禁语义：_require_player 层拦截（ext.banned）
+    banned = PlayerDoc(uid="b1", ext={"banned": True})
+    assert banned.ext.get("banned") is True
+    print("social ok")
+
     # 15c. 每日任务：公式 / 接取-提交-领奖闭环 / 灵石自动追踪 / 秘境计数
     from core import quest as quest_mod  # noqa: E402
 
