@@ -470,6 +470,47 @@ async def main():
     assert rw["__stones__"] == 8_000_000 and rw["神石"] == 10
     print("shenjie ok")
 
+    # 15h. 小世界：开辟/演化/挂机收获/种植/浇灌（对齐 xiaoshijie.js）
+    from core import xiaoshijie as xs_mod  # noqa: E402
+
+    inv = {"世界石": 1}
+    ok, msg, w = xs_mod.create_world("紫霄界", 10, inv)
+    assert not ok and "成仙" in msg  # 境界不足
+    ok, msg, w = xs_mod.create_world("紫霄界", 42, inv)
+    assert ok and w["level"] == 1 and w["fields"] == []
+    # 演化：2 级材料齐 → 成功；5 级封顶
+    inv2 = {"世界石": 99, "玄渊真水": 1, "元虚罡风": 1, "太初燧火": 1, "须弥神土": 1,
+            "造化玉碟": 1, "混沌母气": 99}
+    for _ in range(4):
+        ok, msg, w = xs_mod.upgrade_world(w, inv2)
+        assert ok, msg
+    ok, msg, _ = xs_mod.upgrade_world(w, inv2)
+    assert not ok and "5 级" in msg, msg
+    # 挂机：分身化入 → 时间快进收获
+    ok, msg, w = xs_mod.bind_avatar(w, 2_000_000)
+    assert ok and w["avatar"]
+    w["last_harvest"] -= 3600  # 快进 1 现实小时
+    ok, msg, w, out = xs_mod.harvest(w)
+    assert ok and out.get("__stones__", 0) == 6_400_000 and out.get("仙馐果") == 2400, out  # 5级×流速8=8有效小时
+    # 种植：5 级灵气 30000 可种全部种子；大夏神药 12 现实小时成熟
+    ok, msg, w = xs_mod.plant(w, "大夏神药种子")
+    assert ok and "1.5" in msg, msg  # (3000/1000)×4h ÷ 流速8 = 1.5 现实小时
+    ok, msg, w = xs_mod.plant(w, "不存在种子")
+    assert not ok
+    # 浇灌：-30 分钟 + 冷却
+    ok, msg, w = xs_mod.water(w)
+    assert ok, msg
+    remaining = w["fields"][0]["remaining"]
+    ok, msg, _ = xs_mod.water(w)
+    assert not ok and "冷却" in msg, msg
+    # 成熟判定：剩余 0 → harvest 收获神药
+    w["fields"][0]["remaining"] = 0
+    w["last_harvest"] -= 3600  # 回拨避免"间隔太短"拦截
+    ok, msg, w, out = xs_mod.harvest(w)
+    assert ok and out.get("大夏神药") == 1, out
+    assert all(f.get("seed") != "大夏神药种子" for f in w["fields"]), w["fields"]  # 收获后不返种（简化）
+    print("xiaoshijie ok")
+
     # 15c. 每日任务：公式 / 接取-提交-领奖闭环 / 灵石自动追踪 / 秘境计数
     from core import quest as quest_mod  # noqa: E402
 

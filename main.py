@@ -11,7 +11,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import alchemy, battle, boss, catalog, cultivate, equipment, items, linggen, occupation, pet, quest, secret, sect, shenjie
+from .core import alchemy, battle, boss, catalog, cultivate, equipment, items, linggen, occupation, pet, quest, secret, sect, shenjie, xiaoshijie
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -104,6 +104,15 @@ CMD_STONE = "#敲开闪闪发光的石头"
 CMD_SHENJIE = "#踏入神界"
 CMD_SHENJIE_END = "#神界归来"
 CMD_EVIL = "#我的邪道"
+CMD_WORLD_CREATE = "#开辟小世界"
+CMD_WORLD_UP = "#演化小世界"
+CMD_WORLD_MY = "#我的小世界"
+CMD_WORLD_AVATAR = "#将分身化入小世界"
+CMD_WORLD_HARVEST = "#收获小世界资源"
+CMD_WORLD_PLANT = "#小世界栽种"
+CMD_WORLD_BATCH = "#一键种植"
+CMD_WORLD_WATER = "#一键浇灌普通"
+CMD_PLANT_GUIDE = "#种植指南"
 CMD_IMPERIAL = "#认主"
 CMD_IMPERIAL_MY = "#已认主"
 CMD_SECT_SECRET = "#宗门秘境"
@@ -469,6 +478,16 @@ class ZhutianPlugin(Star):
                 (CMD_SHENJIE, "踏入神界（供奉圆满+220 万灵石+每日 1 次）"),
                 (CMD_SHENJIE_END, "神界归来结算"),
                 (CMD_EVIL, "我的邪道（魔道值/业力）"),
+            ]},
+            {"title": "小世界", "lines": [
+                (f"{CMD_WORLD_CREATE} 世界名", "开辟小世界（成仙+世界石×1）"),
+                (CMD_WORLD_UP, "演化升级（1-5 级，材料逐级）"),
+                (CMD_WORLD_MY, "查看世界总览"),
+                (CMD_WORLD_AVATAR, "分身化入（100 万修为开启挂机）"),
+                (CMD_WORLD_HARVEST, "收获资源与成熟作物（96h 封顶×流速）"),
+                (f"{CMD_WORLD_PLANT} 种子名", "栽种神药（#种植指南 查看）"),
+                (f"{CMD_WORLD_BATCH} 种子名", "一键种植"),
+                (CMD_WORLD_WATER, "一键浇灌（生长-30 分，6h 冷却）"),
             ]},
             {"title": "图鉴查询", "lines": [
                 (f"{CMD_LOU} 类目 页码", "丹药楼/装备楼/功法楼/道具楼/仙宠楼/锻造材料楼/灵根图鉴等"),
@@ -1565,6 +1584,227 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         yield event.plain_result("【邪道录】\n" + shenjie.evil_profile(doc.model_dump()))
+
+    # ---- 小世界（对齐原版 Garden/xiaoshijie.js 核心链） ----
+
+    @filter.command(CMD_WORLD_CREATE, "开辟小世界")
+    async def handle_world_create(self, event: AstrMessageEvent, world_name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        name = (world_name or "").strip()
+        if not name:
+            yield event.plain_result(f"格式：{CMD_WORLD_CREATE} 世界名（如：#开辟小世界 紫霄界）")
+            return
+        if doc.ext.get("xiaoshijie"):
+            w = doc.ext["xiaoshijie"]
+            yield event.plain_result(f"你已开辟【{w.get('name')}】，无法再开辟新的小世界。")
+            return
+        realm_id = max(0, doc.realm_index) + 1
+        inv = await self.db.get_inventory(doc.uid)
+        ok, msg, world = xiaoshijie.create_world(name, realm_id, inv)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = doc.model_copy(deep=True)
+        d.ext["xiaoshijie"] = world
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            for item, amount in xiaoshijie.WORLD_LEVELS[1]["cost"].items():
+                await self.db.remove_item(doc.uid, item, amount)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_WORLD_UP, "演化小世界")
+    async def handle_world_up(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = doc.ext.get("xiaoshijie")
+        if not w:
+            yield event.plain_result(f"道友尚无小世界，先「{CMD_WORLD_CREATE} 世界名」。")
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        ok, msg, nw = xiaoshijie.upgrade_world(w, inv)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        cost = xiaoshijie.upgrade_cost(int(w.get("level", 1)))
+        d = doc.model_copy(deep=True)
+        d.ext["xiaoshijie"] = nw
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            for item, amount in cost.items():
+                await self.db.remove_item(doc.uid, item, amount)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_WORLD_MY, "我的小世界")
+    async def handle_world_my(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = doc.ext.get("xiaoshijie")
+        if not w:
+            yield event.plain_result(f"道友尚无小世界，先「{CMD_WORLD_CREATE} 世界名」（需成仙）。")
+            return
+        _, exp = self._ensure_occ(doc)
+        yield event.plain_result(xiaoshijie.view(w, doc.exp))
+
+    @filter.command(CMD_WORLD_AVATAR, "分身化入小世界")
+    async def handle_world_avatar(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = doc.ext.get("xiaoshijie")
+        if not w:
+            yield event.plain_result(f"道友尚无小世界，先「{CMD_WORLD_CREATE} 世界名」。")
+            return
+        ok, msg, nw = xiaoshijie.bind_avatar(w, doc.exp)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = doc.model_copy(deep=True)
+        d.exp -= xiaoshijie.AVATAR_COST
+        d.ext["xiaoshijie"] = nw
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_WORLD_HARVEST, "收获小世界资源")
+    async def handle_world_harvest(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = doc.ext.get("xiaoshijie")
+        if not w:
+            yield event.plain_result(f"道友尚无小世界。")
+            return
+        ok, msg, nw, out = xiaoshijie.harvest(w)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        stones = out.pop("__stones__", 0)
+        d = doc.model_copy(deep=True)
+        d.stones += stones
+        d.ext["xiaoshijie"] = nw
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            if out:
+                await self.db.add_items(doc.uid, out)
+        parts = [f"灵石 ×{stones}"] + [f"{k} ×{v}" for k, v in out.items()]
+        yield event.plain_result(msg.replace("__stones__", "灵石") + f"\n合计：{'，'.join(parts)}")
+
+    @filter.command(CMD_PLANT_GUIDE, "种植指南")
+    async def handle_plant_guide(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        lines = ["--- 种植指南（种子 → 神药｜灵气需求）---"]
+        for seed, (harvest, aura) in xiaoshijie.SEEDS.items():
+            lines.append(f"· {seed} → {harvest}（需灵气 {aura}）")
+        yield event.plain_result("\n".join(lines))
+
+    async def _world_plant(self, event: AstrMessageEvent, seed: str):
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = doc.ext.get("xiaoshijie")
+        if not w:
+            yield event.plain_result(f"道友尚无小世界。")
+            return
+        seed = (seed or "").strip()
+        ok, msg, nw = xiaoshijie.plant(w, seed)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = doc.model_copy(deep=True)
+        d.ext["xiaoshijie"] = nw
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            await self.db.remove_item(doc.uid, seed, 1)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_WORLD_PLANT, "栽种神药")
+    async def handle_world_plant(self, event: AstrMessageEvent, seed: str = ""):
+        if not self._allowed(event):
+            return
+        seed = (seed or "").strip()
+        if not seed:
+            yield event.plain_result(f"格式：{CMD_WORLD_PLANT} 种子名（#种植指南 查看）")
+            return
+        async for r in self._world_plant(event, seed):
+            yield r
+
+    @filter.command(CMD_WORLD_BATCH, "一键种植")
+    async def handle_world_batch(self, event: AstrMessageEvent, seed: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = doc.ext.get("xiaoshijie")
+        if not w:
+            yield event.plain_result(f"道友尚无小世界。")
+            return
+        seed = (seed or "").strip()
+        inv = await self.db.get_inventory(doc.uid)
+        planted = 0
+        msgs: list[str] = []
+        nw = w
+        while True:
+            ok0, msg0, nw0 = xiaoshijie.plant(nw, seed)
+            if not ok0:
+                msgs.append(msg0)
+                break
+            # 确认种子库存
+            if int(inv.get(seed, 0)) < 1:
+                msgs.append(f"{seed} 种子用尽（已种 {planted} 株）。")
+                break
+            nw = nw0
+            inv = {**inv, seed: int(inv.get(seed, 0)) - 1}
+            planted += 1
+        if planted:
+            d = doc.model_copy(deep=True)
+            d.ext["xiaoshijie"] = nw
+            async with self.db.transaction():
+                await self.db.save_player(d.model_dump())
+                await self.db.remove_item(doc.uid, seed, planted)
+            yield event.plain_result(f"一键种植完成：{seed} ×{planted}。" + ("\n" + msgs[-1] if msgs else ""))
+        else:
+            yield event.plain_result(msgs[-1] if msgs else "未能种植。")
+
+    @filter.command(CMD_WORLD_WATER, "一键浇灌")
+    async def handle_world_water(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = doc.ext.get("xiaoshijie")
+        if not w:
+            yield event.plain_result(f"道友尚无小世界。")
+            return
+        ok, msg, nw = xiaoshijie.water(w)
+        if ok:
+            d = doc.model_copy(deep=True)
+            d.ext["xiaoshijie"] = nw
+            await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
 
     @filter.command(CMD_HEAL, "灵石疗伤")
     async def handle_heal(self, event: AstrMessageEvent):
