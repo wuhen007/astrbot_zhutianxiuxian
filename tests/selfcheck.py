@@ -2,6 +2,7 @@
 import asyncio
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 PLUGIN = Path(__file__).resolve().parent.parent
@@ -1260,7 +1261,60 @@ async def main():
         {"uid": "b", "name": "乙", "ext": {"endless": {"best_tier": 2, "best_layer": 3, "marks_total": 50}}},
     ])
     assert rows and rows[0]["name"] == "乙", rows
+    assert st2["marks_earned"] == st2["marks_total"], "无消费时历史道痕应等于钱包"
     print("endless ok")
+
+    # 16e. 无尽商店 / 劫境商人 / 称号 / 周末免费
+    shop = store.table("无尽商店")
+    assert len(shop["products"]) == 21, "无尽商店商品数不对"
+    cel = {"name": "测试天象", "shop": 1.0}
+    stx = end_mod.state_of(PlayerDoc(uid="shop", name="商人", realm_index=30))
+    stx["marks_total"] = 100_000
+    sat = time.mktime(time.strptime("2026-11-07 12:00:00", "%Y-%m-%d %H:%M:%S"))
+    assert end_mod.is_weekend(sat), "2026-11-07 应为周六"
+    assert end_mod.weekend_available(stx, sat)
+    stx["weekend_week"] = end_mod.week_key(sat)
+    assert not end_mod.weekend_available(stx, sat), "本周额度用后不应再免费"
+    stx["weekend_week"] = ""
+
+    pill = [p for p in shop["products"] if p["id"] == 2][0]
+    assert end_mod.shop_price(pill, cel) == pill["price"]
+    assert end_mod.shop_price(pill, {"shop": 1.25}) == int(pill["price"] * 1.25)
+    ok, msg, stx, got = end_mod.buy_shop(stx, "2", 2, sat, shop, cel)
+    assert ok and got.get("叩仙丹") == 2 and stx["marks_total"] == 100_000 - 200, msg
+    assert stx["shop_counts"]["2"] == 2
+    ok, msg, stx, _ = end_mod.buy_shop(stx, "2", 99, sat, shop, cel)
+    assert not ok and "限购" in msg, msg
+    ok, msg, stx, _ = end_mod.buy_shop(stx, "8", 1, sat, shop, cel)
+    assert not ok, "未开放 action 不应可买"
+
+    stm = end_mod.state_of(PlayerDoc(uid="merchant", name="行商", realm_index=30))
+    stm["layer"] = 3
+    stm["marks"] = 100_000
+    stm = end_mod.refresh_merchant(stm, shop, cel, _random.Random(1))
+    assert len(stm["merchant"]) == 4, stm["merchant"]
+    price0 = stm["merchant"][0]["price"]
+    before = stm["marks"]
+    ok, msg, stm, got2 = end_mod.buy_merchant(stm, 1, cel)
+    assert ok and stm["marks"] == before - price0 and len(stm["merchant"]) == 3, msg
+    stm["marks"] = 0
+    ok, msg, _, _ = end_mod.buy_merchant(stm, 1, cel)
+    assert not ok and "不足" in msg
+
+    stt = end_mod.state_of(PlayerDoc(uid="title", name="称号", realm_index=30))
+    stt["best_layer"] = 5
+    owned = [t["name"] for t in end_mod.owned_titles(stt)]
+    assert "初入劫境" in owned and "劫境行者" in owned and "破界者" not in owned, owned
+    ok, msg, stt = end_mod.equip_title(stt, "劫境行者")
+    assert ok and stt["title"] == "劫境行者", msg
+    ok, msg, _ = end_mod.equip_title(stt, "无尽劫境天尊")
+    assert not ok, "未获得称号不应可佩戴"
+    base_t = {"atk": 1_000_000, "def": 1_000_000, "hp": 1_000_000, "bao": 0}
+    plain_st = end_mod.state_of(PlayerDoc(uid="t2"))
+    stat_plain = end_mod.run_stats(plain_st, base_t, content_e, cel)
+    stat_title = end_mod.run_stats(stt, base_t, content_e, cel)
+    assert stat_title["atk"] > stat_plain["atk"], (stat_plain, stat_title)
+    print("endless shop ok")
 
     # 17. 宗门纯函数 + 存取
     from core import sect as sect_mod  # noqa: E402

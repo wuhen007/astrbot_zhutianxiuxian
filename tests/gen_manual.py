@@ -65,7 +65,11 @@ def main() -> int:
         ("无尽劫境", ("handle_endless", "handle_endless_start", "handle_endless_map",
                    "handle_endless_route", "handle_endless_next", "handle_endless_pick",
                    "handle_endless_checkpoint", "handle_endless_build", "handle_endless_quit",
-                   "handle_endless_tier", "handle_endless_celestial", "handle_endless_rank")),
+                   "handle_endless_tier", "handle_endless_celestial", "handle_endless_rank",
+                   "handle_endless_shop", "handle_endless_buy", "handle_endless_merchant",
+                   "handle_endless_merchant_buy", "handle_endless_titles",
+                   "handle_endless_titles_alias", "handle_endless_title_equip",
+                   "handle_endless_weekend")),
         ("帮助", ("handle_help",)),
     ]
     grouped = {}

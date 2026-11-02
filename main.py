@@ -185,6 +185,14 @@ CMD_ENDLESS_QUIT = "#无尽撤离"
 CMD_ENDLESS_TIER = "#无尽难度"
 CMD_ENDLESS_CELESTIAL = "#今日天象"
 CMD_ENDLESS_RANK = "#无尽排名"
+CMD_ENDLESS_SHOP = "#无尽商店"
+CMD_ENDLESS_BUY = "#无尽购买"
+CMD_ENDLESS_MERCHANT = "#劫境商人"
+CMD_ENDLESS_MERCHANT_BUY = "#劫境购买"
+CMD_ENDLESS_TITLES = "#称号"
+CMD_ENDLESS_TITLES_ALIAS = "#我的称号"
+CMD_ENDLESS_TITLE_EQUIP = "#佩戴称号"
+CMD_ENDLESS_WEEKEND = "#周末免费"
 CMD_DARK_OPEN = "#开启黑暗动乱"
 CMD_DARK_CLOSE = "#关闭黑暗动乱"
 CMD_DARK_STATUS = "#禁区至尊状态"
@@ -721,6 +729,12 @@ class ZhutianPlugin(Star):
                 (CMD_ENDLESS_BUILD, "本局道法/神器/三维"),
                 (CMD_ENDLESS_QUIT, "撤离，带出劫境道痕"),
                 (CMD_ENDLESS_TIER, "难度 A1-A10（通关解锁）"),
+                (CMD_ENDLESS_SHOP, "劫境道痕商店（每日限购）"),
+                (f"{CMD_ENDLESS_BUY} 编号[*数量]", "购买（如 #无尽购买 叩仙丹*3）"),
+                (CMD_ENDLESS_MERCHANT, "劫境商人（局内，每层 4 件折扣货）"),
+                (f"{CMD_ENDLESS_MERCHANT_BUY} 1-4", "用未带出的道痕购买"),
+                (CMD_ENDLESS_TITLES, "称号（#佩戴称号 名称）"),
+                (CMD_ENDLESS_WEEKEND, "周末免费入场额度"),
                 (CMD_ENDLESS_CELESTIAL, "今日天象"),
                 (CMD_ENDLESS_RANK, "劫境排名"),
             ]},
@@ -5284,6 +5298,7 @@ class ZhutianPlugin(Star):
             "流程：#开启无尽劫境 [世界] → #劫途星图 → #星图定途 N → #无尽下一关",
             "　　　每 3 层 #劫后抉择，每层后 #无尽选择，随时 #无尽撤离",
             "其他：#无尽构筑 / #无尽难度 A2 / #今日天象 / #无尽排名",
+            "商店：#无尽商店｜局内商人：#劫境商人｜称号：#称号｜周末：#周末免费",
         ]
         async for r in self._smart(event, "\n".join(lines), "无尽劫境"):
             yield r
@@ -5304,20 +5319,26 @@ class ZhutianPlugin(Star):
         if not ok:
             yield event.plain_result(msg)
             return
-        if doc.stones < endless.ENTRY_COST:
+        now = time.time()
+        free = endless.weekend_available(st, now)
+        cost = 0 if free else endless.ENTRY_COST
+        if doc.stones < cost:
             yield event.plain_result(
-                f"开启劫境需 {endless.ENTRY_COST:,} 灵石（当前 {doc.stones:,}）。"
+                f"开启劫境需 {cost:,} 灵石（当前 {doc.stones:,}）。"
             )
             return
         base = self._endless_base(doc)
         ok, msg, st2 = endless.start_run(
-            st, doc, base, self._endless_content(), (world or "").strip(), time.time()
+            st, doc, base, self._endless_content(), (world or "").strip(), now
         )
         if not ok:
             yield event.plain_result(msg)
             return
+        if free:
+            st2["weekend_week"] = endless.week_key(now)
+            msg += "\n（周末免费额度：本次免入场灵石）"
         d = endless.save(doc, st2)
-        d.stones -= endless.ENTRY_COST
+        d.stones -= cost
         await self.db.save_player(d.model_dump())
         async for r in self._smart(event, msg, "无尽劫境"):
             yield r
@@ -5557,6 +5578,158 @@ class ZhutianPlugin(Star):
                 f"{i}. {r['name']}｜A{r['tier']} 第 {r['layer']} 层｜道痕 {r['marks']:,}"
             )
         async for r in self._smart(event, "\n".join(lines), "无尽排名"):
+            yield r
+
+    # ---- B8-2：无尽商店 / 劫境商人 / 称号 / 周末免费 ----
+
+    def _endless_shop(self) -> dict:
+        return self.content.table("无尽商店") or {}
+
+    @filter.command(CMD_ENDLESS_SHOP, "无尽商店")
+    async def handle_endless_shop(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = endless.state_of(doc)
+        text = endless.shop_text(
+            st, self._endless_shop(), endless.celestial_of(time.time()), time.time()
+        )
+        async for r in self._smart(event, text, "无尽商店"):
+            yield r
+
+    @filter.command(CMD_ENDLESS_BUY, "无尽购买")
+    async def handle_endless_buy(self, event: AstrMessageEvent, item: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        raw = (item or "").strip()
+        if not raw:
+            yield event.plain_result(f"格式：{CMD_ENDLESS_BUY} 编号或名称[*数量]")
+            return
+        ident, _, qtxt = raw.partition("*")
+        qty = int(qtxt) if qtxt.strip().isdigit() else 1
+        st = endless.state_of(doc)
+        now = time.time()
+        ok, msg, st2, items = endless.buy_shop(
+            st, ident.strip(), qty, now, self._endless_shop(), endless.celestial_of(now)
+        )
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = endless.save(doc, st2)
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            if items:
+                await self.db.add_items(doc.uid, items)
+        async for r in self._smart(event, msg, "无尽购买"):
+            yield r
+
+    @filter.command(CMD_ENDLESS_MERCHANT, "劫境商人")
+    async def handle_endless_merchant(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = endless.state_of(doc)
+        if not st.get("active"):
+            yield event.plain_result("劫境商人在劫境之内才会现身（#开启无尽劫境）。")
+            return
+        import random as _random
+        now = time.time()
+        st2 = endless.refresh_merchant(
+            st, self._endless_shop(), endless.celestial_of(now),
+            _random.Random(f"{doc.uid}:merchant:{st.get('layer')}"),
+        )
+        await self.db.save_player(endless.save(doc, st2).model_dump())
+        async for r in self._smart(event, endless.merchant_text(st2), "劫境商人"):
+            yield r
+
+    @filter.command(CMD_ENDLESS_MERCHANT_BUY, "劫境购买")
+    async def handle_endless_merchant_buy(self, event: AstrMessageEvent, idx: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = endless.state_of(doc)
+        if not st.get("active"):
+            yield event.plain_result("你不在劫境之中。")
+            return
+        raw = (idx or "").strip()
+        if not raw.isdigit():
+            yield event.plain_result(f"格式：{CMD_ENDLESS_MERCHANT_BUY} 1-4")
+            return
+        ok, msg, st2, items = endless.buy_merchant(
+            st, int(raw), endless.celestial_of(time.time())
+        )
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = endless.save(doc, st2)
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            if items:
+                await self.db.add_items(doc.uid, items)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_ENDLESS_TITLES, "称号")
+    async def handle_endless_titles(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, endless.titles_text(endless.state_of(doc)), "称号"):
+            yield r
+
+    @filter.command(CMD_ENDLESS_TITLES_ALIAS, "我的称号")
+    async def handle_endless_titles_alias(self, event: AstrMessageEvent):
+        async for r in self.handle_endless_titles(event):
+            yield r
+
+    @filter.command(CMD_ENDLESS_TITLE_EQUIP, "佩戴称号")
+    async def handle_endless_title_equip(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        raw = (name or "").strip()
+        if not raw:
+            yield event.plain_result(f"格式：{CMD_ENDLESS_TITLE_EQUIP} 称号名（{CMD_ENDLESS_TITLES} 查看）")
+            return
+        st = endless.state_of(doc)
+        ok, msg, st2 = endless.equip_title(st, raw)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self.db.save_player(endless.save(doc, st2).model_dump())
+        async for r in self._smart(event, msg, "佩戴称号"):
+            yield r
+
+    @filter.command(CMD_ENDLESS_WEEKEND, "周末免费")
+    async def handle_endless_weekend(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = endless.state_of(doc)
+        async for r in self._smart(
+            event, endless.weekend_text(st, time.time()), "周末免费"
+        ):
             yield r
 
     @filter.command(CMD_HEAL, "灵石疗伤")

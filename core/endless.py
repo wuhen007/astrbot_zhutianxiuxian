@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import copy
+import datetime
 import random
 import time
 from collections.abc import Mapping, Sequence
@@ -54,12 +55,12 @@ PHENOMENA = [
      "desc": "本日能力加成提高 25%。"},
     {"id": "trace_drought", "name": "道痕枯潮", "tone": "danger", "token": 0.7,
      "desc": "劫境道痕收益降低 30%。"},
-    {"id": "shop_inflation", "name": "天市炽盛", "tone": "danger",
-     "desc": "无尽商店价格上涨 25%（商店 B8-2 开放后生效）。"},
-    {"id": "shop_discount", "name": "万宝潮生", "tone": "gold",
-     "desc": "无尽商店价格降低 20%（商店 B8-2 开放后生效）。"},
-    {"id": "shop_expansion", "name": "商路拓界", "tone": "jade",
-     "desc": "限购商品额度 +20%（商店 B8-2 开放后生效）。"},
+    {"id": "shop_inflation", "name": "天市炽盛", "tone": "danger", "shop": 1.25,
+     "desc": "无尽商店价格上涨 25%。"},
+    {"id": "shop_discount", "name": "万宝潮生", "tone": "gold", "shop": 0.8,
+     "desc": "无尽商店价格降低 20%。"},
+    {"id": "shop_expansion", "name": "商路拓界", "tone": "jade", "shop_limit": 1.2,
+     "desc": "限购商品额度 +20%（最低 +1 件）。"},
 ]
 
 NODE_LABEL = {
@@ -67,7 +68,7 @@ NODE_LABEL = {
     "boon": "诸天遗珍", "rest": "涅槃温泉", "treasure": "道痕矿脉",
 }
 
-NODE_REWARD = {"battle": 40, "elite": 90, "boss": 260, "boon": 30, "rest": 20, "treasure": 80}
+NODE_REWARD = {"battle": 400, "elite": 900, "boss": 2600, "boon": 300, "rest": 200, "treasure": 800}
 
 CHECKPOINT_CHOICES = [
     {"id": "rest", "name": "涅槃归息", "sub": "收拢残魂，重燃命火",
@@ -96,6 +97,10 @@ def world_of(content: Mapping, world_id: str) -> dict:
             return w
     return worlds[0] if worlds else {"id": "perfect", "name": "乱古界海", "rule": "",
                                      "normal": [], "elite": [], "boss": []}
+
+
+def time_key(ts: float) -> str:
+    return time.strftime("%Y-%m-%d", time.localtime(ts))
 
 
 def tier_of(tier: int) -> dict:
@@ -131,6 +136,16 @@ def state_of(doc: Any) -> dict:
     st.setdefault("pending_node", 0)
     st.setdefault("marks", 0)
     st.setdefault("marks_total", 0)
+    st.setdefault("marks_earned", 0)
+    if not st["marks_earned"] and int(st.get("marks_total", 0) or 0) > 0:
+        # 兼容 B8-1 老数据：历史道痕从钱包回填
+        st["marks_earned"] = int(st.get("marks_total", 0) or 0)
+    st.setdefault("title", "")
+    st.setdefault("shop_day", "")
+    st.setdefault("shop_counts", {})
+    st.setdefault("merchant", [])
+    st.setdefault("merchant_layer", 0)
+    st.setdefault("weekend_week", "")
     st.setdefault("best_tier", 1)
     st.setdefault("best_layer", 0)
     st.setdefault("clears", [])
@@ -226,6 +241,11 @@ def run_stats(st: Mapping, base: Mapping, content: Mapping, celestial: Mapping |
         crit += fold["crit"]
         regen += fold["regen"]
         revive = max(revive, fold["revive"])
+    title = title_of(st)
+    if title:
+        atk += float(title.get("atk", 0) or 0)
+        df += float(title.get("def", 0) or 0)
+        hp += float(title.get("hp", 0) or 0)
     return {
         "atk": max(1, int(float(base.get("atk", 1) or 1) * atk)),
         "def": max(0, int(float(base.get("def", 0) or 0) * df)),
@@ -401,8 +421,10 @@ def enemy_unit(st: Mapping, node: Mapping, stats: Mapping, content: Mapping,
 def reward_of(st: Mapping, node: Mapping, celestial: Mapping) -> int:
     layer = int(st.get("layer", 0) or 0) + 1
     tier = tier_of(int(st.get("tier", 1) or 1))
-    base = NODE_REWARD.get(str(node.get("type")), 40) + layer * 8
-    return max(1, int(base * tier["reward"] * float(celestial.get("token", 1) or 1)))
+    base = NODE_REWARD.get(str(node.get("type")), 400) + layer * 80
+    title = title_of(st)
+    return max(1, int(base * tier["reward"] * float(celestial.get("token", 1) or 1)
+                      * (1 + float(title.get("marks", 0) or 0))))
 
 
 def resolve_node(st: Mapping, base: Mapping, content: Mapping, now: float,
@@ -448,6 +470,7 @@ def resolve_node(st: Mapping, base: Mapping, content: Mapping, now: float,
             # 真败：结算一半道痕，结束本局
             banked = int(st2.get("marks", 0) * BANK_ON_DEFEAT)
             st2["marks_total"] = int(st2.get("marks_total", 0)) + banked
+            st2["marks_earned"] = int(st2.get("marks_earned", 0)) + banked
             st2 = _end_run(st2, victory=False)
             result["win"] = False
             result["msg"] = (f"你被{foe.name}击溃，劫境投影消散。\n"
@@ -492,6 +515,7 @@ def resolve_node(st: Mapping, base: Mapping, content: Mapping, now: float,
     if layer >= MAX_LAYERS:
         banked = int(st2.get("marks", 0)) + CLEAR_BONUS
         st2["marks_total"] = int(st2.get("marks_total", 0)) + banked
+        st2["marks_earned"] = int(st2.get("marks_earned", 0)) + banked
         if int(st2.get("tier", 1)) not in (st2.get("clears") or []):
             st2["clears"] = list(st2.get("clears") or []) + [int(st2["tier"])]
         st2["best_tier"] = max(int(st2.get("best_tier", 1)), int(st2.get("tier", 1)))
@@ -665,6 +689,7 @@ def withdraw(st: Mapping, now: float) -> tuple[str, dict]:
         return "", st2
     banked = int(st2.get("marks", 0) or 0)
     st2["marks_total"] = int(st2.get("marks_total", 0)) + banked
+    st2["marks_earned"] = int(st2.get("marks_earned", 0)) + banked
     st2["best_layer"] = max(int(st2.get("best_layer", 0)), int(st2.get("layer", 0)))
     st2["best_tier"] = max(int(st2.get("best_tier", 1)), int(st2.get("tier", 1)))
     layer = int(st2.get("layer", 0) or 0)
@@ -678,7 +703,7 @@ def status_text(st: Mapping, base: Mapping, content: Mapping, now: float) -> str
         tier = tier_of(int(st.get("tier", 1) or 1))
         return (f"--- 无尽劫境 ---\n"
                 f"当前难度：{tier['code']}·{tier['name']}｜最高：A{st.get('best_tier', 1)} 第 {st.get('best_layer', 0)} 层\n"
-                f"劫境道痕：{int(st.get('marks_total', 0)):,}\n"
+                f"劫境道痕：{int(st.get('marks_total', 0)):,}｜称号：{title_of(st).get('name') or '无'}\n"
                 f"未开启：#开启无尽劫境 [世界名]｜难度：#无尽难度 A2｜天象：#今日天象")
     stats = run_stats(st, base, content, celestial_of(now))
     sync_hp(st, stats)
@@ -692,7 +717,8 @@ def status_text(st: Mapping, base: Mapping, content: Mapping, now: float) -> str
         f"难度：{tier['code']}·{tier['name']}｜已过 {layer}/{MAX_LAYERS} 层｜{phase}",
         f"气血：{int(st.get('hp', 0)):,} / {int(stats['hp']):,}",
         f"攻 {stats['atk']:,}｜防 {stats['def']:,}｜暴击 {stats['bao']:.0%}",
-        f"道痕：{int(st.get('marks', 0)):,}（未带出）｜累计 {int(st.get('marks_total', 0)):,}",
+        f"道痕：{int(st.get('marks', 0)):,}（未带出）｜钱包 {int(st.get('marks_total', 0)):,}"
+        f"｜称号：{title_of(st).get('name') or '无'}",
         f"道法：{len(st.get('abilities') or {})} 门｜神器：{len(st.get('boons') or [])} 件",
     ]
     if st.get("phase") == "ready":
@@ -711,7 +737,8 @@ def build_text(st: Mapping, base: Mapping, content: Mapping, now: float) -> str:
     lines = ["--- 无尽构筑 ---",
              f"攻 {stats['atk']:,}（×{stats['atk_mult']}）｜防 {stats['def']:,}（×{stats['def_mult']}）"
              f"｜血 {stats['hp']:,}（×{stats['hp_mult']}）｜暴击 {stats['bao']:.0%}",
-             f"回血 {stats['regen']:.1%}/层｜涅槃 {revive_txt}"]
+             f"回血 {stats['regen']:.1%}/层｜涅槃 {revive_txt}"
+             f"｜称号：{title_of(st).get('name') or '无'}"]
     abs_ = st.get("abilities") or {}
     if abs_:
         lines.append("【道法】")
@@ -727,6 +754,258 @@ def build_text(st: Mapping, base: Mapping, content: Mapping, now: float) -> str:
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------- 称号
+
+TITLES = [
+    {"id": "ruins", "name": "初入劫境", "need_layer": 1, "need_clears": 0,
+     "atk": 0.03, "hp": 0.03, "def": 0.03, "marks": 0.0,
+     "desc": "第一次自劫境中生还。"},
+    {"id": "walker", "name": "劫境行者", "need_layer": 5, "need_clears": 0,
+     "atk": 0.06, "hp": 0.06, "def": 0.06, "marks": 0.05,
+     "desc": "在劫境中走过五层。"},
+    {"id": "breaker", "name": "破界者", "need_layer": 10, "need_clears": 1,
+     "atk": 0.10, "hp": 0.10, "def": 0.10, "marks": 0.10,
+     "desc": "首次打穿一档劫境。"},
+    {"id": "unmoved", "name": "万劫不磨", "need_layer": 10, "need_clears": 3,
+     "atk": 0.15, "hp": 0.15, "def": 0.15, "marks": 0.15,
+     "desc": "打穿三档劫境，道心不磨。"},
+    {"id": "master", "name": "无量劫主", "need_layer": 10, "need_clears": 6,
+     "atk": 0.20, "hp": 0.20, "def": 0.20, "marks": 0.20,
+     "desc": "六档劫境尽数踏平。"},
+    {"id": "heaven", "name": "无尽劫境天尊", "need_layer": 10, "need_clears": 10,
+     "atk": 0.25, "hp": 0.25, "def": 0.25, "marks": 0.25,
+     "desc": "十档皆破，劫境称尊（原版全服第一专属，本插件改为通关 A10 授予）。"},
+]
+TITLE_MAP = {t["name"]: t for t in TITLES}
+
+
+def _clears_count(st: Mapping) -> int:
+    return len([c for c in (st.get("clears") or []) if int(c or 0) > 0])
+
+
+def title_owned(st: Mapping, title: Mapping) -> bool:
+    return (int(st.get("best_layer", 0) or 0) >= int(title.get("need_layer", 0))
+            and _clears_count(st) >= int(title.get("need_clears", 0)))
+
+
+def title_of(st: Mapping) -> dict:
+    name = str(st.get("title") or "")
+    t = TITLE_MAP.get(name)
+    return t if t and title_owned(st, t) else {}
+
+
+def owned_titles(st: Mapping) -> list[dict]:
+    return [t for t in TITLES if title_owned(st, t)]
+
+
+def equip_title(st: Mapping, name: str) -> tuple[bool, str, dict]:
+    st2 = copy.deepcopy(dict(st))
+    title = TITLE_MAP.get(str(name or "").strip())
+    if not title:
+        return False, f"没有「{name}」这个称号。可发「#称号」查看。", st2
+    if not title_owned(st2, title):
+        return False, f"尚未获得称号【{title['name']}】。", st2
+    st2["title"] = title["name"]
+    return True, (f"已佩戴称号【{title['name']}】：{title['desc']}\n"
+                  f"加成：攻/防/血 +{title['atk']:.0%}，道痕 +{title['marks']:.0%}"), st2
+
+
+def titles_text(st: Mapping) -> str:
+    lines = ["--- 称号 ---"]
+    cur = title_of(st)
+    lines.append(f"当前佩戴：{cur.get('name') or '无'}")
+    owned = {t["id"] for t in owned_titles(st)}
+    for t in TITLES:
+        mark = "✅" if t["id"] in owned else "🔒"
+        wear = "（佩戴中）" if cur.get("id") == t["id"] else ""
+        need = []
+        if t.get("need_layer"):
+            need.append(f"最高 {t['need_layer']} 层")
+        if t.get("need_clears"):
+            need.append(f"通关 {t['need_clears']} 档")
+        lines.append(f"{mark} {t['name']}{wear}｜{'、'.join(need)}")
+        lines.append(f"    {t['desc']}（攻防血 +{t['atk']:.0%}｜道痕 +{t['marks']:.0%}）")
+    lines.append("佩戴：#佩戴称号 名称")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------- 周末免费
+
+
+def is_weekend(now: float) -> bool:
+    return time.localtime(now).tm_wday >= 5
+
+
+def week_key(now: float) -> str:
+    y, w, _ = datetime.date.fromtimestamp(now).isocalendar()
+    return f"{y}-W{w:02d}"
+
+
+def weekend_available(st: Mapping, now: float) -> bool:
+    return is_weekend(now) and str(st.get("weekend_week") or "") != week_key(now)
+
+
+def weekend_text(st: Mapping, now: float) -> str:
+    key = week_key(now)
+    weekend = is_weekend(now)
+    used = str(st.get("weekend_week") or "") == key
+    lines = ["--- 周末免费 ---", f"今日：{'周末' if weekend else '工作日'}｜本周：{key}"]
+    if not weekend:
+        lines.append("周末（周六/周日）首次开启劫境免入场灵石。")
+    elif used:
+        lines.append("本周免费额度已用，下次周末再来。")
+    else:
+        lines.append("本周免费额度可用：开启劫境时自动免入场灵石。")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------- 无尽商店
+
+
+def shop_products(shop_content: Mapping) -> list[dict]:
+    return list(shop_content.get("products") or [])
+
+
+def shop_today(st: Mapping, now: float) -> dict:
+    today = time_key(now)
+    counts = st.get("shop_counts") if isinstance(st.get("shop_counts"), dict) else {}
+    if str(st.get("shop_day") or "") != today:
+        counts = {}
+    return counts
+
+
+def shop_limit(product: Mapping, celestial: Mapping) -> int:
+    base = int(product.get("dailyLimit", 0) or 0)
+    if base <= 0:
+        return 0
+    rate = float(celestial.get("shop_limit", 1) or 1)
+    return max(1, int(-(-base * rate // 1)))
+
+
+def shop_price(product: Mapping, celestial: Mapping) -> int:
+    return max(1, int(float(product.get("price", 0) or 0) * float(celestial.get("shop", 1) or 1)))
+
+
+def shop_text(st: Mapping, shop_content: Mapping, celestial: Mapping, now: float) -> str:
+    counts = shop_today(st, now)
+    lines = ["--- 无尽商店 ---",
+             f"劫境道痕：{int(st.get('marks_total', 0) or 0):,}｜今日：{time_key(now)}",
+             f"天象：{celestial.get('name')}（价格 ×{float(celestial.get('shop', 1) or 1):.2f}）"]
+    for p in shop_products(shop_content):
+        pid = str(p.get("id"))
+        action = str(p.get("action") or "item")
+        price = shop_price(p, celestial)
+        limit = shop_limit(p, celestial)
+        used = int(counts.get(pid, 0) or 0)
+        limit_txt = "不限购" if limit <= 0 else f"今日 {used}/{limit}"
+        lock = "" if action == "item" else "（暂未开放）"
+        qty = int(p.get("quantity", 1) or 1)
+        qty_txt = f"×{qty}" if qty > 1 else ""
+        lines.append(f"· [{p.get('id')}] {p.get('name')}{qty_txt}｜{price:,} 道痕｜{limit_txt}{lock}")
+        lines.append(f"    {p.get('description', '')}")
+    lines.append("购买：#无尽购买 编号或名称[*数量]")
+    return "\n".join(lines)
+
+
+def buy_shop(st: Mapping, product_id: str, qty: int, now: float,
+             shop_content: Mapping, celestial: Mapping) -> tuple[bool, str, dict, dict]:
+    st2 = copy.deepcopy(dict(st))
+    qty = max(1, int(qty or 1))
+    key = str(product_id or "").strip()
+    product = None
+    for p in shop_products(shop_content):
+        if str(p.get("id")) == key or str(p.get("name")) == key:
+            product = p
+            break
+    if not product:
+        return False, f"商店里没有「{product_id}」。", st2, {}
+    if str(product.get("action") or "item") != "item":
+        return False, f"【{product['name']}】对应系统尚未开放，暂不可购买。", st2, {}
+    today = time_key(now)
+    counts = shop_today(st2, now)
+    st2["shop_day"] = today
+    pid = str(product.get("id"))
+    limit = shop_limit(product, celestial)
+    used = int(counts.get(pid, 0) or 0)
+    if limit > 0 and used + qty > limit:
+        return False, f"【{product['name']}】今日限购 {limit} 件（已购 {used}）。", st2, {}
+    price = shop_price(product, celestial) * qty
+    if int(st2.get("marks_total", 0) or 0) < price:
+        return False, (f"道痕不足：【{product['name']}】需 {price:,}"
+                       f"（持有 {int(st2.get('marks_total', 0) or 0):,}）。"), st2, {}
+    st2["marks_total"] = int(st2.get("marks_total", 0) or 0) - price
+    counts[pid] = used + qty
+    st2["shop_counts"] = counts
+    grant = int(product.get("quantity", 1) or 1) * qty
+    return True, (f"购入【{product['name']}】×{grant}，耗道痕 {price:,}"
+                  f"（余 {st2['marks_total']:,}）。"), st2, {str(product["name"]): grant}
+
+
+# ---------------------------------------------------------------- 劫境商人
+
+
+def refresh_merchant(st: Mapping, shop_content: Mapping, celestial: Mapping,
+                     rng: random.Random) -> dict:
+    """每层可遇一次行商：4 件随机商品，价格 6-9 折，用未带出的道痕支付。"""
+    st2 = copy.deepcopy(dict(st))
+    layer = int(st2.get("layer", 0) or 0)
+    if st2.get("merchant") and int(st2.get("merchant_layer", 0) or 0) == layer:
+        return st2
+    pool = [p for p in shop_products(shop_content) if str(p.get("action") or "item") == "item"]
+    if not pool:
+        return st2
+    picks = rng.sample(pool, min(4, len(pool)))
+    offers = []
+    for p in picks:
+        disc = round(rng.uniform(0.6, 0.9), 2)
+        price = max(20, int(float(p.get("price", 0) or 0) * disc
+                           * float(celestial.get("shop", 1) or 1) * 0.35))
+        offers.append({
+            "id": p.get("id"), "name": p.get("name"), "price": price,
+            "discount": disc, "qty": int(p.get("quantity", 1) or 1),
+            "desc": p.get("description", ""),
+        })
+    st2["merchant"] = offers
+    st2["merchant_layer"] = layer
+    return st2
+
+
+def merchant_text(st: Mapping) -> str:
+    offers = st.get("merchant") or []
+    if not offers:
+        return "劫境行商尚未现身（先「#无尽下一关」推进一层）。"
+    lines = ["--- 劫境商人 ---",
+             f"可用道痕：{int(st.get('marks', 0) or 0):,}（未带出）"]
+    for i, o in enumerate(offers, 1):
+        lines.append(f"{i}. {o['name']}×{o.get('qty', 1)}｜{o['price']:,} 道痕"
+                     f"（{o['discount'] * 10:.1f} 折）")
+        lines.append(f"    {o.get('desc', '')}")
+    lines.append("购买：#劫境购买 1-4（本层有效）")
+    return "\n".join(lines)
+
+
+def buy_merchant(st: Mapping, idx: int, celestial: Mapping) -> tuple[bool, str, dict, dict]:
+    st2 = copy.deepcopy(dict(st))
+    offers = list(st2.get("merchant") or [])
+    i = int(idx or 0)
+    if i < 1 or i > len(offers):
+        return False, f"商人只有 1-{len(offers)} 件货。", st2, {}
+    offer = offers[i - 1]
+    price = int(offer.get("price", 0) or 0)
+    if int(st2.get("marks", 0) or 0) < price:
+        return False, (f"未带出的道痕不足（{int(st2.get('marks', 0) or 0):,}/{price:,}）。\n"
+                       f"提示：道痕需在劫境内使用，撤离后才能进商店。"), st2, {}
+    st2["marks"] = int(st2.get("marks", 0) or 0) - price
+    offers.pop(i - 1)
+    st2["merchant"] = offers
+    grant = int(offer.get("qty", 1) or 1)
+    return True, (f"购入【{offer['name']}】×{grant}，耗道痕 {price:,}"
+                  f"（余 {st2['marks']:,}）。"), st2, {str(offer["name"]): grant}
+
+
+# ---------------------------------------------------------------- 等级 / 排名
+
+
 def rank_rows(players: Sequence[Mapping], limit: int = 10) -> list[dict]:
     rows = []
     for p in players:
@@ -736,7 +1015,7 @@ def rank_rows(players: Sequence[Mapping], limit: int = 10) -> list[dict]:
             continue
         tier = int(st.get("best_tier", 1) or 1)
         layer = int(st.get("best_layer", 0) or 0)
-        marks = int(st.get("marks_total", 0) or 0)
+        marks = int(st.get("marks_earned", st.get("marks_total", 0)) or 0)
         if layer <= 0 and marks <= 0:
             continue
         rows.append({"name": p.get("name") or str(p.get("uid", ""))[:8],
