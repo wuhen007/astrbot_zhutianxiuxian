@@ -380,9 +380,16 @@ class ZhutianPlugin(Star):
 
     SMART_TEXT_LIMIT = 200
 
+    def _is_panel(self, text: str) -> bool:
+        """面板判定：超字数、或行数 ≥5、或以 --- 标题行开头 → 出图。"""
+        if len(text) > self.SMART_TEXT_LIMIT:
+            return True
+        lines = [ln for ln in text.split("\n") if ln.strip()]
+        return len(lines) >= 5 or text.lstrip().startswith("---")
+
     async def _smart(self, event: AstrMessageEvent, text: str, title: str = "诸天修仙"):
-        """智能回复：长文本（>200 字）自动转通用面板图，渲染失败回退原文。"""
-        if len(text) <= self.SMART_TEXT_LIMIT:
+        """智能回复：长文本/多行面板自动转通用面板图，渲染失败回退原文。"""
+        if not self._is_panel(text):
             yield event.plain_result(text)
             return
         if self.render_on:
