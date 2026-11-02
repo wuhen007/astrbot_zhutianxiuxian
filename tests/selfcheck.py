@@ -537,7 +537,22 @@ async def main():
     qa = dict(lover_a.ext.get("qinmidu") or {})
     qa["lb"] = int(qa.get("lb", 0)) + 5
     assert qa["lb"] == 15
-    print("social economy ok")
+    # 双修融合规则（体质对+概率）
+    RULES = [
+        ({"大成·荒古圣体", "先天道胎"}, 0.05, "先天圣体道胎"),
+        ({"命运神道体", "极道天魔"}, 0.01, "终焉神魔体"),
+        ({"太阳之体", "太阴之体"}, 0.01, "混沌体"),
+    ]
+    for names, chance, fused in RULES:
+        assert len(names) == 2 and 0 < chance <= 1 and fused, (names, fused)
+    # 融合体质在灵根表中
+    lg_tbl = store.table("item/灵根列表")
+    lg_names = {e.get("name") for e in lg_tbl}
+    for _, _, fused in RULES:
+        assert fused in lg_names, fused
+    for n in ("大成·荒古圣体", "先天道胎", "命运神道体", "极道天魔", "太阳之体", "太阴之体"):
+        assert n in lg_names, n
+    print("fusion ok")
 
     # 15c. 每日任务：公式 / 接取-提交-领奖闭环 / 灵石自动追踪 / 秘境计数
     from core import quest as quest_mod  # noqa: E402
