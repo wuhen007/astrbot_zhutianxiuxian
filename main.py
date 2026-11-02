@@ -11,7 +11,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import alchemy, battle, boss, catalog, cultivate, equipment, items, linggen, pet, quest, secret, sect
+from .core import alchemy, battle, boss, catalog, cultivate, equipment, items, linggen, occupation, pet, quest, secret, sect
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -83,6 +83,14 @@ CMD_TASK_SUBMIT = "#提交每日任务"
 CMD_TASK_CLAIM = "#领取每日奖励"
 CMD_LOU = "#图鉴楼"
 CMD_WHERE = "#哪里有"
+CMD_JOB = "#转职"
+CMD_JOB_SWAP = "#转换副职"
+CMD_JOB_MY = "#我的职业"
+CMD_PLANT = "#采药"
+CMD_PLANT_END = "#结束采药"
+CMD_MINE = "#采矿"
+CMD_MINE_END = "#结束采矿"
+CMD_MAKE = "#制作"
 CMD_IMPERIAL = "#认主"
 CMD_IMPERIAL_MY = "#已认主"
 CMD_SECT_SECRET = "#宗门秘境"
@@ -172,6 +180,16 @@ class ZhutianPlugin(Star):
         # 灵根（天资）表：原版 139 条，天资洗炼类丹药重摇用
         self.linggen_table = [
             e for e in (self.content.table("item/灵根列表") or [])
+            if isinstance(e, dict) and e.get("name")
+        ]
+
+        # 职业经验表（occupation/experience.json 38 档）与职业名单
+        self.occ_exp_table = [
+            e for e in (self.content.table("occupation/experience") or [])
+            if isinstance(e, dict) and e.get("id") is not None
+        ]
+        self.job_names = [
+            str(e.get("name")) for e in (self.content.table("occupation/职业列表") or [])
             if isinstance(e, dict) and e.get("name")
         ]
 
@@ -412,6 +430,16 @@ class ZhutianPlugin(Star):
             ]},
             {"title": "源版帮助目录", "lines": [
                 (f"{CMD_HELP} 目录", "诸天/灵根/职业/活动/小世界/师徒/基础/宗门/设置/星海/周年/通用/扩展/世界"),
+            ]},
+            {"title": "职业体系", "lines": [
+                (f"{CMD_JOB} 职业名", "转职（需对应转职凭证）"),
+                (f"{CMD_JOB_SWAP} 职业名", "切换副职"),
+                (CMD_JOB_MY, "查看主职与副职"),
+                (f"{CMD_PLANT} 分钟", "采药（采药师，15 分钟周期）"),
+                (CMD_PLANT_END, "结束采药结算"),
+                (f"{CMD_MINE} 分钟", "采矿（采矿师，30 分钟周期）"),
+                (CMD_MINE_END, "结束采矿结算"),
+                (f"{CMD_MAKE} 符名 数量", "制作符箓（符师，必成）"),
             ]},
             {"title": "图鉴查询", "lines": [
                 (f"{CMD_LOU} 类目 页码", "丹药楼/装备楼/功法楼/道具楼/仙宠楼/锻造材料楼/灵根图鉴等"),
@@ -1829,8 +1857,10 @@ class ZhutianPlugin(Star):
         qty = max(1, min(int(qty or 1), 10))
         alchemy_exp = int(doc.ext.get("alchemy_exp", 0))
         lv = alchemy.level_of(alchemy_exp)
-        if alchemy.level_locked(recipe, lv):
-            yield event.plain_result(f"炼丹等级不足：此方需 {recipe['level_limit']} 级，道友 {lv} 级。")
+        occ_lv, _ = self._ensure_occ(doc)
+        # 原版门槛对职业等级（occupation_level）；炼丹等级保留为参考展示
+        if occ_lv < int(recipe.get("level_limit", 0) or 0):
+            yield event.plain_result(f"炼丹等级不足：此方需 {recipe['level_limit']} 级，道友职业 {occ_lv} 级。")
             return
         inv = await self.db.get_inventory(doc.uid)
         lacking = alchemy.missing_materials(recipe, inv)
@@ -1844,7 +1874,7 @@ class ZhutianPlugin(Star):
             consume[str(m["name"])] = consume.get(str(m["name"]), 0) + int(m["amount"]) * qty
         import random as _random
         rng = _random.Random(f"{doc.uid}:{pill_name}:{qty}:{time.time()}")
-        buckets, new_exp = alchemy.craft_pills(recipe, lv, rng, qty)
+        buckets, new_exp = alchemy.craft_pills(recipe, occ_lv, rng, qty)  # 品质阈值用职业等级（原版 dengjixiuzheng）
         d = doc.model_copy(deep=True)
         d.ext["alchemy_exp"] = new_exp
         gain: dict[str, int] = {}
@@ -1864,8 +1894,18 @@ class ZhutianPlugin(Star):
             await self.db.add_items(doc.uid, gain)
         new_lv = alchemy.level_of(new_exp)
         lv_note = f"\n炼丹等级升至 {new_lv} 级！" if new_lv > lv else ""
+        # 职业经验（原版 zhizuo_dan 调 Add_职业经验；仅炼丹师生效）
+        occ_note = ""
+        if doc.ext.get("occupation") == "炼丹师":
+            olv, oexp = self._ensure_occ(doc)
+            gain_exp = int((recipe.get("exp") or [0, 0])[0]) * qty
+            nlv2, nexp2 = occupation.add_exp(olv, oexp, gain_exp, self.occ_exp_table)
+            d.ext["occupation_level"] = nlv2
+            d.ext["occupation_exp"] = nexp2
+            await self.db.save_player(d.model_dump())
+            occ_note = f"\n职业经验 +{gain_exp}" + (f"，升到 {nlv2} 级！" if nlv2 > olv else "")
         text = f"丹炉火候正好，炼成：{'、'.join(parts)}。"
-        yield event.plain_result(f"{text}\n累计经验 {new_exp}{lv_note}")
+        yield event.plain_result(f"{text}\n累计经验 {new_exp}{lv_note}{occ_note}")
 
     @filter.command(CMD_ALCHEMY_LV, "炼丹等级")
     async def handle_alchemy_lv(self, event: AstrMessageEvent):
@@ -2144,6 +2184,296 @@ class ZhutianPlugin(Star):
             lines.append("· （当前无生效丹药）")
         yield event.plain_result("\n".join(lines))
 
+    # ---- 职业 / 采集 / 制符（移植原版 Occupation） ----
+
+    def _ensure_occ(self, doc: PlayerDoc) -> tuple[int, int]:
+        """读职业等级；老玩家无职业字段时从 alchemy/forge 经验映射迁移（只读，不落盘）。"""
+        lv = doc.ext.get("occupation_level")
+        if lv is not None:
+            return int(lv), int(doc.ext.get("occupation_exp", 0) or 0)
+        migrated = max(
+            alchemy.level_of(int(doc.ext.get("alchemy_exp", 0))),
+            alchemy.level_of(int(doc.ext.get("forge_exp", 0))),
+        )
+        return migrated, 0
+
+    def _occ_rate(self, level: int) -> float:
+        return occupation.rate_of(level, self.occ_exp_table)
+
+    @filter.command(CMD_JOB, "转职")
+    async def handle_job(self, event: AstrMessageEvent, job_name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        job = (job_name or "").strip()
+        if not job:
+            yield event.plain_result(f"格式：{CMD_JOB} 职业名（可选：{'、'.join(self.job_names)}）")
+            return
+        if job not in self.job_names:
+            yield event.plain_result(f"没有[{job}]这项职业。可选：{'、'.join(self.job_names)}")
+            return
+        realm_id = max(0, doc.realm_index) + 1
+        if not occupation.job_gate_ok(job, realm_id):
+            need = 17 if job == "采矿师" else 25
+            yield event.plain_result(f"门槛未至：[{job}]需第 {need} 境，道友当前第 {realm_id} 境。")
+            return
+        cur = doc.ext.get("occupation")
+        if cur == job:
+            yield event.plain_result(f"你当前已经是[{job}]。")
+            return
+        fuzhi = list(doc.ext.get("fuzhi") or [])
+        if any(f.get("职业名") == job for f in fuzhi):
+            yield event.plain_result(f"你已拥有[{job}]副职，请发「{CMD_JOB_SWAP} {job}」切换。")
+            return
+        cert = f"{job}转职凭证"
+        inv = await self.db.get_inventory(doc.uid)
+        if int(inv.get(cert, 0)) < 1:
+            yield event.plain_result(f"你没有【{cert}】。")
+            return
+        lv, exp = self._ensure_occ(doc)
+        d = doc.model_copy(deep=True)
+        if cur:  # 旧职业快照入副职（对齐原版 saveOccupation）
+            fuzhi = [f for f in fuzhi if f.get("职业名") != cur]
+            fuzhi.append({"职业名": cur, "职业经验": exp, "职业等级": lv})
+        d.ext["fuzhi"] = fuzhi
+        d.ext["occupation"] = job
+        d.ext["occupation_level"] = 1
+        d.ext["occupation_exp"] = 0
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            await self.db.remove_item(doc.uid, cert, 1)
+        yield event.plain_result(
+            f"恭喜转职为[{job}]！" + (f"旧职业[{cur}]已存为副职。" if cur else "")
+        )
+
+    @filter.command(CMD_JOB_SWAP, "转换副职")
+    async def handle_job_swap(self, event: AstrMessageEvent, job_name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        fuzhi = [f for f in (doc.ext.get("fuzhi") or []) if isinstance(f, dict)]
+        cur = doc.ext.get("occupation")
+        fuzhi = [f for f in fuzhi if f.get("职业名") != cur]
+        if not fuzhi:
+            yield event.plain_result("您还没有副职哦。")
+            return
+        target = (job_name or "").strip()
+        if not target:
+            if len(fuzhi) > 1:
+                yield event.plain_result(
+                    f"你有多个副职，请发「{CMD_JOB_SWAP} 职业名」。可选：{'、'.join(f['职业名'] for f in fuzhi)}"
+                )
+                return
+            target = str(fuzhi[0]["职业名"])
+        tgt = next((f for f in fuzhi if f.get("职业名") == target), None)
+        if not tgt:
+            yield event.plain_result(f"你还没有[{target}]职业，可发「{CMD_JOB_MY}」查看。")
+            return
+        lv, exp = self._ensure_occ(doc)
+        d = doc.model_copy(deep=True)
+        rest = [f for f in fuzhi if f.get("职业名") != target]
+        if cur:
+            rest = [f for f in rest if f.get("职业名") != cur]
+            rest.append({"职业名": cur, "职业经验": exp, "职业等级": lv})
+        d.ext["fuzhi"] = rest
+        d.ext["occupation"] = target
+        d.ext["occupation_level"] = int(tgt.get("职业等级", 1))
+        d.ext["occupation_exp"] = int(tgt.get("职业经验", 0))
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result(
+            f"已切换至副职[{target}]（{int(tgt.get('职业等级', 1))} 级）。"
+            + (f"原职业[{cur}]已存为副职。" if cur else "")
+        )
+
+    @filter.command(CMD_JOB_MY, "我的职业")
+    async def handle_job_my(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        lv, exp = self._ensure_occ(doc)
+        cur = doc.ext.get("occupation")
+        lines = ["--- 职业 ---"]
+        if cur:
+            row = next((e for e in self.occ_exp_table if int(e.get("id", -1)) == lv), {})
+            lines.append(f"主职：{cur}（{row.get('name', '?')} {lv} 级｜经验 {exp}）")
+        else:
+            lines.append("主职：无业游民（发「#转职 职业名」入职，需对应转职凭证）")
+        for f in (doc.ext.get("fuzhi") or []):
+            if isinstance(f, dict) and f.get("职业名"):
+                lines.append(f"副职：{f['职业名']}（{int(f.get('职业等级', 1))} 级）")
+        yield event.plain_result("\n".join(lines))
+
+    def _timed_action_start(self, doc: PlayerDoc, action: str, minutes: int,
+                            period: int, cycles: int) -> tuple[bool, str, PlayerDoc]:
+        """采集类定时动作（对齐原版 plant/mine：周期档钳制 + state 机）。"""
+        if doc.state != "空闲":
+            return False, f"道友正在「{doc.state}」中，无法分心。", doc
+        t = max(period, min(int(minutes), period * cycles))
+        d = doc.model_copy(deep=True)
+        d.state = action
+        d.state_start = time.time()
+        d.ext["action_minutes"] = t
+        return True, f"现在开始{action}{t}分钟，完成后发对应「#结束{action[:2]}」结算。", d
+
+    def _timed_action_end(self, doc: PlayerDoc, action: str, period: int, cycles: int) -> tuple[bool, int, PlayerDoc]:
+        """结算采集时长：实际分钟按周期向下取整，不足一个周期 0 收益。"""
+        if doc.state != action:
+            return False, 0, doc
+        cap = period * cycles
+        elapsed = max(0.0, (time.time() - doc.state_start) / 60)
+        planned = doc.ext.get("action_minutes")
+        counted = min(elapsed, float(planned) if planned else float(cap), float(cap))
+        floored = int(counted // period) * period
+        d = doc.model_copy(deep=True)
+        d.state = "空闲"
+        d.state_start = 0.0
+        d.ext.pop("action_minutes", None)
+        return True, floored, d
+
+    @filter.command(CMD_PLANT, "采药")
+    async def handle_plant(self, event: AstrMessageEvent, minutes: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if doc.ext.get("occupation") != "采药师":
+            yield event.plain_result("您采药，您配吗？（需采药师职业）")
+            return
+        digits = "".join(ch for ch in (minutes or "") if ch.isdigit())
+        t = int(digits) if digits else occupation.plant_period()
+        ok, msg, d = self._timed_action_start(doc, "采药中", t, occupation.plant_period(), occupation.plant_cycles())
+        if ok:
+            await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_PLANT_END, "结束采药")
+    async def handle_plant_end(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, minutes, d = self._timed_action_end(doc, "采药中", occupation.plant_period(), occupation.plant_cycles())
+        if not ok:
+            yield event.plain_result("道友并未采药。")
+            return
+        realm_id = max(0, doc.realm_index) + 1
+        lv, _ = self._ensure_occ(doc)
+        import random as _random
+        herbs, exp = occupation.plant_yield(minutes, lv, realm_id, _random.Random(f"{doc.uid}:plant:{time.time()}"))
+        nlv, nexp = occupation.add_exp(lv, self._ensure_occ(doc)[1], exp, self.occ_exp_table)
+        d.ext["occupation_level"] = nlv
+        d.ext["occupation_exp"] = nexp
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            if herbs:
+                await self.db.add_items(doc.uid, herbs)
+        lines = [f"采药归来（{minutes} 分钟）：获得职业经验 {exp}" + (f"，升到 {nlv} 级！" if nlv > lv else "")]
+        if herbs:
+            lines += [f"· {n}×{c}" for n, c in herbs.items()]
+        else:
+            lines.append("· 产出不足一株，草药散于风中")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command(CMD_MINE, "采矿")
+    async def handle_mine(self, event: AstrMessageEvent, minutes: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if doc.ext.get("occupation") != "采矿师":
+            d = doc.model_copy(deep=True)
+            d.stones = max(0, d.stones - 200)
+            await self.db.save_player(d.model_dump())
+            yield event.plain_result("你挖矿许可证呢？非法挖矿，罚款 200 灵石。")
+            return
+        digits = "".join(ch for ch in (minutes or "") if ch.isdigit())
+        t = int(digits) if digits else occupation.mine_period()
+        ok, msg, d = self._timed_action_start(doc, "采矿中", t, occupation.mine_period(), occupation.mine_cycles())
+        if ok:
+            await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_MINE_END, "结束采矿")
+    async def handle_mine_end(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, minutes, d = self._timed_action_end(doc, "采矿中", occupation.mine_period(), occupation.mine_cycles())
+        if not ok:
+            yield event.plain_result("道友并未采矿。")
+            return
+        lv, exp_now = self._ensure_occ(doc)
+        import random as _random
+        mats, exp = occupation.mine_yield_full(minutes, lv, self.occ_exp_table, _random.Random(f"{doc.uid}:mine:{time.time()}"))
+        nlv, nexp = occupation.add_exp(lv, exp_now, exp, self.occ_exp_table)
+        d.ext["occupation_level"] = nlv
+        d.ext["occupation_exp"] = nexp
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            if mats:
+                await self.db.add_items(doc.uid, mats)
+        lines = [f"采矿归来（{minutes} 分钟）：获得职业经验 {exp}" + (f"，升到 {nlv} 级！" if nlv > lv else "")]
+        if mats:
+            lines += [f"· {n}×{c}" for n, c in mats.items()]
+        else:
+            lines.append("· 产出不足以装满一筐")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command(CMD_MAKE, "制作符箓")
+    async def handle_make(self, event: AstrMessageEvent, fu_name: str = "", qty: int = 1):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if doc.ext.get("occupation") != "符师":
+            yield event.plain_result("符道玄奥，非符师不可妄为！")
+            return
+        fu_name = (fu_name or "").strip().rstrip("*0123456789")
+        fufang = next((r for r in (self.content.table("occupation/制符列表") or [])
+                       if isinstance(r, dict) and r.get("name") == fu_name), None)
+        if not fufang:
+            yield event.plain_result(f"符道秘录中无「{fu_name}」记载。发「#符道配方」查看。")
+            return
+        lv, _ = self._ensure_occ(doc)
+        ok, why, n = occupation.talisman_make(fufang, lv, max(1, int(qty or 1)))
+        if not ok:
+            yield event.plain_result(why)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        lacking = alchemy.missing_materials(fufang, inv)
+        if lacking:
+            detail = "、".join(f"{nm}(需{need}有{have})" for nm, need, have in lacking)
+            yield event.plain_result(f"材料不足：{detail}")
+            return
+        d = doc.model_copy(deep=True)
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            for m in fufang["materials"]:
+                if not await self.db.remove_item(doc.uid, str(m["name"]), int(m["amount"]) * n):
+                    raise RuntimeError("INSUFFICIENT")
+            await self.db.add_items(doc.uid, {fu_name: n})
+        yield event.plain_result(f"成功制作「{fu_name}」×{n}！")
+
     # ---- 图鉴楼 / 来源查询（对齐原版楼类指令） ----
 
     CATALOG_TABLES = {
@@ -2406,6 +2736,7 @@ class ZhutianPlugin(Star):
             return
         forge_exp = int(doc.ext.get("forge_exp", 0))
         lv = alchemy.level_of(forge_exp)
+        occ_lv, occ_exp = self._ensure_occ(doc)
         inv = await self.db.get_inventory(doc.uid)
         lacking = alchemy.missing_materials(recipe, inv)
         if lacking:
@@ -2414,19 +2745,41 @@ class ZhutianPlugin(Star):
             return
         import random as _random
         rng = _random.Random(f"{doc.uid}:{item_name}:{time.time()}")
-        ok, new_exp, text = alchemy.craft(recipe, forge_exp, rng, 1)
-        d = doc.model_copy()
-        d.ext["forge_exp"] = new_exp
+        # 对齐原版 lianqi：成功率 = 图纸 rate × (1 + 职业等级加成)，≥24 级 0.8 封顶
+        is_forger = doc.ext.get("occupation") == "炼器师"
+        suc = occupation.forge_rate(float(recipe.get("rate", 1) or 1), occ_lv if is_forger else 0, self.occ_exp_table)
+        mats_txt = "、".join(f"{m['name']}×{m['amount']}" for m in recipe["materials"])
+        d = doc.model_copy(deep=True)
+        d.ext["forge_exp"] = forge_exp
+        new_exp = forge_exp
+        if rng.random() > suc:
+            async with self.db.transaction():
+                await self.db.save_player(d.model_dump())
+                for m in recipe["materials"]:
+                    if not await self.db.remove_item(doc.uid, str(m["name"]), int(m["amount"])):
+                        raise RuntimeError("INSUFFICIENT")
+            flavor = "打造装备时不小心锤断了刃芯，打造失败！" if rng.random() < 0.5 \
+                else "打造装备时没有把控好火候，烧毁了，打造失败！"
+            yield event.plain_result(f"消耗 {mats_txt}。{flavor}（成功率 {suc:.0%}）")
+            return
+        pinji = occupation.forge_pinji(rng)
         async with self.db.transaction():
             await self.db.save_player(d.model_dump())
             for m in recipe["materials"]:
                 if not await self.db.remove_item(doc.uid, str(m["name"]), int(m["amount"])):
                     raise RuntimeError("INSUFFICIENT")
-            if ok:
-                await self.db.add_items(doc.uid, {recipe["name"]: 1})
-        new_lv = alchemy.level_of(new_exp)
-        lv_note = f"\n炼器等级升至 {new_lv} 级！" if new_lv > lv else ""
-        yield event.plain_result(f"{text}\n累计经验 {new_exp}{lv_note}")
+            await self.db.add_items(doc.uid, {recipe["name"]: 1})
+        gain_exp = int((recipe.get("exp") or [0, 0])[0])
+        if is_forger:
+            nlv, nexp = occupation.add_exp(occ_lv, occ_exp, gain_exp, self.occ_exp_table)
+            d.ext["occupation_level"] = nlv
+            d.ext["occupation_exp"] = nexp
+            await self.db.save_player(d.model_dump())
+        yield event.plain_result(
+            f"消耗 {mats_txt}。打造成功，获得{item_name}"
+            f"（品相：{occupation.PINJI_NAMES[pinji]}）×1｜成功率 {suc:.0%}"
+            + (f"，炼器师经验 +{gain_exp}" if is_forger else "")
+        )
 
     @filter.command(CMD_FORGE_LV, "锻造等级")
     async def handle_forge_lv(self, event: AstrMessageEvent):

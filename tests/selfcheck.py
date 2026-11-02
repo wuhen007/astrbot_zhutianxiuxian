@@ -382,6 +382,42 @@ async def main():
     assert not ok and not consume, msg
     print("pill buffs ok")
 
+    # 15e. 职业体系：等级曲线 / 采药采矿产出 / 制符 / 炼器成功率
+    from core import occupation as occ_mod  # noqa: E402
+
+    store = ContentStore(PLUGIN / "data")
+    exp_table = store.table("occupation/experience")
+    assert len(exp_table) == 38 and exp_table[0]["id"] == 0
+    lv0, exp0 = occ_mod.add_exp(1, 0, 100, exp_table)
+    assert lv0 == 2 and exp0 == 0, (lv0, exp0)  # 1 级需 100 → 恰好升 2 级
+    lv1, exp1 = occ_mod.add_exp(1, 0, 250, exp_table)
+    assert lv1 == 2 and exp1 == 150, (lv1, exp1)  # 250-100=150 < 200 → 停 2 级剩 150
+    assert occ_mod.rate_of(1, exp_table) == 0.1
+    # 采药：480 分钟满周期、10 级、境界 10（<22 → k=0.5）→ total=32×0.5=16，前 5 草各 3 株
+    herbs, exp = occ_mod.plant_yield(480, 10, 10, _random.Random(1))
+    assert exp == 4800 and sum(herbs.values()) >= 10, (herbs, exp)
+    assert set(herbs) <= set(occ_mod.HERB_NAMES[:5]), herbs  # 低境界只有前 5 草
+    herbs_low, exp_low = occ_mod.plant_yield(30, 1, 10, _random.Random(1))
+    assert exp_low == 300 and herbs_low == {}, (herbs_low, exp_low)  # 30 分钟×1 级不足一株（原版语义）
+    # 采矿：60 分钟、5 级
+    mats, exp = occ_mod.mine_yield_full(60, 5, exp_table, _random.Random(2))
+    assert "庚金" in mats and "玄土" in mats and exp == 600, mats
+    assert all(v >= 0 for v in mats.values())
+    # 制符：等级门槛
+    ff = {"name": "符笔", "level_limit": 0, "materials": []}
+    ok, why, n = occ_mod.talisman_make(ff, 1, 2)
+    assert ok and n == 2
+    ff2 = {"name": "锁灵仙符", "level_limit": 5, "materials": []}
+    ok, why, _ = occ_mod.talisman_make(ff2, 3, 1)
+    assert not ok and "5重境" in why, why
+    # 炼器成功率：clamp 与封顶
+    tbl = [{"id": 24, "rate": 3.0}, {"id": 1, "rate": 0.1}]
+    r24 = occ_mod.forge_rate(1.0, 24, tbl)
+    assert r24 == 0.8, r24  # ≥24 级封顶 0.8
+    r1 = occ_mod.forge_rate(0.5, 1, tbl)
+    assert 0.01 <= r1 < 1.0, r1
+    print("occupation ok")
+
     # 15c. 每日任务：公式 / 接取-提交-领奖闭环 / 灵石自动追踪 / 秘境计数
     from core import quest as quest_mod  # noqa: E402
 
