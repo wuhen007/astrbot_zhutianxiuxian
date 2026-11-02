@@ -11,7 +11,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, battle, boss, catalog, cultivate, dibing, equipment, items, linggen, endless, motou, npc, occupation, pet, quest, raid, secret, sect, shenjie, story_npc, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, battle, boss, catalog, cultivate, dibing, equipment, items, linggen, addict, endless, motou, npc, occupation, pet, quest, raid, secret, sect, shenjie, story_npc, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -204,6 +204,9 @@ CMD_ENDLESS_TREASURE_UNEQUIP = "#卸下无尽至宝"
 CMD_ENDLESS_TREASURE_SLOT = "#拓展无尽至宝槽"
 CMD_ENDLESS_REROLL = "#重置无尽能力"
 CMD_ENDLESS_SWEEP = "#扫荡无尽劫境"
+CMD_ADDICT = "#沉迷秘境"
+CMD_ADDICT_CLAIM = "#沉迷收获"
+CMD_ADDICT_CLEAR = "#清除沉迷记录"
 CMD_DARK_OPEN = "#开启黑暗动乱"
 CMD_DARK_CLOSE = "#关闭黑暗动乱"
 CMD_DARK_STATUS = "#禁区至尊状态"
@@ -719,6 +722,9 @@ class ZhutianPlugin(Star):
                 (f"{CMD_RAID_SPY} 地点", "花 0.3×价格打探收获"),
                 (f"{CMD_RAID} 地点", "洗劫（强化费+战斗，2h CD，魔道值+）"),
                 (f"{CMD_GIFT} @道侣", "赠百合花篮（亲密度 +10）"),
+                (f"{CMD_ADDICT} 地点*次数", "沉迷秘境（1-12 次，限时挂机）"),
+                (CMD_ADDICT_CLAIM, "沉迷到点一次性结算"),
+                (CMD_ADDICT_CLEAR, "清除沉迷记录"),
             ]},
             {"title": "团本讨伐", "lines": [
                 (f"{CMD_TR_CREATE} 名字", "创建讨伐队伍（5 人，24h 有效）"),
@@ -5977,6 +5983,132 @@ class ZhutianPlugin(Star):
             return
         await self.db.save_player(endless.save(doc, st2).model_dump())
         yield event.plain_result(msg)
+
+    # ---- B9：沉迷秘境（限时挂机 + 一次性结算） ----
+
+    @filter.command(CMD_ADDICT, "沉迷秘境")
+    async def handle_addict(self, event: AstrMessageEvent, target: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        raw = (target or "").strip()
+        if not raw:
+            lines = ["--- 沉迷秘境 ---", "沉迷为限时挂机，到点一次性结算，战败会中断。"]
+            for name, (gate, factor, _desc) in secret.PLACES.items():
+                lines.append(f"· {name}｜每 1 次约 {int(addict.PLACE_COST * factor):,} 灵石"
+                             f"、{addict.MINUTES_PER_COUNT} 分钟、{addict.ROUNDS_PER_COUNT} 层")
+            lines.append(f"格式：{CMD_ADDICT} 地点*次数（1-{addict.MAX_COUNT}）")
+            async for r in self._smart(event, "\n".join(lines), "沉迷秘境"):
+                yield r
+            return
+        place, _, cnt_txt = raw.partition("*")
+        place = place.strip()
+        cnt = int(cnt_txt) if cnt_txt.strip().isdigit() else 1
+        if place not in secret.PLACES:
+            yield event.plain_result(f"没有「{place}」这个秘境。可选：{' / '.join(secret.PLACES)}")
+            return
+        if cnt < 1 or cnt > addict.MAX_COUNT:
+            yield event.plain_result(f"沉迷次数需在 1-{addict.MAX_COUNT} 之间。")
+            return
+        if doc.state != "空闲" or self._session(doc):
+            yield event.plain_result(f"道友正在「{doc.state or '秘境'}」中，无法沉迷。")
+            return
+        gate, _f, _desc = secret.PLACES[place]
+        if doc.realm_index < gate:
+            table = self.content.table(doc.realm_table)
+            need = table[min(gate, len(table) - 1)]["level"]
+            yield event.plain_result(f"【{place}】凶险异常，需修为达到【{need}】方可沉迷。")
+            return
+        hp_cur, hp_max = self._hp_pair(doc)
+        if hp_cur <= hp_max * 0.3:
+            yield event.plain_result("气血太虚，先疗伤再沉迷。")
+            return
+        cost = addict.cost_of(place, cnt)
+        if doc.stones < cost:
+            yield event.plain_result(f"沉迷【{place}】×{cnt} 需灵石 {cost:,}（当前 {doc.stones:,}）。")
+            return
+        now = time.time()
+        rec = addict.make(place, cnt, now, gate)
+        d = doc.model_copy(deep=True)
+        d.stones -= cost
+        d.state = "沉迷中"
+        d.state_start = now
+        d.ext["addiction"] = rec
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result(
+            f"你进入【{place}】沉迷历练（{cnt} 次，共 {rec['rounds']} 层）。\n"
+            f"耗时约 {cnt * addict.MINUTES_PER_COUNT} 分钟，耗灵石 {cost:,}。\n"
+            f"到点发「{CMD_ADDICT_CLAIM}」一次性结算；战败会中断且灵石减半。"
+        )
+
+    @filter.command(CMD_ADDICT_CLAIM, "沉迷收获")
+    async def handle_addict_claim(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        rec = doc.ext.get("addiction")
+        if not isinstance(rec, dict):
+            hist = addict.history_of(doc)
+            if hist:
+                async for r in self._smart(event, addict.summary_text(hist[0]), "沉迷收获"):
+                    yield r
+            else:
+                yield event.plain_result(f"没有进行中的沉迷（{CMD_ADDICT} 地点*次数）。")
+            return
+        left = addict.remaining(rec, time.time())
+        if left > 0:
+            yield event.plain_result(
+                f"沉迷尚未结束：{addict.fmt_duration(left)} 后即可收获。\n"
+                f"地点 {rec.get('place')}｜{rec.get('done', 0)}/{rec.get('rounds', 0)} 层"
+            )
+            return
+        st = self._stats(doc)
+        hp_cur, _hp_max = self._hp_pair(doc)
+        import random as _random
+        rng = _random.Random(f"{doc.uid}:addict:{rec.get('start')}")
+        rec2, hp_left = addict.simulate(
+            rec, (st.atk, st.defense, st.hp), hp_cur, st.bao, self.drop_pool, rng
+        )
+        d = doc.model_copy(deep=True)
+        d.stones += int(rec2.get("stones", 0) or 0)
+        d.exp += int(rec2.get("exp", 0) or 0)
+        d.ext["hp"] = max(0, int(hp_left))
+        d.ext.pop("addiction", None)
+        d.state = "空闲"
+        d.state_start = 0.0
+        d = addict.push_history(d, rec2)
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            if rec2.get("items"):
+                await self.db.add_items(doc.uid, dict(rec2["items"]))
+        text = addict.summary_text(rec2)
+        if rec2.get("deaths"):
+            text += "\n你重伤倒地，先「#疗伤」。"
+        async for r in self._smart(event, text, "沉迷收获"):
+            yield r
+
+    @filter.command(CMD_ADDICT_CLEAR, "清除沉迷记录")
+    async def handle_addict_clear(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        hist = addict.history_of(doc)
+        if not hist:
+            yield event.plain_result("没有可清除的沉迷记录。")
+            return
+        d = doc.model_copy(deep=True)
+        d.ext.pop("addiction_history", None)
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result(f"已清除 {len(hist)} 条沉迷记录。")
 
     @filter.command(CMD_HEAL, "灵石疗伤")
     async def handle_heal(self, event: AstrMessageEvent):

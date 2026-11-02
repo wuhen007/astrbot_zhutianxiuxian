@@ -1384,6 +1384,27 @@ async def main():
     assert not ok, "同日不应重复扫荡"
     print("endless meta ok")
 
+    # 16g. 沉迷秘境：时长/费用/模拟/死亡中断/历史
+    from core import addict as addict_mod  # noqa: E402
+
+    assert addict_mod.rounds_of(3) == 9
+    assert addict_mod.cost_of("青冥山", 1) == int(addict_mod.PLACE_COST * secret_mod.place_factor("青冥山"))
+    rec = addict_mod.make("青冥山", 2, 1_800_000_000)
+    assert rec["rounds"] == 6 and rec["end"] == 1_800_000_000 + 2 * addict_mod.MINUTES_PER_COUNT * 60
+    out, hp_left = addict_mod.simulate(
+        rec, (1_000_000, 800_000, 2_000_000), 2_000_000, 0.2, pool, _random.Random(1)
+    )
+    assert out["done"] >= 1 and out["status"] in ("completed", "died"), out
+    assert out["exp"] >= 0 and hp_left >= 0
+    out_w, hp_w = addict_mod.simulate(
+        rec, (10, 0, 10), 10, 0.0, pool, _random.Random(2)
+    )
+    assert out_w["deaths"] >= 1 and hp_w <= 0, out_w
+    assert "沉迷收获" in addict_mod.summary_text(out)
+    hdoc = addict_mod.push_history(PlayerDoc(uid="addict"), out)
+    assert len(addict_mod.history_of(hdoc)) == 1
+    print("addiction ok")
+
     # 17. 宗门纯函数 + 存取
     from core import sect as sect_mod  # noqa: E402
 
