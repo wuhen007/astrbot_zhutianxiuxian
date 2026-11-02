@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="textbody">
+  {% for line in lines %}
+  {% if line.strip() %}
+  <div class="tline {{ 'thead' if line.startswith('---') else '' }}">{{ line }}</div>
+  {% else %}
+  <div class="tgap"></div>
+  {% endif %}
+  {% endfor %}
+</div>
+{% endblock %}

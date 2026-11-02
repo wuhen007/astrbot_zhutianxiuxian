@@ -358,6 +358,24 @@ class ZhutianPlugin(Star):
             return None, "道友已被打入天牢，静候管理员赦免。"
         return doc, None
 
+    SMART_TEXT_LIMIT = 200
+
+    async def _smart(self, event: AstrMessageEvent, text: str, title: str = "诸天修仙"):
+        """智能回复：长文本（>200 字）自动转通用面板图，渲染失败回退原文。"""
+        if len(text) <= self.SMART_TEXT_LIMIT:
+            yield event.plain_result(text)
+            return
+        if self.render_on:
+            png = await render.render_panel(
+                "text",
+                {"title": title, "footer": "智能排版", "lines": text.split("\n")},
+                self.panel_dir,
+            )
+            if png:
+                yield event.image_result(str(png))
+                return
+        yield event.plain_result(text)
+
     # ---- 指令 ----
 
     @filter.command(CMD_START, "踏入仙途，创建角色")
@@ -703,7 +721,8 @@ class ZhutianPlugin(Star):
                 lines.append(f"—— {g.get('group', '')} ——")
                 for it in g.get("list", []):
                     lines.append(f"{it.get('title', '')}：{it.get('desc', '')}")
-            yield event.plain_result("\n".join(lines))
+            async for _r in self._smart(event, "\n".join(lines)):
+                yield _r
             return
         groups = self._help_groups()
         if self.render_on:
@@ -717,8 +736,8 @@ class ZhutianPlugin(Star):
             lines.append(f"—— {g['title']} ——")
             for c, d in g["lines"]:
                 lines.append(f"{c}：{d}")
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     # ---- 数值辅助 ----
 
     def _val(self, key: str, default):
@@ -911,8 +930,8 @@ class ZhutianPlugin(Star):
                 f" {items.item_buy_price(e, markup)} 灵石"
             )
         lines.append(f"购买：#购买 {page_items[0]['name']} 1")
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     async def _trade(self, event: AstrMessageEvent, item_name: str, qty: int, mode: str):
         doc, err = await self._require_player(event)
         if err:
@@ -1332,8 +1351,8 @@ class ZhutianPlugin(Star):
             )
         elif left <= b["health_max"] * 0.25:
             lines.append("妖王已濒死，血条见底！")
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     # ---- 黑暗动乱帝战（对齐原版 BOSS2） ----
 
     async def _avg_atk(self) -> tuple[int, int]:
@@ -1422,8 +1441,8 @@ class ZhutianPlugin(Star):
         ]
         if top:
             lines.append("贡献榜：" + "、".join(f"{n}({d})" for n, d in top))
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     @filter.command(CMD_DARK_RANK, "黑暗动乱贡献榜")
     async def handle_dark_rank(self, event: AstrMessageEvent):
         if not self._allowed(event):
@@ -1440,8 +1459,8 @@ class ZhutianPlugin(Star):
         lines = [f"--- 帝战贡献榜 · 第 {cur['round']} 轮 ---"]
         for i, (uid, (n, dmg)) in enumerate(top, 1):
             lines.append(f"{i}. {n}：{dmg}")
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     @filter.command(CMD_DARK_FIGHT, "平定黑暗动乱")
     async def handle_dark_fight(self, event: AstrMessageEvent):
         if not self._allowed(event):
@@ -1506,8 +1525,8 @@ class ZhutianPlugin(Star):
                 f"【全服公告】黑暗动乱被 {name} 率先平定！成仙之路开启！\n"
                 f"奖池 {b['reward']} 灵石按贡献分配：\n" + "\n".join(paid[:8])
             )
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     # ---- 锻神池 · 炼神魄（对齐原版 pata/DSC） ----
 
     @filter.command(CMD_SHENPO, "炼神魄")
@@ -1876,8 +1895,8 @@ class ZhutianPlugin(Star):
         lines = ["--- 种植指南（种子 → 神药｜灵气需求）---"]
         for seed, (harvest, aura) in xiaoshijie.SEEDS.items():
             lines.append(f"· {seed} → {harvest}（需灵气 {aura}）")
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     async def _world_plant(self, event: AstrMessageEvent, seed: str):
         doc, err = await self._require_player(event)
         if err:
@@ -2092,8 +2111,8 @@ class ZhutianPlugin(Star):
             if raw:
                 p = PlayerDoc(**raw)
                 lines.append(f"· {p.name}（第 {max(0, p.realm_index) + 1} 境）")
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     @filter.command(CMD_MY_SHIFU, "我的师门")
     async def handle_my_shifu(self, event: AstrMessageEvent):
         if not self._allowed(event):
@@ -2244,8 +2263,8 @@ class ZhutianPlugin(Star):
             raw = await self.db.get_player(uid)
             name = PlayerDoc(**raw).name if raw else uid[:8]
             lines.append(f"· {name}：{n}")
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     # ---- 管理（对齐原版 AdminSuper 精选） ----
 
     async def _target_doc(self, event: AstrMessageEvent) -> tuple[PlayerDoc | None, str | None]:
@@ -2435,8 +2454,8 @@ class ZhutianPlugin(Star):
         lines = [f"--- 师徒商店（我的积分 {pts}）---"]
         for name, cost in self.SHITU_SHOP.items():
             lines.append(f"· {name}：{cost} 积分")
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     @filter.command(CMD_SHITU_EX, "师徒兑换")
     async def handle_shitu_ex(self, event: AstrMessageEvent, thing_name: str = ""):
         if not self._allowed(event):
@@ -2621,8 +2640,8 @@ class ZhutianPlugin(Star):
         lines = [f"【{title}】"]
         for g in goods[:30]:
             lines.append(f"· {g['name']}（{g.get('daibi')}×{g.get('出售价')}）")
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     @filter.command("#天机阁", "天机阁商店")
     async def handle_tianji_shop(self, event: AstrMessageEvent):
         if not self._allowed(event):
@@ -2754,8 +2773,8 @@ class ZhutianPlugin(Star):
         else:
             lines.append("已臻七阶·彼岸。")
         lines.append("投影：#投影诸天 世界名（#诸天世界 查列表）｜探索：#探索友枝町 地点 等")
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     @filter.command(CMD_MIRROR_REFINE, "淬炼诸天镜")
     async def handle_mirror_refine(self, event: AstrMessageEvent):
         if not self._allowed(event):
@@ -2784,8 +2803,8 @@ class ZhutianPlugin(Star):
             mark = "✅可投影" if tier >= t else f"需 {t} 阶"
             lines.append(f"· {w}（{mark}）")
         lines.append("投影：#投影诸天 世界名（修为 1 亿 + 血气 1 亿 + 镜能 1）")
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     @filter.command(CMD_MIRROR_PROJ, "投影诸天")
     async def handle_mirror_proj(self, event: AstrMessageEvent, world: str = ""):
         if not self._allowed(event):
@@ -2927,8 +2946,8 @@ class ZhutianPlugin(Star):
                 f"· {name}{cur}｜eff +{root.get('eff', 0):g}｜三维 +{root.get('atk', 0):.0%}"
             )
         lines.append(f"当前灵根：{zt.get('current') or '本源'}｜切换：#装载化身 化身名 / #装载化身 本源（1 镜能 + 15 分钟冷却）")
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     @filter.command(CMD_MIRROR_LOAD, "装载化身")
     async def handle_mirror_load(self, event: AstrMessageEvent, name: str = ""):
         if not self._allowed(event):
@@ -3003,8 +3022,8 @@ class ZhutianPlugin(Star):
         if nxt:
             lines.append(f"下一阶【{nxt['name']}】需：潜力 {nxt['potential']}｜修为血气各 {nxt['cultivation']:,}｜灵韵 {nxt['aura']}")
         lines.append("炼化：#炼化宇宙灵韵 物品*数量｜铸造：#铸造宇宙秘境 名*简介*守关者｜挑战：#进入宇宙秘境 名")
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     @filter.command(CMD_UNI_ASCEND, "升格大宇宙")
     async def handle_uni_ascend(self, event: AstrMessageEvent):
         if not self._allowed(event):
@@ -3129,8 +3148,8 @@ class ZhutianPlugin(Star):
             lines.append(f"· {d['name']}｜守关者【{d['enemy']}】｜通关 {d.get('cleared', 0)} 次")
             if d.get("intro"):
                 lines.append(f"  {d['intro']}")
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     @filter.command(CMD_UNI_ENTER, "进入宇宙秘境")
     async def handle_uni_enter(self, event: AstrMessageEvent, name: str = ""):
         if not self._allowed(event):
@@ -3219,7 +3238,8 @@ class ZhutianPlugin(Star):
             d.stones = max(0, d.stones + stones)
             d.ext["tower_ts"] = time.time()
             await self.db.save_player(d.model_dump())
-        yield event.plain_result(msg)
+        async for _r in self._smart(event, msg, "镇妖塔"):
+            yield _r
 
     @filter.command(CMD_TOWER_ALL, "一键挑战镇妖塔")
     async def handle_tower_all(self, event: AstrMessageEvent):
@@ -3235,7 +3255,8 @@ class ZhutianPlugin(Star):
         d.stones = max(0, d.stones + stones)
         d.ext["tower_ts"] = time.time()
         await self.db.save_player(d.model_dump())
-        yield event.plain_result(msg)
+        async for _r in self._smart(event, msg, "镇妖塔 · 连战"):
+            yield _r
 
     @filter.command(CMD_PET_SEND, "派仙宠寻宝")
     async def handle_pet_send(self, event: AstrMessageEvent):
@@ -3285,7 +3306,8 @@ class ZhutianPlugin(Star):
             loot = "、".join(x["name"] for x in (s.get("one") or [])[:4])
             lines.append(f"· {s['name']}（{s['Grade']} 档｜强化费 {s['price'] * s['Grade']:,}）｜可掠：{loot}…")
         lines.append("#探查 地点（0.3×价格）｜#洗劫 地点（2h CD，战斗定胜负）")
-        yield event.plain_result("\n".join(lines))
+        async for r in self._smart(event, "\n".join(lines), "洗劫地点"):
+            yield r
 
     @filter.command(CMD_RAID_SPY, "探查洗劫点")
     async def handle_raid_spy(self, event: AstrMessageEvent, place: str = ""):
@@ -3309,11 +3331,14 @@ class ZhutianPlugin(Star):
         await self.db.save_player(d.model_dump())
         loot = s.get("one") or []
         preview = "、".join(f"{x['name']}×{x.get('数量', 1)}" for x in loot[:5])
-        yield event.plain_result(
+        async for r in self._smart(
+            event,
             f"你花 {cost:,} 灵石买通了 {s['name']} 的账房……\n"
-            f"传闻库中藏着：{preview} 等。守卫实力约 {s['Grade']} 档（{adventure.raid_guard(s['Grade'])['hp']:,} 血）。\n"
-            f"#洗劫 {s['name']} 干一票大的！"
-        )
+            f"传闻库中藏着：{preview} 等。\n守卫实力约 {s['Grade']} 档（血 {adventure.raid_guard(s['Grade'])['hp']:,}）。\n"
+            f"#洗劫 {s['name']} 干一票大的！",
+            f"探查 · {s['name']}",
+        ):
+            yield r
 
     @filter.command(CMD_RAID, "洗劫")
     async def handle_raid(self, event: AstrMessageEvent, place: str = ""):
@@ -3374,19 +3399,25 @@ class ZhutianPlugin(Star):
                 if gains:
                     await self.db.add_items(doc.uid, gains)
             loot_txt = "，".join(f"{k} ×{v}" for k, v in gains.items()) or "（空手但赢了面子）"
-            yield event.plain_result(
+            async for r in self._smart(
+                event,
                 f"夜色掩护下你潜入 {s['name']}——守卫被你放倒！\n"
-                + "\n".join(log[-3:]) + f"\n💰 掠得：{loot_txt}；灵石 +{stones_gain:,}\n"
-                f"（强化费 −{strengthen:,}，魔道值 +{adventure.RAID_MODAO_PER_GRADE * grade}）"
-            )
+                + "\n".join(log[-4:]) + f"\n💰 掠得：{loot_txt}；灵石 +{stones_gain:,}\n"
+                f"（强化费 −{strengthen:,}，魔道值 +{adventure.RAID_MODAO_PER_GRADE * grade}）",
+                f"洗劫 · {s['name']}",
+            ):
+                yield r
         else:
             loss = int(s["price"] * grade * 0.3)
             d.stones = max(0, d.stones - loss)
             await self.db.save_player(d.model_dump())
-            yield event.plain_result(
+            async for r in self._smart(
+                event,
                 f"夜袭 {s['name']} 失手——守卫把你打了出来！\n"
-                + "\n".join(log[-3:]) + f"\n❌ 灵石 −{loss:,}（疗伤封口费），魔道值 +{adventure.RAID_MODAO_PER_GRADE * grade}"
-            )
+                + "\n".join(log[-4:]) + f"\n❌ 灵石 −{loss:,}（疗伤封口费），魔道值 +{adventure.RAID_MODAO_PER_GRADE * grade}",
+                f"洗劫失败 · {s['name']}",
+            ):
+                yield r
 
     @filter.command(CMD_GIFT, "赠予花篮")
     async def handle_gift(self, event: AstrMessageEvent, *, args: str = ""):
@@ -3523,8 +3554,8 @@ class ZhutianPlugin(Star):
             lines.append(f"· {name}（{mark}）：{desc}")
         if sess:
             lines.append(f"※ 你正在【{sess.place}】第 {sess.floor} 层，发「{CMD_SEARCH}」继续寻宝，「{CMD_FLEE}」撤离。")
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     @filter.command(CMD_ENTER, "降临秘境")
     async def handle_enter(self, event: AstrMessageEvent, place: str = ""):
         if not self._allowed(event):
@@ -3726,8 +3757,8 @@ class ZhutianPlugin(Star):
                 f"· 【{s['name']}】{sect.level_title(s['level'])}"
                 f"（{s['level']}级）基金 {s['fund']} · 成员 {len(members)}/{sect.member_limit(s['level'])}"
             )
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     @filter.command(CMD_SECT_MINE, "我的宗门")
     async def handle_sect_mine(self, event: AstrMessageEvent):
         if not self._allowed(event):
@@ -3756,8 +3787,8 @@ class ZhutianPlugin(Star):
             f"身份：{'宗主' if is_master else '弟子'}",
             f"升级费用（宗主操作）：{sect.upgrade_cost(target['level'])}（取自基金）",
         ]
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     @filter.command(CMD_SECT_DONATE, "宗门捐赠灵石")
     async def handle_sect_donate(self, event: AstrMessageEvent, amount: int = 0):
         if not self._allowed(event):
@@ -3865,8 +3896,8 @@ class ZhutianPlugin(Star):
         lines.append("--- 天地榜 · 富甲前十 ---")
         for i, p in enumerate(by_stones, 1):
             lines.append(f"{i}. {display(p)} 灵石 {p.get('stones', 0)}")
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     # ---- 装备强化 / 宗门俸禄 / 转账 / 拍卖行（M4） ----
 
     @filter.command(CMD_ENHANCE, "强化装备")
@@ -4041,8 +4072,8 @@ class ZhutianPlugin(Star):
         for r in rows:
             lines.append(f"· {r['id']}号：{r['item']} ×{r['qty']} — {r['price']} 灵石/件（{r['seller_name']}）")
         lines.append(f"购买：{CMD_BUY_LOT} 单号")
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     @filter.command(CMD_BUY_LOT, "购买拍卖品")
     async def handle_buy_lot(self, event: AstrMessageEvent, lot_id: int = 0):
         if not self._allowed(event):
@@ -4115,8 +4146,8 @@ class ZhutianPlugin(Star):
         lines = ["--- 我的挂单 ---"]
         for r in lots:
             lines.append(f"· {r['id']}号：{r['item']} ×{r['qty']} — {r['price']} 灵石/件")
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     # ---- 炼丹 / 帝兵认主 / 宗门秘境（M5） ----
 
     @filter.command(CMD_RECIPES, "炼丹配方")
@@ -4138,8 +4169,8 @@ class ZhutianPlugin(Star):
             mode = self.craft_mode.get(r["name"], "direct")
             out = "直接产出" if mode == "direct" else "凡品/极品/仙品"
             lines.append(f"· {r['name']}{lock}：{mats}｜{out}")
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     @filter.command(CMD_CRAFT, "炼丹")
     async def handle_craft(self, event: AstrMessageEvent, pill_name: str = "", qty: int = 1):
         if not self._allowed(event):
@@ -4251,8 +4282,8 @@ class ZhutianPlugin(Star):
             f"修炼效率：×{eff:g} {eff_note}",
             "效果：闭关出关所得修为 ×此效率；欲改天命，再服天命轮回丹/神心丹重新洗炼。",
         ]
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     @filter.command(CMD_LINGGEN, "查看灵根")
     async def handle_linggen(self, event: AstrMessageEvent):
         if not self._allowed(event):
@@ -4299,8 +4330,8 @@ class ZhutianPlugin(Star):
         lines.append(
             f"终极奖励：修为/血气/灵石 ×{data['final']['amount']}，秘境之匙 ×{data['final']['key_n']}"
         )
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     @filter.command(CMD_TASK_GET, "接取每日任务")
     async def handle_task_get(self, event: AstrMessageEvent):
         if not self._allowed(event):
@@ -4428,8 +4459,8 @@ class ZhutianPlugin(Star):
             lines.append(f"—— {g['group']} ——")
             for it in g["list"]:
                 lines.append(f"{it['title']}｜{it['desc']}")
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     @filter.command("#丹药配方", "丹方总览")
     async def handle_danfang(self, event: AstrMessageEvent):
         if not self._allowed(event):
@@ -4483,8 +4514,8 @@ class ZhutianPlugin(Star):
             lines.append(f"· 魔道值 {int(doc.ext['modao'])}")
         if len(lines) == 1:
             lines.append("· （当前无生效丹药）")
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     # ---- 职业 / 采集 / 制符（移植原版 Occupation） ----
 
     def _ensure_occ(self, doc: PlayerDoc) -> tuple[int, int]:
@@ -4611,8 +4642,8 @@ class ZhutianPlugin(Star):
         for f in (doc.ext.get("fuzhi") or []):
             if isinstance(f, dict) and f.get("职业名"):
                 lines.append(f"副职：{f['职业名']}（{int(f.get('职业等级', 1))} 级）")
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     def _timed_action_start(self, doc: PlayerDoc, action: str, minutes: int,
                             period: int, cycles: int) -> tuple[bool, str, PlayerDoc]:
         """采集类定时动作（对齐原版 plant/mine：周期档钳制 + state 机）。"""
@@ -4686,8 +4717,8 @@ class ZhutianPlugin(Star):
             lines += [f"· {n}×{c}" for n, c in herbs.items()]
         else:
             lines.append("· 产出不足一株，草药散于风中")
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     @filter.command(CMD_MINE, "采矿")
     async def handle_mine(self, event: AstrMessageEvent, minutes: str = ""):
         if not self._allowed(event):
@@ -4736,8 +4767,8 @@ class ZhutianPlugin(Star):
             lines += [f"· {n}×{c}" for n, c in mats.items()]
         else:
             lines.append("· 产出不足以装满一筐")
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     @filter.command(CMD_MAKE, "制作符箓")
     async def handle_make(self, event: AstrMessageEvent, fu_name: str = "", qty: int = 1):
         if not self._allowed(event):
@@ -4799,8 +4830,8 @@ class ZhutianPlugin(Star):
             )
         if curp < pages:
             lines.append(f"翻页：{cmd} {curp + 1}")
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     def _catalog_router(self, catalog_name: str):
         return self.CATALOG_TABLES.get((catalog_name or "").strip())
 
@@ -5018,8 +5049,8 @@ class ZhutianPlugin(Star):
                 f"· {r['name']}（{item.get('type', '?')}｜{item.get('稀有度', '?')}阶）\n"
                 f"   材料：{mats}｜成功率 {alchemy.success_rate(r, lv):.0%}"
             )
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     @filter.command(CMD_FORGE, "锻造装备")
     async def handle_forge(self, event: AstrMessageEvent, item_name: str = ""):
         if not self._allowed(event):
@@ -5194,8 +5225,8 @@ class ZhutianPlugin(Star):
                 f"{i}. {name} — {ext.get('duel_points', 0)} 分"
                 f"（{ext.get('duel_win', 0)}胜/{ext.get('duel_total', 0)}战）"
             )
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     # ---- 宝石 / 功法 / 宗门挑战（M7） ----
 
     GEM_SLOTS_PER = 2   # 每槽位可镶宝石数
@@ -5326,8 +5357,8 @@ class ZhutianPlugin(Star):
             total += b
             lines.append(f"· {n}（闭关效率 +{b}%）")
         lines.append(f"合计：闭关效率 +{total}%")
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     async def _sect_power(self, name: str) -> tuple[int, list[str]]:
         """宗门战力 = 全体成员聚合属性之和。"""
         total = 0
@@ -5437,8 +5468,8 @@ class ZhutianPlugin(Star):
             price = max(1, int(float(item.get("出售价", 1) or 1) * self.SECT_PRICE_MULT))
             lines.append(f"· {n} — {price} 贡献度（{item.get('type', item.get('class', '?'))}）")
         lines.append(f"兑换：{CMD_SECT_EXCHANGE} 商品名 数量")
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     @filter.command(CMD_SECT_EXCHANGE, "宗门兑换")
     async def handle_sect_exchange(self, event: AstrMessageEvent, item_name: str = "", qty: int = 1):
         if not self._allowed(event):
@@ -5572,8 +5603,8 @@ class ZhutianPlugin(Star):
             f"当前属性：攻击 {st.atk} · 防御 {st.defense} · 血量 {st.hp}",
             f"喂养：{CMD_PET_FEED} 灵石数（每 1000 灵石 = 1 级）",
         ]
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     @filter.command(CMD_PET_FEED, "喂养仙宠")
     async def handle_pet_feed(self, event: AstrMessageEvent, stones: int = 0):
         if not self._allowed(event):
@@ -5738,8 +5769,8 @@ class ZhutianPlugin(Star):
                 f"{i}. {pet_data['name']}（{info.get('品级', '?')}）{pet_data.get('level', 1)} 级"
                 f" — 主人 {name}｜战绩 {int((p.get('ext') or {}).get('pet_wins', 0))} 胜"
             )
-        yield event.plain_result("\n".join(lines))
-
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
     @filter.command(CMD_PET_ADV, "进阶仙宠")
     async def handle_pet_advance(self, event: AstrMessageEvent):
         if not self._allowed(event):
