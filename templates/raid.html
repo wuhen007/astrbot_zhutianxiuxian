@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block body %}
+<style>
+  .bossbox { background: rgba(0,0,0,.25); border: 1px solid rgba(232,115,74,.25);
+    border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
+  .bname { font-size: 16px; font-weight: 800; color: #f0a184; letter-spacing: 1px;
+    display: flex; justify-content: space-between; align-items: baseline; }
+  .bname .tag { font-size: 11px; color: #7a8aa0; font-weight: 400; letter-spacing: 0; }
+  .hpbar { height: 12px; border-radius: 6px; background: #2a1c1a; overflow: hidden; margin: 9px 0 6px; }
+  .hpbar > div { height: 100%; border-radius: 6px;
+    background: linear-gradient(90deg, #e8734a, #d4452f); }
+  .hpnum { font-size: 11.5px; color: #c3cdd9; display: flex; justify-content: space-between; }
+  .mtable { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .mtable td { padding: 6px 4px; border-bottom: 1px dashed rgba(122,138,160,.15); }
+  .mtable td.r { text-align: right; color: #e8edf4; font-weight: 600; }
+  .mtable td.l { color: #c3cdd9; }
+  .mtable tr.me td.l { color: #f0d78c; }
+  .tagline { font-size: 11px; color: #6a7a92; }
+</style>
+<div class="row"><span class="k">队伍码</span><span class="v gold">{{ code }}</span></div>
+<div class="row"><span class="k">状态</span><span class="v">{{ status }}</span></div>
+{% if started %}
+<div class="bossbox">
+  <div class="bname">{{ boss }}<span class="tag">{{ title_tag }}</span></div>
+  <div class="hpbar"><div style="width: {{ pct }}%"></div></div>
+  <div class="hpnum"><span>气血 {{ hp }} / {{ hp_max }}</span><span>{{ pct }}%</span></div>
+</div>
+{% endif %}
+<div class="section">
+  <div class="head">队伍 · {{ members|length }}/5</div>
+  <table class="mtable">
+    {% for m in members %}
+    <tr>
+      <td class="l">{{ m.name }}{% if m.leader %} <span class="tagline">队长</span>{% endif %}
+        {% if m.killer %}<span class="tagline">· 击杀</span>{% endif %}</td>
+      <td class="r">{{ m.dmg }} 伤害</td>
+      <td class="r">{{ m.hits }}/3</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+<div class="section">
+  <div class="head">{% if victory %}奖励结算{% else %}奖池{% endif %}</div>
+  {% if not started %}
+    <div class="row"><span class="k">定标</span><span class="v">开战后按全队均攻 × 人数生成</span></div>
+  {% else %}
+  <div class="row"><span class="k">灵石</span><span class="v gold">{{ reward }}</span></div>
+  {% if victory %}
+    {% for m in members %}
+    <div class="row"><span class="k">{{ m.name }}{% if m.killer %}（击杀 +10%）{% endif %}</span>
+      <span class="v">{{ m.stones }} 灵石{% if loot %} · {{ loot }}{% endif %}</span></div>
+    {% endfor %}
+  {% else %}
+    <div class="row"><span class="k">分配</span><span class="v">按伤害占比自动分奖</span></div>
+  {% endif %}
+  {% endif %}
+</div>
+<div class="section"><div class="chip plain">{{ hint }}</div></div>
+{% endblock %}

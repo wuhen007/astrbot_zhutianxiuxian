@@ -3,3 +3,6 @@ __pycache__/
 *.db
 panels/
 .selfcheck.log
+
+data/cmd_config.json
+data/t2i_templates/

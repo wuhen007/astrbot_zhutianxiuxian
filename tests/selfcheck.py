@@ -154,9 +154,9 @@ async def main():
     ok, _, _ = items_mod.sell(inv_doc, junk, 1)
     assert not ok, "出售价 0 不可出售"
 
-    # 10. 迁移版本 = 8
+    # 10. 迁移版本 = 9
     async with db.conn.execute("SELECT version FROM db_info") as cur:
-        assert (await cur.fetchone())[0] == 8
+        assert (await cur.fetchone())[0] == 9
 
     # 11. 装备：穿戴/换位/卸下 + 比例与固定加成聚合
     from core import battle as battle_mod   # noqa: E402
@@ -1132,6 +1132,55 @@ async def main():
     assert triggered and triggered[0] is False and triggered[1] == 500, triggered
     print("story npc ok")
 
+    # 16c. 团本讨伐：定标 / 分奖 / 队伍流转 / 出手记伤 / 击杀
+    from core import raid as raid_mod  # noqa: E402
+
+    st = raid_mod.boss_stats(10_000_000, 4, 1.0)
+    assert st["hp"] == 10_000_000 * (3 + 2.5 * 4), st
+    assert st["hp_max"] == st["hp"] and st["reward"] > 0
+    assert raid_mod.boss_stats(10_000_000, 4, 2.0)["hp"] == st["hp"] * 2
+
+    shares = raid_mod.split_rewards(1_000_000, [("a", "甲", 600), ("b", "乙", 400)], "a")
+    assert shares[0]["uid"] == "a" and shares[0]["stones"] == 600_000 + 100_000, shares
+    assert shares[1]["stones"] == 400_000
+    assert shares[0]["share"] == 60.0
+
+    now = 1_800_000_000.0
+    assert (await db.create_raid("123456", "若陀龙王", "raid_u1", "甲", now)) is None
+    team = await db.get_raid("123456")
+    assert team["status"] == "recruiting" and team["leader_uid"] == "raid_u1"
+    assert (await db.active_raid_of("raid_u1"))["code"] == "123456"
+    assert await db.join_raid("123456", "raid_u2", "乙", now + 1)
+    assert not await db.join_raid("123456", "raid_u2", "乙", now + 2), "重复加入应失败"
+    assert await db.raid_member_count("123456") == 2
+    assert await db.start_raid("123456", st), "招募中应可开战"
+    left = await db.damage_raid("123456", "raid_u1", st["hp"] // 2, "2026-11-02", now + 3)
+    assert left > 0
+    assert (await db.raid_member("123456", "raid_u1"))["dmg"] == st["hp"] // 2
+    left = await db.damage_raid("123456", "raid_u2", st["hp"], "2026-11-02", now + 4)
+    assert left <= 0
+    team = await db.get_raid("123456")
+    assert team["status"] == "victory" and team["killer_uid"] == "raid_u2", team
+    members = await db.raid_members("123456")
+    assert len(members) == 2 and members[0]["uid"] == "raid_u2"
+
+    member = {"hits_today": 3, "hits_day": raid_mod.time_key(now), "last_ts": 0}
+    ok, msg = raid_mod.can_hit({"status": "fighting", "hp": 100}, member, now)
+    assert not ok and "次数" in msg
+    member = {"hits_today": 3, "hits_day": "1999-01-01", "last_ts": 0}
+    ok, _ = raid_mod.can_hit({"status": "fighting", "hp": 100}, member, now)
+    assert ok, "跨日应重置出手次数"
+    member = {"hits_today": 0, "hits_day": raid_mod.time_key(now), "last_ts": now}
+    ok, msg = raid_mod.can_hit({"status": "fighting", "hp": 100}, member, now + 1)
+    assert not ok and "秒后" in msg
+
+    # 解散：招募中的队伍可关闭
+    await db.create_raid("654321", "九幽魔君", "raid_u3", "丙", now)
+    await db.close_raid("654321", "closed", now)
+    assert (await db.get_raid("654321"))["status"] == "closed"
+    assert (await db.active_raid_of("raid_u3")) is None
+    print("raid ok")
+
     # 17. 宗门纯函数 + 存取
     from core import sect as sect_mod  # noqa: E402
 
@@ -1436,6 +1485,23 @@ async def main():
     assert "万兽神药" in html_b and "定魂草" in html_b and "37 件" in html_b, "bag 模板变量未注入"
     png_b = await render_mod.render_panel("bag", bag_data, tmp)
     assert png_b and png_b.exists() and png_b.stat().st_size > 2000
+
+    # 团本面板：血条/成员/分奖
+    raid_data = {
+        "title": "团本讨伐 · 若陀龙王", "footer": "队伍码 123456",
+        "code": "123456", "boss": "若陀龙王", "title_tag": "岩龙", "status": "讨伐中",
+        "started": True,
+        "hp": "7,750,000", "hp_max": "15,500,000", "pct": 50.0, "reward": "2,790,000",
+        "members": [
+            {"name": "甲", "dmg": "600", "hits": 2, "leader": True, "killer": False, "stones": "0"},
+            {"name": "乙", "dmg": "400", "hits": 1, "leader": False, "killer": False, "stones": "0"},
+        ],
+        "victory": False, "loot": "五行神石", "hint": "#讨伐出手（今日 3 次）",
+    }
+    png_r = await render_mod.render_panel("raid", raid_data, tmp)
+    assert png_r and png_r.exists() and png_r.stat().st_size > 2000
+    html_r = render_mod._jinja().get_template("raid.html").render(**raid_data)
+    assert "若陀龙王" in html_r and "7,750,000" in html_r and "甲" in html_r
 
     # 分组区间互斥：物品只落一组
     tiers = [(9, 99), (8, 9), (7, 8), (6, 7), (4, 6), (0, 4)]

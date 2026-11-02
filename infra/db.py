@@ -10,7 +10,7 @@ from typing import Any, AsyncIterator, Optional
 
 import aiosqlite
 
-LATEST_DB_VERSION = 8
+LATEST_DB_VERSION = 9
 
 
 def _shanghai_date_key(ts: float) -> str:
@@ -70,11 +70,12 @@ class DataBase:
                 await _v6_sect_score(self.conn)
                 await _v7_daily_tasks(self.conn)
                 await _v8_dark_boss(self.conn)
+                await _v9_raid(self.conn)
                 await self.conn.execute("INSERT INTO db_info (version) VALUES (?)", (LATEST_DB_VERSION,))
             return
 
         # 后续版本在此登记：MIGRATIONS[n] = upgrade_fn
-        MIGRATIONS = {2: _v2_inventory, 3: _v3_world_boss, 4: _v4_sects, 5: _v5_auction, 6: _v6_sect_score, 7: _v7_daily_tasks, 8: _v8_dark_boss}
+        MIGRATIONS = {2: _v2_inventory, 3: _v3_world_boss, 4: _v4_sects, 5: _v5_auction, 6: _v6_sect_score, 7: _v7_daily_tasks, 8: _v8_dark_boss, 9: _v9_raid}
         for version in sorted(v for v in MIGRATIONS if v > current):
             async with self.transaction():
                 await MIGRATIONS[version](self.conn)
@@ -285,6 +286,180 @@ class DataBase:
         assert self.conn is not None
         async with self.conn.execute("SELECT uid FROM players") as cur:
             return [row[0] for row in await cur.fetchall()]
+
+    # ---- 团本讨伐 ----
+
+    @staticmethod
+    def _raid_row(row: Any) -> dict[str, Any] | None:
+        if not row:
+            return None
+        keys = ("code", "boss", "leader_uid", "leader_name", "hp", "hp_max", "atk",
+                "defense", "reward", "status", "created_at", "finished_at", "settled", "killer_uid")
+        d = dict(zip(keys, row))
+        d["settled"] = bool(d["settled"])
+        return d
+
+    async def create_raid(self, code: str, boss: str, leader_uid: str,
+                          leader_name: str, now: float) -> None:
+        assert self.conn is not None
+        owned = not self.conn.in_transaction
+        await self.conn.execute(
+            "INSERT INTO raid_team (code, boss, leader_uid, leader_name, created_at)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (code, boss, leader_uid, leader_name, now),
+        )
+        await self.conn.execute(
+            "INSERT OR IGNORE INTO raid_member (code, uid, name, joined_at) VALUES (?, ?, ?, ?)",
+            (code, leader_uid, leader_name, now),
+        )
+        if owned:
+            await self.conn.commit()
+
+    async def get_raid(self, code: str) -> dict[str, Any] | None:
+        assert self.conn is not None
+        async with self.conn.execute(
+            "SELECT code, boss, leader_uid, leader_name, hp, hp_max, atk, defense,"
+            " reward, status, created_at, finished_at, settled, killer_uid FROM raid_team WHERE code = ?",
+            (str(code),),
+        ) as cur:
+            return self._raid_row(await cur.fetchone())
+
+    async def active_raid_of(self, uid: str) -> dict[str, Any] | None:
+        assert self.conn is not None
+        async with self.conn.execute(
+            "SELECT t.code, t.boss, t.leader_uid, t.leader_name, t.hp, t.hp_max, t.atk,"
+            " t.defense, t.reward, t.status, t.created_at, t.finished_at, t.settled, t.killer_uid"
+            " FROM raid_team t JOIN raid_member m ON m.code = t.code"
+            " WHERE m.uid = ? AND t.status IN ('recruiting', 'fighting')"
+            " ORDER BY t.created_at DESC LIMIT 1",
+            (uid,),
+        ) as cur:
+            return self._raid_row(await cur.fetchone())
+
+    async def last_raid_of(self, uid: str) -> dict[str, Any] | None:
+        assert self.conn is not None
+        async with self.conn.execute(
+            "SELECT t.code, t.boss, t.leader_uid, t.leader_name, t.hp, t.hp_max, t.atk,"
+            " t.defense, t.reward, t.status, t.created_at, t.finished_at, t.settled, t.killer_uid"
+            " FROM raid_team t JOIN raid_member m ON m.code = t.code"
+            " WHERE m.uid = ? ORDER BY t.created_at DESC LIMIT 1",
+            (uid,),
+        ) as cur:
+            return self._raid_row(await cur.fetchone())
+
+    async def raid_members(self, code: str) -> list[dict[str, Any]]:
+        assert self.conn is not None
+        async with self.conn.execute(
+            "SELECT uid, name, dmg, hits_today, hits_day, last_ts, joined_at"
+            " FROM raid_member WHERE code = ? ORDER BY dmg DESC, joined_at ASC",
+            (str(code),),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [
+            {"uid": r[0], "name": r[1], "dmg": r[2], "hits_today": r[3],
+             "hits_day": r[4], "last_ts": r[5], "joined_at": r[6]}
+            for r in rows
+        ]
+
+    async def raid_member(self, code: str, uid: str) -> dict[str, Any] | None:
+        for m in await self.raid_members(code):
+            if m["uid"] == uid:
+                return m
+        return None
+
+    async def join_raid(self, code: str, uid: str, name: str, now: float) -> bool:
+        assert self.conn is not None
+        owned = not self.conn.in_transaction
+        cur = await self.conn.execute(
+            "INSERT OR IGNORE INTO raid_member (code, uid, name, joined_at) VALUES (?, ?, ?, ?)",
+            (str(code), uid, name, now),
+        )
+        ok = cur.rowcount > 0
+        if owned:
+            await self.conn.commit()
+        return ok
+
+    async def start_raid(self, code: str, stats: dict[str, int]) -> bool:
+        assert self.conn is not None
+        owned = not self.conn.in_transaction
+        cur = await self.conn.execute(
+            "UPDATE raid_team SET status = 'fighting', hp = ?, hp_max = ?, atk = ?,"
+            " defense = ?, reward = ? WHERE code = ? AND status = 'recruiting'",
+            (stats["hp"], stats["hp_max"], stats["atk"], stats["defense"],
+             stats["reward"], str(code)),
+        )
+        ok = cur.rowcount > 0
+        if owned:
+            await self.conn.commit()
+        return ok
+
+    async def damage_raid(self, code: str, uid: str, dmg: int, day: str, now: float) -> int:
+        """扣 Boss 血 + 记成员伤害/次数，原子完成。返回剩余血量（≤0 = 击杀）。"""
+        assert self.conn is not None
+        owned = not self.conn.in_transaction
+        await self.conn.execute(
+            "UPDATE raid_member SET dmg = dmg + ?,"
+            " hits_today = CASE WHEN hits_day = ? THEN hits_today + 1 ELSE 1 END,"
+            " hits_day = ?, last_ts = ? WHERE code = ? AND uid = ?",
+            (int(dmg), day, day, float(now), str(code), uid),
+        )
+        await self.conn.execute(
+            "UPDATE raid_team SET hp = MAX(0, hp - ?) WHERE code = ? AND status = 'fighting'",
+            (int(dmg), str(code)),
+        )
+        async with self.conn.execute(
+            "SELECT hp FROM raid_team WHERE code = ?", (str(code),)
+        ) as cur:
+            row = await cur.fetchone()
+        left = int(row[0]) if row else 0
+        if left <= 0:
+            await self.conn.execute(
+                "UPDATE raid_team SET hp = 0, status = 'victory', finished_at = ?, killer_uid = ?"
+                " WHERE code = ? AND status = 'fighting'",
+                (float(now), uid, str(code)),
+            )
+        if owned:
+            await self.conn.commit()
+        return left
+
+    async def close_raid(self, code: str, status: str, now: float) -> None:
+        assert self.conn is not None
+        owned = not self.conn.in_transaction
+        await self.conn.execute(
+            "UPDATE raid_team SET status = ?, finished_at = ?"
+            " WHERE code = ? AND status IN ('recruiting', 'fighting')",
+            (status, float(now), str(code)),
+        )
+        if owned:
+            await self.conn.commit()
+
+    async def mark_raid_settled(self, code: str) -> None:
+        assert self.conn is not None
+        owned = not self.conn.in_transaction
+        await self.conn.execute(
+            "UPDATE raid_team SET settled = 1 WHERE code = ?", (str(code),)
+        )
+        if owned:
+            await self.conn.commit()
+
+    async def list_raids(self, status: str = "recruiting", limit: int = 10) -> list[dict[str, Any]]:
+        assert self.conn is not None
+        async with self.conn.execute(
+            "SELECT code, boss, leader_uid, leader_name, hp, hp_max, atk, defense,"
+            " reward, status, created_at, finished_at, settled, killer_uid FROM raid_team"
+            " WHERE status = ? ORDER BY created_at DESC LIMIT ?",
+            (status, int(limit)),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [d for d in (self._raid_row(r) for r in rows) if d]
+
+    async def raid_member_count(self, code: str) -> int:
+        assert self.conn is not None
+        async with self.conn.execute(
+            "SELECT COUNT(*) FROM raid_member WHERE code = ?", (str(code),)
+        ) as cur:
+            row = await cur.fetchone()
+        return int(row[0]) if row else 0
 
     # ---- 世界 Boss ----
 
@@ -582,4 +757,40 @@ async def _v8_dark_boss(conn: aiosqlite.Connection) -> None:
         " name TEXT NOT NULL,"
         " damage INTEGER NOT NULL,"
         " PRIMARY KEY (boss_round, uid))"
+    )
+
+
+async def _v9_raid(conn: aiosqlite.Connection) -> None:
+    """团本讨伐：队伍 + 成员伤害账本（对齐原版 tuanben/TeamBoss 的 5 人共享血条）。"""
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS raid_team ("
+        " code TEXT PRIMARY KEY,"
+        " boss TEXT NOT NULL,"
+        " leader_uid TEXT NOT NULL,"
+        " leader_name TEXT NOT NULL DEFAULT '',"
+        " hp INTEGER NOT NULL DEFAULT 0,"
+        " hp_max INTEGER NOT NULL DEFAULT 0,"
+        " atk INTEGER NOT NULL DEFAULT 0,"
+        " defense INTEGER NOT NULL DEFAULT 0,"
+        " reward INTEGER NOT NULL DEFAULT 0,"
+        " status TEXT NOT NULL DEFAULT 'recruiting',"
+        " created_at REAL NOT NULL,"
+        " finished_at REAL NOT NULL DEFAULT 0,"
+        " settled INTEGER NOT NULL DEFAULT 0,"
+        " killer_uid TEXT NOT NULL DEFAULT '')"
+    )
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS raid_member ("
+        " code TEXT NOT NULL,"
+        " uid TEXT NOT NULL,"
+        " name TEXT NOT NULL DEFAULT '',"
+        " dmg INTEGER NOT NULL DEFAULT 0,"
+        " hits_today INTEGER NOT NULL DEFAULT 0,"
+        " hits_day TEXT NOT NULL DEFAULT '',"
+        " last_ts REAL NOT NULL DEFAULT 0,"
+        " joined_at REAL NOT NULL,"
+        " PRIMARY KEY (code, uid))"
+    )
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_raid_member_uid ON raid_member(uid)"
     )

@@ -11,7 +11,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, battle, boss, catalog, cultivate, dibing, equipment, items, linggen, motou, npc, occupation, pet, quest, secret, sect, shenjie, story_npc, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, battle, boss, catalog, cultivate, dibing, equipment, items, linggen, motou, npc, occupation, pet, quest, raid, secret, sect, shenjie, story_npc, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -165,6 +165,14 @@ CMD_HEI_ARRAYS = "#黑皇阵法"
 CMD_HEI_ENGRAVE = "#请黑皇刻阵"
 CMD_ARRAY_OFF = "#停用阵法"
 CMD_ARRAY_ON = "#启用阵法"
+CMD_TR_CREATE = "#创建讨伐队伍"
+CMD_TR_JOIN = "#加入讨伐队伍"
+CMD_TR_START = "#发起讨伐"
+CMD_TR_HIT = "#讨伐出手"
+CMD_TR_INFO = "#查看队伍信息"
+CMD_TR_LIST = "#团本列表"
+CMD_TR_DISMISS = "#解散队伍"
+CMD_TR_CLAIM = "#结算团本奖励"
 CMD_DARK_OPEN = "#开启黑暗动乱"
 CMD_DARK_CLOSE = "#关闭黑暗动乱"
 CMD_DARK_STATUS = "#禁区至尊状态"
@@ -680,6 +688,16 @@ class ZhutianPlugin(Star):
                 (f"{CMD_RAID_SPY} 地点", "花 0.3×价格打探收获"),
                 (f"{CMD_RAID} 地点", "洗劫（强化费+战斗，2h CD，魔道值+）"),
                 (f"{CMD_GIFT} @道侣", "赠百合花篮（亲密度 +10）"),
+            ]},
+            {"title": "团本讨伐", "lines": [
+                (f"{CMD_TR_CREATE} 名字", "创建讨伐队伍（5 人，24h 有效）"),
+                (f"{CMD_TR_JOIN} 队伍码", "加入队伍"),
+                (CMD_TR_START, "队长发起讨伐（按全队均攻定标）"),
+                (CMD_TR_HIT, "出手（每日 3 次，20 秒间隔）"),
+                (CMD_TR_INFO, "队伍信息 / Boss 血条 / 伤害榜"),
+                (CMD_TR_LIST, "招募中的团本"),
+                (CMD_TR_CLAIM, "结算明细（击杀时已自动发放）"),
+                (CMD_TR_DISMISS, "解散队伍（队长）"),
             ]},
             {"title": "剧情人物", "lines": [
                 (CMD_NPC, "剧情人物图鉴（11 位 · 立绘/关系/线索）"),
@@ -4742,6 +4760,388 @@ class ZhutianPlugin(Star):
         s["arrays_off"] = False
         await self.db.save_player(story_npc.save(doc, s).model_dump())
         yield event.plain_result("阵纹重新亮起，秘境战斗将自动催动。")
+
+    # ---- B7：团本讨伐（组队共享血条 + 伤害账本分奖） ----
+
+    def _raid_cd_left(self, doc: PlayerDoc) -> float:
+        return max(0.0, float(doc.ext.get("raid_cd", 0) or 0) - time.time())
+
+    def _raid_block_text(self, left: float) -> str:
+        hours = int(left // 3600)
+        mins = int(left % 3600 // 60)
+        return f"刚刚经历过一场团本讨伐，需休整 {hours} 小时 {mins} 分。"
+
+    async def _raid_expire(self, team: dict | None) -> dict | None:
+        """招募/讨伐超过 24h 自动解散。"""
+        if not team or team.get("status") not in ("recruiting", "fighting"):
+            return team
+        if time.time() - float(team.get("created_at", 0) or 0) <= raid.RAID_TTL:
+            return team
+        await self.db.close_raid(team["code"], "closed", time.time())
+        return None
+
+    async def _raid_data(self, team: dict, members: list[dict], now: float) -> dict:
+        hp = max(0, int(team.get("hp", 0) or 0))
+        hp_max = max(1, int(team.get("hp_max", 1) or 1))
+        pct = round(hp * 100 / hp_max, 1)
+        cfg = raid.boss_of(team.get("boss")) or {}
+        victory = str(team.get("status")) == "victory"
+        ledger = [(m["uid"], m["name"], int(m.get("dmg", 0) or 0)) for m in members]
+        shares = raid.split_rewards(
+            int(team.get("reward", 0) or 0), ledger, team.get("killer_uid") or None
+        ) if victory else []
+        smap = {s["uid"]: s for s in shares}
+        rows = []
+        for m in members:
+            share = smap.get(m["uid"]) or {}
+            rows.append({
+                "name": m.get("name") or m["uid"][:8],
+                "dmg": f"{int(m.get('dmg', 0) or 0):,}",
+                "hits": raid.hits_today(m, now),
+                "leader": m["uid"] == team.get("leader_uid"),
+                "killer": m["uid"] == team.get("killer_uid"),
+                "stones": f"{int(share.get('stones', 0) or 0):,}",
+            })
+        if str(team.get("status")) == "recruiting":
+            hint = f"队友加入：#加入讨伐队伍 {team['code']}｜队长：#发起讨伐"
+        elif str(team.get("status")) == "fighting":
+            hint = "#讨伐出手（今日 3 次，20 秒间隔）"
+        elif victory:
+            hint = "奖励已按伤害占比自动发放（击杀者 +10%）"
+        else:
+            hint = "队伍已解散"
+        return {
+            "title": f"团本讨伐 · {team.get('boss')}",
+            "footer": f"队伍码 {team.get('code')}",
+            "code": team.get("code"), "boss": team.get("boss"),
+            "title_tag": cfg.get("title", ""),
+            "status": raid.STATUS_LABEL.get(str(team.get("status")), str(team.get("status"))),
+            "hp": f"{hp:,}", "hp_max": f"{hp_max:,}", "pct": pct,
+            "reward": f"{int(team.get('reward', 0) or 0):,}",
+            "members": rows, "victory": victory, "started": str(team.get("status")) != "recruiting",
+            "loot": (f"{cfg['loot']}×{int(cfg.get('loot_qty', 1))}" if cfg.get("loot") else ""),
+            "hint": hint,
+        }
+
+    async def _raid_send(self, event: AstrMessageEvent, team: dict, members: list[dict]):
+        now = time.time()
+        data = await self._raid_data(team, members, now)
+        if self.render_on:
+            png = await render.render_panel("raid", data, self.panel_dir)
+            if png:
+                yield event.image_result(str(png))
+                return
+        async for r in self._smart(event, raid.status_text(team, members, now), "团本讨伐"):
+            yield r
+
+    @filter.command(CMD_TR_CREATE, "创建讨伐队伍")
+    async def handle_team_create(self, event: AstrMessageEvent, boss_name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        name = (boss_name or "").strip()
+        if not name:
+            lines = ["--- 创建讨伐队伍 ---"]
+            for bname, cfg in raid.BOSSES.items():
+                gate = f"，需【{cfg['gate']}】" if cfg.get("gate") else ""
+                lines.append(f"· {bname}（第 {cfg['realm']} 境{gate}）：{cfg['desc']}")
+            lines.append(f"格式：{CMD_TR_CREATE} 名字｜队长可邀 4 人（共 5 人）")
+            async for r in self._smart(event, "\n".join(lines), "创建讨伐队伍"):
+                yield r
+            return
+        cd = self._raid_cd_left(doc)
+        if cd > 0:
+            yield event.plain_result(self._raid_block_text(cd))
+            return
+        active = await self._raid_expire(await self.db.active_raid_of(doc.uid))
+        ok, msg, cfg = raid.can_create(doc, name, bool(active))
+        if not ok or cfg is None:
+            yield event.plain_result(msg)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        gate = cfg.get("gate") or ""
+        if gate and int(inv.get(gate, 0)) < 1:
+            yield event.plain_result(f"创建【{name}】的队伍需要【{gate}】×1。")
+            return
+        import random as _random
+        rng = _random.Random(f"{doc.uid}:{time.time()}")
+        code = ""
+        for _ in range(20):
+            code = raid.make_code(rng)
+            if not await self.db.get_raid(code):
+                break
+        now = time.time()
+        async with self.db.transaction():
+            await self.db.create_raid(code, name, doc.uid, doc.name or doc.uid[:8], now)
+            if gate:
+                await self.db.remove_item(doc.uid, gate, 1)
+        yield event.plain_result(
+            f"【{name}】讨伐队伍已立！\n"
+            f"队伍码：{code}（{raid.MAX_MEMBERS} 人上限）\n"
+            f"队友加入：{CMD_TR_JOIN} {code}\n"
+            f"队长开战：{CMD_TR_START}｜查看：{CMD_TR_INFO}"
+            + (f"\n（已消耗【{gate}】×1）" if gate else "")
+        )
+
+    @filter.command(CMD_TR_JOIN, "加入讨伐队伍")
+    async def handle_team_join(self, event: AstrMessageEvent, code: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        c = (code or "").strip()
+        if not (len(c) == 6 and c.isdigit()):
+            yield event.plain_result(f"格式：{CMD_TR_JOIN} 六位队伍码（{CMD_TR_LIST} 查看招募中队伍）")
+            return
+        cd = self._raid_cd_left(doc)
+        if cd > 0:
+            yield event.plain_result(self._raid_block_text(cd))
+            return
+        team = await self._raid_expire(await self.db.get_raid(c))
+        if not team:
+            yield event.plain_result("没有这个队伍码（或队伍已解散/逾期）。")
+            return
+        if await self.db.raid_member(c, doc.uid):
+            yield event.plain_result("你已在这支队伍里。")
+            return
+        count = await self.db.raid_member_count(c)
+        active = await self._raid_expire(await self.db.active_raid_of(doc.uid))
+        ok, msg = raid.can_join(doc, team, count, bool(active))
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        cfg = raid.boss_of(team["boss"])
+        if cfg and not raid.realm_ok(doc, cfg):
+            yield event.plain_result(f"【{team['boss']}】需第 {cfg['realm']} 境，道友境界未至。")
+            return
+        joined = await self.db.join_raid(c, doc.uid, doc.name or doc.uid[:8], time.time())
+        if not joined:
+            yield event.plain_result("加入失败：队伍状态已变化，请重试。")
+            return
+        yield event.plain_result(
+            f"已加入【{team['boss']}】讨伐队（{count + 1}/{raid.MAX_MEMBERS}）。\n"
+            f"等待队长 {CMD_TR_START}，开战后发 {CMD_TR_HIT} 出手。"
+        )
+
+    @filter.command(CMD_TR_START, "发起讨伐")
+    async def handle_team_start(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        team = await self._raid_expire(await self.db.active_raid_of(doc.uid))
+        if not team:
+            yield event.plain_result("你不在任何招募中的队伍里。")
+            return
+        members = await self.db.raid_members(team["code"])
+        ok, msg = raid.can_start(team, len(members), team["leader_uid"] == doc.uid)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        atks: list[int] = []
+        for m in members:
+            raw = await self.db.get_player(m["uid"])
+            if raw:
+                atks.append(self._stats(PlayerDoc(**raw)).atk)
+        avg = sum(atks) // max(1, len(atks))
+        cfg = raid.boss_of(team["boss"]) or {"tier": 1.0}
+        stats = raid.boss_stats(avg, len(members), float(cfg.get("tier", 1.0)))
+        if not await self.db.start_raid(team["code"], stats):
+            yield event.plain_result("队伍状态已变化，发起失败。")
+            return
+        team = await self.db.get_raid(team["code"]) or team
+        yield event.plain_result(
+            f"【{team['boss']}】现身！全队 {len(members)} 人，均攻 {avg:,} 定标。\n"
+            f"Boss 气血：{stats['hp']:,}｜奖池：{stats['reward']:,} 灵石\n"
+            f"队员发 {CMD_TR_HIT} 出手（今日 3 次，20 秒间隔），击杀后自动分奖。"
+        )
+
+    @filter.command(CMD_TR_HIT, "讨伐出手")
+    async def handle_team_hit(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        team = await self._raid_expire(await self.db.active_raid_of(doc.uid))
+        if not team:
+            yield event.plain_result("你不在进行中的讨伐队伍里。")
+            return
+        member = await self.db.raid_member(team["code"], doc.uid)
+        if not member:
+            yield event.plain_result("你不在这支队伍里。")
+            return
+        now = time.time()
+        ok, msg = raid.can_hit(team, member, now)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        hp_cur, hp_max = self._hp_pair(doc)
+        if hp_cur <= hp_max * 0.1:
+            yield event.plain_result("气血将尽，先「#疗伤」再出手。")
+            return
+        st = self._stats(doc)
+        sname, satk, sdef, shp = raid.shadow_of(team)
+        import random as _random
+        rng = _random.Random(f"{doc.uid}:raid:{team['code']}:{now}")
+        me = battle.Unit(doc.name or doc.uid[:8] + "…", st.atk, st.defense, hp_cur, st.bao)
+        shadow = battle.Unit(sname, satk, sdef, shp, 0.05)
+        won, _log, hp_left, _ = battle.spar_full(me, shadow, rng, max_rounds=20)
+        won_bool = won == 0
+        dmg = raid.hit_damage(won_bool, st.atk, int(team["defense"]), int(team["hp_max"]), rng)
+        doc.ext["hp"] = hp_left if won_bool else 0
+        await self.db.save_player(doc.model_dump())
+        left = await self.db.damage_raid(
+            team["code"], doc.uid, dmg, raid.time_key(now), now
+        )
+        hits = raid.hits_today(member, now) + 1
+        verdict = (
+            f"你击碎{sname}，一击贯穿岩躯，造成 {dmg:,} 伤害！"
+            if won_bool else
+            f"你被{sname}击退，仍在其身上留下 {dmg:,} 伤害的血痕。"
+        )
+        lines = [
+            verdict,
+            f"Boss 剩余气血：{max(0, left):,} / {int(team['hp_max']):,}",
+            f"今日出手：{hits}/{raid.HITS_PER_MEMBER}",
+        ]
+        if not won_bool:
+            lines.append("你重伤倒地（气血归零），先「#疗伤」。")
+        if left <= 0:
+            members = await self.db.raid_members(team["code"])
+            shares = await self._raid_settle(team, members, doc.uid)
+            lines.append(f"\n【全队公告】{team['boss']} 被讨伐！奖池 {int(team['reward']):,} 灵石已按伤害分奖：")
+            for s in shares:
+                lines.append(f"· {s['name']}：{s['stones']:,} 灵石（伤害 {s['dmg']:,}｜{s['share']}%）")
+            cfg = raid.boss_of(team["boss"]) or {}
+            if cfg.get("loot"):
+                lines.append(f"每人另得【{cfg['loot']}】×{int(cfg.get('loot_qty', 1))}。")
+        async for r in self._smart(event, "\n".join(lines), "团本讨伐"):
+            yield r
+
+    async def _raid_settle(self, team: dict, members: list[dict], killer_uid: str) -> list[dict]:
+        ledger = [(m["uid"], m["name"], int(m.get("dmg", 0) or 0)) for m in members]
+        shares = raid.split_rewards(
+            int(team.get("reward", 0) or 0), ledger, killer_uid
+        )
+        cfg = raid.boss_of(team["boss"]) or {}
+        now = time.time()
+        async with self.db.transaction():
+            for s in shares:
+                raw = await self.db.get_player(s["uid"])
+                if raw:
+                    p = PlayerDoc(**raw)
+                    p.stones += int(s["stones"])
+                    p.ext["raid_cd"] = now + raid.CLEAR_CD
+                    await self.db.save_player(p.model_dump())
+                if cfg.get("loot"):
+                    await self.db.add_items(
+                        s["uid"], {cfg["loot"]: int(cfg.get("loot_qty", 1))}
+                    )
+            await self.db.mark_raid_settled(team["code"])
+        return shares
+
+    @filter.command(CMD_TR_INFO, "查看队伍信息")
+    async def handle_team_info(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        team = await self._raid_expire(await self.db.active_raid_of(doc.uid))
+        if not team:
+            team = await self.db.last_raid_of(doc.uid)
+        if not team or team.get("status") == "closed":
+            yield event.plain_result(f"你不在任何队伍中。{CMD_TR_LIST} 查看招募中的团本。")
+            return
+        members = await self.db.raid_members(team["code"])
+        async for r in self._raid_send(event, team, members):
+            yield r
+
+    @filter.command(CMD_TR_LIST, "团本列表")
+    async def handle_team_list(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        raw_teams = await self.db.list_raids("recruiting", 20)
+        teams = []
+        for t in raw_teams:
+            alive = await self._raid_expire(t)
+            if alive:
+                teams.append(alive)
+            if len(teams) >= 10:
+                break
+        if not teams:
+            yield event.plain_result(
+                f"暂无招募中的团本。发「{CMD_TR_CREATE} 若陀龙王」开一支。"
+            )
+            return
+        lines = ["--- 招募中的团本 ---"]
+        for t in teams:
+            n = await self.db.raid_member_count(t["code"])
+            lines.append(
+                f"· {t['boss']}｜队伍码 {t['code']}｜队长 {t['leader_name']}｜{n}/{raid.MAX_MEMBERS}"
+            )
+        lines.append(f"加入：{CMD_TR_JOIN} 队伍码")
+        async for r in self._smart(event, "\n".join(lines), "团本列表"):
+            yield r
+
+    @filter.command(CMD_TR_DISMISS, "解散队伍")
+    async def handle_team_dismiss(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        team = await self.db.active_raid_of(doc.uid)
+        if not team:
+            yield event.plain_result("你不在任何队伍中。")
+            return
+        if team["leader_uid"] != doc.uid:
+            yield event.plain_result("只有队长可以解散队伍。")
+            return
+        await self.db.close_raid(team["code"], "closed", time.time())
+        yield event.plain_result(f"【{team['boss']}】讨伐队已解散（队伍码 {team['code']}）。")
+
+    @filter.command(CMD_TR_CLAIM, "结算团本奖励")
+    async def handle_team_claim(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        team = await self.db.last_raid_of(doc.uid)
+        if not team or team.get("status") != "victory":
+            yield event.plain_result("你还没有已讨伐成功的团本。")
+            return
+        members = await self.db.raid_members(team["code"])
+        cfg = raid.boss_of(team["boss"]) or {}
+        shares = raid.split_rewards(
+            int(team.get("reward", 0) or 0),
+            [(m["uid"], m["name"], int(m.get("dmg", 0) or 0)) for m in members],
+            team.get("killer_uid") or None,
+        )
+        lines = [f"--- {team['boss']} · 奖励结算 ---",
+                 f"队伍码：{team['code']}｜奖池：{int(team.get('reward', 0)):,} 灵石"]
+        for s in shares:
+            lines.append(
+                f"· {s['name']}：{s['stones']:,} 灵石（伤害 {s['dmg']:,}｜{s['share']}%）"
+            )
+        if cfg.get("loot"):
+            lines.append(f"每位参战者另得【{cfg['loot']}】×{int(cfg.get('loot_qty', 1))}")
+        lines.append("奖励已于击杀时自动发放，无需重复领取。")
+        async for r in self._smart(event, "\n".join(lines), "团本结算"):
+            yield r
 
     @filter.command(CMD_HEAL, "灵石疗伤")
     async def handle_heal(self, event: AstrMessageEvent):

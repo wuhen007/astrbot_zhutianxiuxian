@@ -59,6 +59,9 @@ def main() -> int:
                    "handle_protect_my", "handle_protect_off",
                    "handle_hei", "handle_hei_state", "handle_hei_talk", "handle_hei_teach",
                    "handle_hei_arrays", "handle_hei_engrave", "handle_array_off", "handle_array_on")),
+        ("团本讨伐", ("handle_team_create", "handle_team_join", "handle_team_start",
+                   "handle_team_hit", "handle_team_info", "handle_team_list",
+                   "handle_team_dismiss", "handle_team_claim")),
         ("帮助", ("handle_help",)),
     ]
     grouped = {}
