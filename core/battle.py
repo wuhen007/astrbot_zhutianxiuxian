@@ -49,40 +49,14 @@ def spar_full(
 ) -> tuple[int | None, list[str], int, int]:
     """同 spar，另返回双方剩余血量 (winner, log, a_hp_left, b_hp_left)。
 
+    W1-1 起为薄壳：逻辑迁入 core/combat/engine.py（行为等价，自检兜底），
+    新效果（护盾/反噬/汲取/技能）请直接用 combat.run_1v1 + Fighter.effects。
     skip_first：首回合无法出手的一方下标（0=a，1=b），用于「山河困龙阵」等定身效果。
     """
-    log: list[str] = []
-    units = [a, b]
-    hp = [a.hp, b.hp]
-    winner: int | None = None
-    skipped: set[int] = set()
+    from .combat import Fighter, run_1v1
 
-    for rnd in range(1, max_rounds + 1):
-        i, j = (0, 1) if rnd % 2 else (1, 0)
-        if i in skip_first and i not in skipped:
-            skipped.add(i)
-            log.append(f"第{rnd}回合：{units[i].name}被大阵困住，无法出手")
-            continue
-        atk_u, def_u = units[i], units[j]
-        dmg, crit = harm(atk_u.atk, def_u.defense, rng, atk_u.bao)
-        hp[j] = max(0, hp[j] - dmg)
-        log.append(
-            f"第{rnd}回合：{atk_u.name}出手，对{def_u.name}造成 {dmg} 点伤害"
-            + ("（暴击！）" if crit else "")
-            + f"，{def_u.name}剩余 {hp[j]}"
-        )
-        if hp[j] <= 0:
-            winner = i
-            break
-
-    if winner is None:
-        ratio_a = hp[0] / a.hp if a.hp > 0 else 0.0
-        ratio_b = hp[1] / b.hp if b.hp > 0 else 0.0
-        if abs(ratio_a - ratio_b) < 1e-9:
-            winner = None
-        else:
-            winner = 0 if ratio_a > ratio_b else 1
-    return winner, log, hp[0], hp[1]
+    fa, fb = Fighter.from_unit(a), Fighter.from_unit(b)
+    return run_1v1(fa, fb, rng, max_rounds=max_rounds, skip_first=skip_first).as_tuple()
 
 
 def spar(

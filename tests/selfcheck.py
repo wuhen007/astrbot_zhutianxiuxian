@@ -2075,6 +2075,59 @@ async def main():
     assert not q["enough_realm"]
     print("authority ok")
 
+    # 16s. 战斗引擎骨架（W1-1）：薄壳等价 + 效果槽 + 技能注册表
+    from core.combat import Fighter, run_1v1, skills as cskills  # noqa: E402
+
+    ua = battle_mod.Unit("甲", 5000, 2000, 50000, 0.3)
+    ub = battle_mod.Unit("乙", 4000, 2500, 45000, 0.2)
+    for seed in range(5):
+        w1, log1, ha1, hb1 = battle_mod.spar_full(ua, ub, _random.Random(seed))
+        w2, log2, ha2, hb2 = run_1v1(
+            Fighter.from_unit(ua), Fighter.from_unit(ub), _random.Random(seed)
+        ).as_tuple()
+        assert (w1, log1, ha1, hb1) == (w2, log2, ha2, hb2), seed
+    # skip_first 等价（困龙阵路径）
+    w1, log1, _, _ = battle_mod.spar_full(ua, ub, _random.Random(7), skip_first=(1,))
+    w2, log2, _, _ = run_1v1(
+        Fighter.from_unit(ua), Fighter.from_unit(ub), _random.Random(7), skip_first=(1,)
+    ).as_tuple()
+    assert (w1, log1) == (w2, log2) and any("困住" in x for x in log2)
+    # 定身效果：乙前两回合无法出手
+    fb = Fighter.from_unit(ub)
+    fb.effects["stun_turns"] = 2
+    res = run_1v1(Fighter.from_unit(ua), fb, _random.Random(1))
+    assert sum("被定身" in x for x in res.log) == 2, res.log
+    # 护盾吸收 + 溢出扣血
+    fb2 = Fighter.from_unit(ub)
+    fb2.effects["shield"] = 30000
+    res2 = run_1v1(Fighter.from_unit(ua), fb2, _random.Random(2))
+    assert any("护盾吸收" in x for x in res2.log) and res2.b_hp < 45000
+    # 反噬致死：守方高反噬，攻方薄血
+    fa3 = Fighter("脆皮", 8000, 1000, 100, 0.0)
+    fb3 = Fighter.from_unit(battle_mod.Unit("刺猬", 1000, 500000, 999999, 0.0))
+    fb3.effects["reflect"] = 1.0
+    res3 = run_1v1(fa3, fb3, _random.Random(3))
+    assert res3.winner == 1 and any("反噬" in x for x in res3.log), res3
+    # 汲取回血不超上限
+    fa4 = Fighter("吸血", 9000, 1000, 500, 0.9)
+    fa4.hp_max = 1000
+    fb4 = Fighter("血袋", 10, 10, 999999, 0.0)
+    fa4.effects["lifesteal"] = 0.5
+    res4 = run_1v1(fa4, fb4, _random.Random(4))
+    assert res4.a_hp > 500 and any("汲取" in x for x in res4.log), res4.a_hp  # 汲取回血且不超上限
+    # 技能注册表：on_turn 钩子被调用
+    fired = []
+    cskills.register(cskills.SkillSpec(
+        "test_echo", "回声技",
+        on_turn=lambda me, foe, ctx: fired.append(ctx["round"]) or foe.effects.update({"shield": 10}),
+    ))
+    assert cskills.get("test_echo").name == "回声技"
+    fa5 = Fighter("甲", 5000, 2000, 50000, 0.0, skills=("test_echo",))
+    res5 = run_1v1(fa5, Fighter.from_unit(ub), _random.Random(5))
+    assert fired and any("护盾吸收" in x for x in res5.log), (fired, res5.log)
+    cskills.clear()
+    print("combat engine ok")
+
     # 17. 宗门纯函数 + 存取
     from core import sect as sect_mod  # noqa: E402
 
