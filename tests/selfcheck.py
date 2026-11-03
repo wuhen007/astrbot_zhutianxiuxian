@@ -15,6 +15,9 @@ from core.player import (              # noqa: E402
 )
 from core import cultivate             # noqa: E402
 from core import items as items_mod    # noqa: E402
+from core import other_shore_world as osh_w          # noqa: E402
+from core import other_shore_rules as osh_rules   # noqa: E402
+from core import other_shore_state as osh_state   # noqa: E402
 import random as _random               # noqa: E402
 
 
@@ -155,9 +158,9 @@ async def main():
     ok, _, _ = items_mod.sell(inv_doc, junk, 1)
     assert not ok, "出售价 0 不可出售"
 
-    # 10. 迁移版本 = 10
+    # 10. 迁移版本 = 14
     async with db.conn.execute("SELECT version FROM db_info") as cur:
-        assert (await cur.fetchone())[0] == 10
+        assert (await cur.fetchone())[0] == 14
 
     # 11. 装备：穿戴/换位/卸下 + 比例与固定加成聚合
     from core import battle as battle_mod   # noqa: E402
@@ -1622,6 +1625,389 @@ async def main():
     assert g_back["rift"]["id"] == g["rift"]["id"], "裂界状态应可持久化"
     print("rift ok")
 
+    # 16j. 千年灾劫：均值锚定/召唤/巡猎上限/讨伐/魔主/纪元
+    from core import calamity as cal_mod  # noqa: E402
+    import random as pyrandom  # noqa: E402
+
+    avg = cal_mod.average_stats([{"atk": 1_000_000, "defense": 900_000, "hp": 5_000_000, "bao": 0.2}])
+    assert avg["samples"] == 1 and avg["atk"] == 1_000_000, avg
+    fallback = cal_mod.average_stats([])
+    assert fallback["atk"] == 5_000 and fallback["samples"] == 0, fallback
+
+    cs = cal_mod.ensure(None)
+    rr = pyrandom.Random(11)
+    made = cal_mod.spawn_wave(cs, 0, 10, avg, rr, source="natural")
+    assert len(made) == 10 and all(e["status"] == "active" for e in made), made
+    assert made[0]["hp"] > 0 and made[0]["id"].startswith("calamity-")
+    assert cal_mod.resolve(cs, "1") is made[-1] or cal_mod.resolve(cs, "1") in made
+    assert cal_mod.resolve(cs, made[0]["name"])["id"] == made[0]["id"]
+
+    # 超过 100 尊：NPC 天骄巡猎最旧者
+    for _ in range(11):
+        cal_mod.spawn_wave(cs, 0, 10, avg, rr, source="natural")
+    active = cal_mod.active_calamities(cs)
+    assert len(active) <= cal_mod.MAX_ACTIVE, len(active)
+    assert cs["report"] and cs["report"]["count"] > 0, cs["report"]
+    assert cal_mod.cull_report_text(cs["report"])
+
+    # 讨伐：胜则伏诛 + 留炼化窗口；败则留伤
+    cd = PlayerDoc(uid="cal_p", name="伐厄者", realm_index=46, stones=0, exp=0)
+    cd.ext["modao"] = 10
+    target = cal_mod.active_calamities(cs)[0]
+    strong = {"atk": avg["atk"] * 1000, "defense": avg["defense"] * 1000, "hp": avg["hp"] * 100, "bao": 0.5}
+    res = cal_mod.battle_calamity(cd, target, strong, rr, t0)
+    assert res["won"] and target["status"] == "defeated", res
+    assert target["defeated_by"] == "cal_p" and res["damage"] > 0
+    cal_mod.grant_refine(cd, target, t0)
+    pending = cal_mod.take_refine(cd, t0 + 60)
+    assert pending and pending["entity_id"] == target["id"], pending
+    assert cal_mod.take_refine(cd, t0 + cal_mod.REFINE_WINDOW_SECONDS + 1) is None
+
+    weak = {"atk": 1, "defense": 1, "hp": 100, "bao": 0.0}
+    target2 = cal_mod.active_calamities(cs)[0]
+    res2 = cal_mod.battle_calamity(cd, target2, weak, rr, t0)
+    assert not res2["won"] and target2["hp"] >= 1, res2
+
+    # 魔主：击杀达标降临 / 共享血条按伤害计贡献 / 名次发奖
+    cs["kills"] = cal_mod.OVERLORD_BASE_KILLS
+    ov = cal_mod.maybe_spawn_overlord(cs, avg, rr, t0)
+    assert ov and ov["status"] == "active" and ov["hp"] > 0, ov
+    assert cal_mod.maybe_spawn_overlord(cs, avg, rr, t0) is None, "魔主在场不重复降临"
+    hit = cal_mod.battle_overlord(cs, cd, strong, rr, t0)
+    assert hit["damage"] > 0 and ov["hp"] < ov["max_hp"], hit
+    rank = cal_mod.overlord_rank(ov)
+    assert rank and rank[0]["uid"] == "cal_p", rank
+    reward = cal_mod.overlord_reward(ov, "cal_p")
+    assert reward["rank"] == 1 and reward["amount"] >= 5 and reward["page"].endswith("残页"), reward
+    mem = cal_mod.rift_memory(cd, str(ov["id"]))
+    assert isinstance(mem["granted"], bool)
+    for _ in range(3):  # 35% 概率 + 3 次保底
+        cd.ext["rift_memory"] = mem["state"]
+        if mem["state"].get("unlocked"):
+            break
+        mem = cal_mod.rift_memory(cd, str(ov["id"]))
+    assert mem["state"].get("unlocked") is True, mem
+    cd.ext["rift_memory"] = mem["state"]
+    assert cal_mod.rift_memory(cd, str(ov["id"]))["already"] is True
+
+    # 纪元：千年轮转 / 压制加深 / 位面损失 / 护身符豁免
+    era0 = dict(cs["era"])
+    adv = cal_mod.advance_era(cs, avg, rr, t0)
+    assert adv["index"] == era0["index"] + 1 and adv["years"] == era0["years"] + cal_mod.NATURAL_YEAR
+    assert 0 < adv["suppression"] <= 0.5 and adv["spawned"] >= 1
+    assert cs["era"]["losses"] and cs["era"]["events"]
+    base_mult = cal_mod.reward_multiplier(cd, cs, t0)
+    assert base_mult <= 1.0
+    cd.ext["era_charm_until"] = cs["era"]["index"]
+    assert cal_mod.reward_multiplier(cd, cs, t0) == 1.0
+    print("calamity ok")
+
+    # 16k. 灵界裂缝：坐标/界印/准入/探索/伏杀/奖励倍率/存取
+    from core import lingjie as lj_mod  # noqa: E402
+
+    lr_rng = _random.Random(21)
+    lr_now = t0
+    lr_rift = lj_mod.create_rift({"index": 1, "years": 2000}, lr_rng, lr_now)
+    assert 0 <= lr_rift["x"] <= lj_mod.COORD_MAX and 0 <= lr_rift["y"] <= lj_mod.COORD_MAX, lr_rift
+    assert abs(lr_rift["expires_at"] - lr_now - lj_mod.RIFT_DURATION) < 1e-6
+    assert lj_mod.ATTEMPT_MIN <= lj_mod.base_attempts(lr_rift) <= lj_mod.ATTEMPT_MAX
+    assert lj_mod.is_milestone(2000) and lj_mod.is_milestone(4000) and not lj_mod.is_milestone(2100)
+
+    # 坐标解析：全角逗号 / 越界 / 非法
+    assert lj_mod.parse_coordinate("#前往 12,34") == (12, 34)
+    assert lj_mod.parse_coordinate("#探索 999，0") == (999, 0)
+    assert lj_mod.parse_coordinate("#前往 1200,3") is None
+    assert lj_mod.parse_coordinate("#前往 abc") is None
+    assert lj_mod.is_at([12, 34], {"x": 12, "y": 34})
+    assert not lj_mod.is_at([12, 35], {"x": 12, "y": 34})
+    assert not lj_mod.is_at(None, {"x": 12, "y": 34})
+
+    # 界印：基础 2~5 重，换裂缝自动清零，锚符追加一次
+    lr_state = lj_mod.ensure({})
+    lr_uid = "lj_p"
+    assert lj_mod.remaining_attempts(lr_state, lr_uid, lr_rift) == lj_mod.base_attempts(lr_rift)
+    lj_mod.bump_attempt(lr_state, lr_uid, lr_rift, "used")
+    assert lj_mod.remaining_attempts(lr_state, lr_uid, lr_rift) == lj_mod.base_attempts(lr_rift) - 1
+    lj_mod.bump_attempt(lr_state, lr_uid, lr_rift, "extra")
+    assert lj_mod.remaining_attempts(lr_state, lr_uid, lr_rift) == lj_mod.base_attempts(lr_rift)
+    lr_next = lj_mod.create_rift({"index": 2, "years": 4000}, lr_rng, lr_now)
+    assert lj_mod.remaining_attempts(lr_state, lr_uid, lr_next) == lj_mod.base_attempts(lr_next)
+
+    # 准入：坍塌 / 境界 / 未抵达 / 来不及 / 通过
+    lj_doc = PlayerDoc(uid=lr_uid, name="探界者", realm_index=40)
+    assert lj_mod.can_start(lj_doc, None, lr_now)[1] == "collapsed"
+    assert lj_mod.can_start(lj_doc, lr_rift, lr_now)[1] == "coordinate"
+    lj_doc.ext["lingjie_pos"] = [lr_rift["x"], lr_rift["y"]]
+    assert lj_mod.can_start(lj_doc, lr_rift, lr_now)[0] is True
+    low = PlayerDoc(uid="lj_low", name="凡人", realm_index=lj_mod.REALM_GATE - 1)
+    low.ext["lingjie_pos"] = [lr_rift["x"], lr_rift["y"]]
+    assert lj_mod.can_start(low, lr_rift, lr_now)[1] == "realm"
+    assert lj_mod.can_start(lj_doc, lr_rift, lr_rift["expires_at"] - 60)[1] == "time"
+
+    # 探索耗时：行字秘/天璇步法减时，下限 1 分钟
+    base_dur, _ = lj_mod.explore_duration(PlayerDoc(uid="lj_d"))
+    assert base_dur == lj_mod.EXPLORE_SECONDS
+    fast_doc = PlayerDoc(uid="lj_f", realm_index=20)
+    fast_doc.ext["gongfa"] = ["行字秘"]
+    fast_dur, fast_msgs = lj_mod.explore_duration(fast_doc)
+    assert fast_dur < base_dur and fast_msgs, (fast_dur, fast_msgs)
+    step_doc = PlayerDoc(uid="lj_s")
+    step_doc.ext["gongfa"] = ["天璇步法"]
+    assert lj_mod.explore_duration(step_doc)[0] == base_dur - 60
+
+    # 裂缝生灵：玩家三维 ×0.85 附近浮动
+    base_stats = (1_000_000, 800_000, 5_000_000)
+    lr_mon = lj_mod.make_monster(base_stats, lr_rng)
+    assert 1 <= lr_mon.atk <= int(base_stats[0] * 1.2), lr_mon.atk
+    assert 1 <= lr_mon.hp <= int(base_stats[2] * 1.3), lr_mon.hp
+    amb = lj_mod.make_ambusher(base_stats, lr_rng, "陆沉")
+    assert "伏杀者" in amb.name
+
+    # 余波分布合法，奖励至少三件丹药
+    for _ in range(50):
+        assert lj_mod.roll_aftermath(lr_rng) in ("ambush", "triple_ambush", "corpse", "none")
+    corpse = lj_mod.roll_corpse_extras(_random.Random(3))
+    assert set(corpse) == {"grass", "water", "fate_reroll", "fate_slot"}
+    lr_rewards = lj_mod.roll_rewards(lr_rng, 1.0)
+    assert len(lr_rewards) >= 3 and all(r["count"] >= 1 for r in lr_rewards), lr_rewards
+
+    # 奖励倍率：灵根天赋 + 幸运 buff 消耗
+    card = PlayerDoc(uid="lj_c")
+    card.ext["linggen"] = {"type": "魔卡少女"}
+    mult, mult_msgs = lj_mod.reward_multiplier(card)
+    assert mult >= 2 and mult_msgs, (mult, mult_msgs)
+    lucky = PlayerDoc(uid="lj_l")
+    lucky.ext["buffs"] = {"lucky": {"times": 1, "bonus": 0.5}}
+    assert lj_mod.reward_multiplier(lucky)[0] > 1
+    assert lucky.ext["buffs"]["lucky"]["times"] == 0
+
+    # 状态文案含坐标与准入
+    text = lj_mod.status_text(lr_rift, lr_now, lj_doc, 3)
+    assert str(lr_rift["x"]) in text and "realm_index" in text and "剩余 3" in text
+    assert "没有现世" in lj_mod.status_text(None, lr_now)
+
+    # 全服单例存取
+    assert await db.get_lingjie() in ({},)
+    lj_state = lj_mod.ensure(await db.get_lingjie())
+    lj_state["rift"] = lr_rift
+    await db.save_lingjie(lj_state)
+    back = await db.get_lingjie()
+    assert back["rift"]["id"] == lr_rift["id"]
+    print("lingjie ok")
+
+    # 16m. 镇妖塔 / 炼神魄：数值门面与实装同源（防两处漂移）
+    from core import pagoda as pg_mod  # noqa: E402
+    from core import adventure as adv_mod, boss as boss_mod  # noqa: E402
+
+    assert pg_mod.MAX_FLOOR == adv_mod.TOWER_MAX == 50000
+    assert pg_mod.clamp_floor(-5) == 0 and pg_mod.clamp_floor(999999) == pg_mod.MAX_FLOOR
+    for f in (0, 1, 99, 100, 199, 200, 500, pg_mod.MAX_FLOOR):
+        assert pg_mod.boss_spec(pg_mod.KIND_ZYT, f) == (
+            adv_mod.tower_boss(f)["hp"], adv_mod.tower_boss(f)["atk"], adv_mod.tower_boss(f)["defense"]
+        ), f"镇妖塔第 {f} 层数值与实装不一致"
+        assert pg_mod.reward_of(pg_mod.KIND_ZYT, f) == adv_mod.tower_reward(f)
+    for s in (0, 1, 7, 500):
+        assert pg_mod.boss_spec(pg_mod.KIND_SHENPO, s) == boss_mod.shenpo_specs(s)[:3]
+        assert pg_mod.reward_of(pg_mod.KIND_SHENPO, s) == boss_mod.shenpo_specs(s)[3]
+    assert pg_mod.reward_of(pg_mod.KIND_ZYT, 0) == 100
+    assert pg_mod.reward_of(pg_mod.KIND_ZYT, 200) == 300 * 200 + 1000
+    assert pg_mod.reward_of(pg_mod.KIND_SHENPO, 500) == 400000
+    assert pg_mod.penalty_of(pg_mod.KIND_ZYT, 10) == 2 * adv_mod.tower_reward(10)
+    assert "第 0 层" in pg_mod.status_text(pg_mod.KIND_ZYT, 0)
+    print("pagoda facade ok")
+
+    # 16n. 彼岸古文明：四章串行链 + 全服贡献 + 每章一次领取
+    from core import ancient as anc  # noqa: E402
+
+    assert [e["order"] for e in anc.CATALOG] == [1, 2, 3, 4]
+    assert all(len(e["opposition"]) == 2 and e["items"] for e in anc.CATALOG)
+    assert [e["required"] for e in anc.CATALOG] == sorted(e["required"] for e in anc.CATALOG)
+    st_anc = anc.ensure(anc.default_state())
+    assert list(st_anc["events"].values())[0]["status"] == "active"
+    assert list(st_anc["events"].values())[1]["status"] == "locked"
+    assert anc.active_chapter(st_anc) is anc.CATALOG[0]
+    assert anc.resolve_chapter("2") is anc.CATALOG[1]
+    assert anc.resolve_chapter("禁宝") is anc.CATALOG[2]
+    assert anc.resolve_chapter("") is None and anc.resolve_chapter("zzz") is None
+
+    # 锁住的章节不能推进；贡献溢出按阈值截断
+    assert not anc.contribute(st_anc, anc.CATALOG[1], "u1", "甲", 50, 1)["ok"]
+    first = anc.CATALOG[0]
+    r1 = anc.contribute(st_anc, first, "u1", "甲", 500, 10)
+    assert r1["ok"] and r1["applied"] == first["required"] and r1["chapterCompleted"]
+    assert st_anc["events"][first["id"]]["status"] == "completed"
+    assert st_anc["events"][anc.CATALOG[1]["id"]]["status"] == "active"
+    assert st_anc["completedCount"] == 1
+    assert not anc.contribute(st_anc, first, "u2", "乙", 10, 11)["ok"]
+
+    # 领取：必须有贡献、每章一次
+    assert anc.claim(st_anc, first, "u2", 12)["ok"] is False
+    c1 = anc.claim(st_anc, first, "u1", 13)
+    assert c1["ok"] and c1["stones"] == first["stones"] and c1["exp"] == first["exp"]
+    assert anc.claim(st_anc, first, "u1", 14)["ok"] is False
+    assert not anc.claim(st_anc, anc.CATALOG[2], "u1", 15)["ok"]
+
+    # 四章全通 → 链条 completed
+    for entry in anc.CATALOG[1:]:
+        anc.contribute(st_anc, entry, "u1", "甲", entry["required"], 20)
+    assert st_anc["completedCount"] == 4 and st_anc["status"] == "completed"
+    assert anc.active_chapter(st_anc) is None
+    assert "四章已尽" in anc.status_text(st_anc, "u1")
+
+    # 战斗口径：强者两战全胜、弱者必败；贡献随境界与章节递增
+    class _AncientStrong:
+        atk = 10 ** 9
+        defense = 10 ** 9
+        hp = 10 ** 9
+        bao = 0.0
+
+    class _AncientWeak:
+        atk = 1
+        defense = 1
+        hp = 10
+        bao = 0.0
+
+    strong = anc.fight_chapter(first, _AncientStrong, _random.Random(3))
+    assert strong["won"] and strong["hp_left"] > 0
+    assert anc.fight_chapter(first, _AncientWeak, _random.Random(3))["wins"] == 0
+    assert anc.contribution_amount(first, 2, 0) >= anc.MIN_CONTRIBUTION
+    assert anc.contribution_amount(first, 0, 9) == 0
+    assert anc.contribution_amount(first, 1, 0) < anc.contribution_amount(first, 2, 0)
+    assert anc.contribution_amount(anc.CATALOG[0], 2, 50) <= anc.CATALOG[0]["required"] // 3
+    assert len(anc.progress_bar(0, 100)) == 10 and len(anc.progress_bar(100, 100)) == 10
+    print("ancient ok")
+
+    # 16o. 小世界工坊/守卫/催熟/偷菜
+    from core import xiaoshijie as xsj  # noqa: E402
+
+    world = {
+        "name": "紫霄界", "level": 2, "avatar": True, "last_harvest": 0.0,
+        "water_ts": 0.0,
+        "fields": [
+            {"seed": "麒麟神药种子", "remaining": 0.0},
+            {"seed": "蟠桃仙种", "remaining": 5.0},
+        ],
+    }
+    assert xsj.workshop_level(world, "灵田") == 0
+    assert xsj.workshop_cost("灵田", 0) == 3_000_000
+    assert xsj.workshop_cost("灵田", 4) == 3_000_000 * 25
+    ok_w, msg_w, nw, spent = xsj.upgrade_workshop(world, "灵田", 10 ** 12, 3)
+    assert ok_w and nw["workshops"]["灵田"] == 1 and spent == 3_000_000
+    assert not xsj.upgrade_workshop(world, "灵田", 10 ** 12, 0)[0]  # 世界石不足
+    assert not xsj.upgrade_workshop(world, "灵田", 1, 9)[0]         # 灵石不足
+    assert not xsj.upgrade_workshop(world, "不存在", 10 ** 12, 9)[0]
+    full = {"name": "甲", "level": 1, "fields": [], "workshops": {"灵田": xsj.WORKSHOP_MAX}}
+    assert not xsj.upgrade_workshop(full, "灵田", 10 ** 12, 9)[0]
+    assert "灵田 5/5" in xsj.workshop_text(full)
+
+    assert xsj.guard_upgrade(world, 10 ** 12, 1)[2]["guard"] == 1
+    guard_full = {"name": "甲", "level": 1, "fields": [], "guard": xsj.GUARD_MAX}
+    assert not xsj.guard_upgrade(guard_full, 10 ** 12, 9)[0]
+    assert xsj.steal_rate(guard_full) == 0.05
+    assert abs(xsj.steal_rate({"guard": 2}) - (0.65 - 0.3)) < 1e-9
+
+    ok_r, msg_r, rw, cost_r = xsj.ripen(world, 10 ** 12)
+    assert ok_r and cost_r == xsj.RIPEN_COST and rw["fields"][1]["remaining"] == 0.0
+    assert not xsj.ripen({"name": "甲", "fields": [{"seed": "x", "remaining": 0}]}, 10 ** 12)[0]
+    assert not xsj.ripen(world, 1)[0]
+
+    class _AlwaysOk:
+        def random(self):
+            return 0.0
+
+    class _AlwaysFail:
+        def random(self):
+            return 0.999
+
+    ok_s, msg_s, tw, item_s, fine_s = xsj.steal(world, 10 ** 7, _AlwaysOk())
+    assert ok_s and item_s == "麒麟神药" and fine_s == 0
+    assert len(tw["fields"]) == 1
+    ok_f, msg_f, _tw, item_f, fine_f = xsj.steal(world, 10 ** 7, _AlwaysFail())
+    assert not ok_f and item_f == "" and fine_f == xsj.STEAL_FAIL_PENALTY
+    assert not xsj.steal(world, 1, _AlwaysOk())[0]           # 修为不足
+    assert not xsj.steal({"name": "甲", "fields": [{"seed": "x", "remaining": 9}]}, 10 ** 7, _AlwaysOk())[0]
+    print("xiaoshijie workshop ok")
+
+    # 16p. 彼岸世界/真世界：世界纯函数 + 规则层 + SQLite 单例存取
+    from core import other_shore_rules as orules  # noqa: E402
+    from core import other_shore_state as osst  # noqa: E402
+    from core import other_shore_world as osw  # noqa: E402
+
+    world = osw.create_other_shore_world("canglan")
+    center_state = world["states"]["0,0"]
+    assert center_state["phase"] == "anchored" and center_state["contribution"] == 0
+    assert osw.get_other_shore_hex_distance({"q": 0, "r": 0}, {"q": 1, "r": 0}) == 1
+    assert osw.get_other_shore_hex_distance({"q": 0, "r": 0}, {"q": 3, "r": 0}) == 3
+    assert osw._hash("canglan:x") == osw._hash("canglan:x")
+    try:
+        osw.require_star(world, {"q": 99, "r": 99})
+        raise AssertionError("不存在的坐标应报错")
+    except ValueError:
+        pass
+    # 中心星已 anchored，踏足无副作用
+    assert osw.visit_other_shore_star(world, {"q": 0, "r": 0})["states"]["0,0"]["phase"] == "anchored"
+    # 观测半径 1 后，距离 1 内星进入 sensed
+    observed = osw.observe_other_shore_stars(world, {"q": 0, "r": 0}, 1)
+    within = [s for s in observed["stars"] if osw.get_other_shore_hex_distance({"q": 0, "r": 0}, s) <= 1]
+    assert any(observed["states"][f"{s['q']},{s['r']}"]["phase"] == "sensed" for s in within), \
+        "观测半径内应进入 sensed"
+    # 贡献：单人上限 1/人；中心星阈值 0 → 贡献无增量
+    center = {"q": 0, "r": 0}
+    assert osw.contribute_other_shore_exploration(observed, center, "u1", 100)[
+        "states"]["0,0"]["contribution"] == 0
+    wide = osw.observe_other_shore_stars(world, center, 4)
+    gate = osw.visit_other_shore_star(wide, {"q": 4, "r": 0})
+    gated = osw.contribute_other_shore_exploration(gate, {"q": 4, "r": 0}, "u1", 100)
+    gate_id = next(x["id"] for x in gated["stars"] if x["q"] == 4 and x["r"] == 0)
+    assert gated["states"][gate_id]["contribution"] == 1, gated["states"][gate_id]
+    assert gated["states"][gate_id]["contributors"]["u1"] == 1
+    assert osw.contribute_other_shore_exploration(
+        gated, {"q": 4, "r": 0}, "u1", 100)["states"][gate_id]["contribution"] == 1
+    anchored = osw.anchor_other_shore_star(observed, center)  # 已 anchored → 幂等
+    assert anchored["states"]["0,0"]["phase"] == "anchored"
+    cleared = osw.clear_other_shore_star(anchored, center)
+    assert cleared["states"]["0,0"]["phase"] == "cleared"
+    # 非中心星未 visited 不可贡献
+    lone = osw.create_other_shore_world("c2")
+    try:
+        osw.contribute_other_shore_exploration(lone, {"q": 4, "r": 0}, "u1", 1)
+        raise AssertionError("未踏足应拒绝贡献")
+    except ValueError:
+        pass
+    # 规则层：境界名 / 分档 / 心神路程 / 抑制免疫 / 外部限制
+    assert orules.tier_from_realm_name("准仙帝") == "quasi_immortal_emperor"
+    assert orules.tier_from_realm_name("仙帝") == "immortal_emperor"
+    assert orules.tier_from_realm_name("远古残境") == "below_emperor"
+    assert orules.tier_from_level(16, {"emperor": 16}) == "emperor"
+    assert orules.tier_from_level(18, {"emperor": 16, "immortalKing": 18}) == "immortal_king"
+    assert orules.stronger_tier("emperor", "below_emperor") == "emperor"
+    assert orules.get_other_shore_travel_tier({"realm": "准仙帝"}) == "quasi_immortal_emperor"
+    cost0 = orules.calculate_other_shore_mind_cost({"realm": "仙帝"}, 10, 0)
+    assert cost0["cost"] == 0 and cost0["remainder"] == 0
+    cost3 = orules.calculate_other_shore_mind_cost({"realm": "仙王"}, 10, 0)
+    assert cost3["cost"] == 3 and cost3["remainder"] == 1
+    assert orules.get_other_shore_suppression({"realm": "仙帝", "xiangu_yishenweizhong": True})["immune"]
+    assert orules.get_other_shore_suppression({"realm": "仙帝", "xiangulevel_id": 13})["immune"]
+    assert not orules.get_other_shore_suppression({"realm": "准仙帝", "xiangulevel_id": 11})["immune"]
+    assert orules.get_other_shore_suppression({"realm": "准仙帝", "xiangulevel_id": 11})["attributeMultiplier"] == 0.7
+    assert not orules.is_other_shore_external_action_allowed("externalShop")
+    try:
+        orules.is_other_shore_external_action_allowed("custom")
+        raise AssertionError("未知外部行为应报错")
+    except ValueError:
+        pass
+    # SQLite 单例存取：create/save/get/update 往返
+    conn = db.conn
+    state = await osst.ensure_other_shore_world(conn, "canglan")
+    assert state["stars"] and state["version"] == 1
+    state = await osst.ensure_other_shore_world(conn, "canglan")
+    assert state is not None
+    await osst.update_other_shore_world(conn, state, lambda d: dict(d, seed="x"))
+    updated = await osst.ensure_other_shore_world(conn, "canglan")
+    assert updated["seed"] == "x"
+    await osst.save_other_shore_world(conn, await osst.ensure_other_shore_world(conn, "canglan"))
+    print("other_shore world ok")
+
     # 17. 宗门纯函数 + 存取
     from core import sect as sect_mod  # noqa: E402
 
@@ -1972,8 +2358,151 @@ async def main():
     for rar in range(0, 12):
         hits = [1 for lo, hi in tiers if lo <= rar < hi]
         assert len(hits) == 1, f"稀有度 {rar} 分组不互斥"
-    bad = await render_mod.render_panel("不存在模板", status_data, tmp)
-    assert bad is None, "未知模板应返回 None 触发回退"
+    # 16p. 彼岸世界/真世界：基础世界层（世界/坐标/观测/路径/贡献/通关）+ 规则层 + 状态访问层
+    # 用固定 rng 桩，不依赖随机数。
+    world = osh_w.create_other_shore_world(seed="canglan")
+    assert world["radius"] == osh_w.OTHER_SHORE_MAP_RADIUS == 4
+    assert world["centerId"] == "0,0"
+    center = next(s for s in world["stars"] if s["id"] == "0,0")
+    assert center["anchorRequirement"] == 0
+    center_state = world["states"]["0,0"]
+    assert center_state["phase"] == "anchored" and center_state["contribution"] == 0
+    non_center = [s for s in world["stars"] if s["id"] != "0,0"]
+    assert len(non_center) > 50, "世界星表应远大于关键星"
+
+    # 坐标与距离
+    assert osh_w.get_other_shore_hex_distance({"q": 0, "r": 0}, {"q": 1, "r": 0}) == 1
+    assert osh_w.get_other_shore_hex_distance({"q": 0, "r": 0}, {"q": 4, "r": 0}) == 4
+    assert osh_w.other_shore_coordinate_id(0, 0) == "0,0"
+    assert osh_w._normalize_coordinate({"q": -2, "r": 3}) == {"q": -2, "r": 3}
+    assert osh_w.get_other_shore_hex_distance({"q": -2, "r": 3}, {"q": -4, "r": 1}) == 4
+
+    # 星表与程序星池
+    key_star_names = {s["name"] for s in world["stars"] if s.get("keyStar")}
+    assert "沧澜祖星" in key_star_names
+    procedural = [s for s in world["stars"] if s.get("keyStar") is False]
+    assert procedural, "应存在程序生成大星"
+    assert all(s["kind"] in ("life", "ruin", "tide", "rift", "civilization", "dead") for s in procedural)
+    assert {s["templateId"] for s in procedural} <= {
+        "life", "ruin", "tide", "rift", "civilization", "dead"}
+    key_star_reqs = {s["anchorRequirement"] for s in world["stars"] if s["name"] == "观潮天门"}
+    assert key_star_reqs == {8}, key_star_reqs
+    assert {s["anchorRequirement"] for s in world["stars"] if s["name"] == "沧澜祖星"} == {0}
+
+    # 观测 / 踏足 / 贡献 / 建标 / 完成 的契约
+    world_sensed = osh_w.observe_other_shore_stars(world, {"q": 2, "r": -1}, range_=2)
+    sensed_ids = {sid for sid, st in world_sensed["states"].items() if st.get("phase") == "sensed"}
+    assert sensed_ids, "观测范围应至少把若干大星推进到 sensed"
+    assert world_sensed["states"]["0,0"]["phase"] == "anchored", "观测不得回退中心锚定"
+    # 距 (2,-1) 为 3 的观潮天门不在观测范围，未观测不可踏足
+    assert osh_w.get_other_shore_hex_distance({"q": 2, "r": -1}, {"q": 4, "r": 0}) == 3
+    try:
+        osh_w.visit_other_shore_star(world_sensed, {"q": 4, "r": 0})
+        raise AssertionError("未观测不可踏足")
+    except ValueError:
+        pass
+    visited = osh_w.visit_other_shore_star(world_sensed, {"q": 2, "r": -1})
+    assert visited["states"]["2,-1"]["phase"] == "visited"
+    try:
+        osh_w.anchor_other_shore_star(visited, {"q": 2, "r": -1})
+        raise AssertionError("贡献不足不可建标")
+    except ValueError:
+        pass
+    # 单人上限 1：凑 6 人贡献后可达标建标
+    for _i in range(6):
+        visited = osh_w.contribute_other_shore_exploration(visited, {"q": 2, "r": -1}, f"u{_i}", 1)
+    world_visited = osh_w.anchor_other_shore_star(visited, {"q": 2, "r": -1})
+    assert world_visited["states"]["2,-1"]["phase"] == "anchored"
+    cleared = osh_w.clear_other_shore_star(world_visited, {"q": 2, "r": -1})
+    assert cleared["states"]["2,-1"]["phase"] == "cleared"
+
+    # 贡献：已 cleared 的星阈值已满（6/6），再贡献无增量
+    world_contrib = osh_w.contribute_other_shore_exploration(world_visited, {"q": 2, "r": -1}, "uid_x", amount=1)
+    assert world_contrib["states"]["2,-1"]["contribution"] == 6, world_contrib["states"]["2,-1"]
+    assert "uid_x" not in world_contrib["states"]["2,-1"].get("contributors", {})
+    # 中心星贡献 = anchorRequirement（中心锚定=0 时 0）
+    center_contrib = osh_w.contribute_other_shore_exploration(
+        world, {"q": 0, "r": 0}, "uid_c", amount=5)
+    assert center_contrib["states"]["0,0"]["contribution"] == 0
+    # 未知坐标报错
+    try:
+        osh_w.require_star(world, {"q": 999, "r": 999})
+        raise AssertionError("未知坐标应报错")
+    except ValueError:
+        pass
+
+    # 路径与移动心智成本
+    path = ["0,0", "1,0", "1,1"]
+    travel = osh_w.calculate_other_shore_travel(world_visited, path, {"境界": "准仙帝"}, remainder=0)
+    assert travel["path"] == path and travel["totalSteps"] == 2
+    assert travel["cost"] == 0 and travel["remainder"] == 2  # 准仙帝 10 步/心神
+    bad_path = ["0,0", "2,0"]  # 距离 2 ≠ 1
+    try:
+        osh_w.calculate_other_shore_travel(world_visited, bad_path, {"境界": "准仙帝"}, remainder=0)
+        raise AssertionError("非相邻路径应报错")
+    except ValueError:
+        pass
+    # 大帝 mindPerStep=1 → 每格 1 心神
+    emperor_cost = osh_w.calculate_other_shore_travel(
+        world_visited, path, {"境界": "大帝"}, remainder=0)
+    assert emperor_cost["cost"] == 2
+    # 真仙 stepsPerMind=2
+    true_tier_cost = osh_w.calculate_other_shore_travel(
+        world_visited, path, {"境界": "真仙"}, remainder=1)
+    assert true_tier_cost["cost"] == (1 + 2) // 2 and true_tier_cost["remainder"] == (1 + 2) % 2
+
+    # 规则层：境界名称判定 / 阈值 / 强档 / 旅行档位
+    assert osh_rules.tier_from_realm_name("准仙帝") == "quasi_immortal_emperor"
+    assert osh_rules.tier_from_realm_name("仙帝") == "immortal_emperor"
+    assert osh_rules.tier_from_realm_name("祭道") == "immortal_emperor"
+    assert osh_rules.tier_from_realm_name("路尽") == "immortal_emperor"
+    assert osh_rules.tier_from_realm_name("仙王") == "immortal_king"
+    assert osh_rules.tier_from_realm_name("真仙") == "true_immortal"
+    assert osh_rules.tier_from_realm_name("大帝") == "emperor"
+    assert osh_rules.tier_from_realm_name("普通") == "below_emperor"
+    assert osh_rules.tier_from_level(10, {"emperor": 16, "trueImmortal": 17, "immortalKing": 18,
+                                          "quasiImmortalEmperor": 20, "immortalEmperor": 21}) == "below_emperor"
+    assert osh_rules.tier_from_level(22, {"emperor": 16, "trueImmortal": 17, "immortalKing": 18,
+                                          "quasiImmortalEmperor": 20, "immortalEmperor": 21}) == "immortal_emperor"
+    assert osh_rules.stronger_tier("emperor", "below_emperor") == "emperor"
+    assert osh_rules.stronger_tier("below_emperor", "emperor") == "emperor"
+    assert osh_rules.get_other_shore_travel_tier("准仙帝") == "quasi_immortal_emperor"
+    # 三体系取最高档：仙王名号 + 秘境 25（≥21 仙帝档）→ immortal_emperor
+    assert osh_rules.get_other_shore_travel_tier({"境界": "仙王", "mijinglevel_id": 25}) == "immortal_emperor"
+    assert osh_rules.get_other_shore_travel_tier({"境界": "仙王", "mijinglevel_id": 18}) == "immortal_king"
+    assert osh_rules.get_other_shore_travel_rule("准仙帝")["mindPerStep"] == 1
+    assert osh_rules.get_other_shore_travel_rule("普通")["mindPerStep"] == 5  # below_emperor
+    assert osh_rules.OTHER_SHORE_SUPPRESSION_MULTIPLIER == 0.7
+    assert osh_rules.is_other_shore_external_action_allowed("externalShop") is False
+    assert osh_rules.is_other_shore_external_action_allowed("externalPillHealing") is False
+
+    # 抑制免疫 / 抑制规则
+    assert osh_rules.is_other_shore_suppression_immune({"xiangu_yishenweizhong": True}) is True
+    assert osh_rules.is_other_shore_suppression_immune({"自创修炼体系": {"name": "星路师"}}) is True
+    assert osh_rules.get_other_shore_suppression({"xiangulevel_id": 25})["immune"] is True
+    assert osh_rules.get_other_shore_suppression({"xiangulevel_id": 5})["immune"] is False
+    assert osh_rules.get_other_shore_suppression({"xiangulevel_id": 5})["attributeMultiplier"] == 0.7
+
+    # 状态访问层：ensure / read / save / update（SQLite 单例表 other_shore_state）
+    await osh_state.ensure_other_shore_world(db.conn, seed="canglan")
+    world_state = await osh_state.read_other_shore_world(db.conn)
+    assert world_state is not None and world_state["centerId"] == "0,0"
+    assert await osh_state.read_other_shore_world(db.conn) == world_state
+    await osh_state.save_other_shore_world(db.conn, {**world_state, "radius": 5})
+    assert (await osh_state.read_other_shore_world(db.conn))["radius"] == 5
+    # update 整体读-改-写
+    count_before = len(world_state["stars"])
+    value = await osh_state.update_other_shore_world(
+        db.conn, world_state, lambda doc: {"n": len(doc["stars"])})
+    assert value[1]["n"] == count_before and len(value[0]["stars"]) == count_before
+
+    # 序列化：阶段与发现字段
+    serial = osh_w.serialize_other_shore_world(world_visited)
+    assert serial["centerId"] == "0,0"
+    center_s = next(s for s in serial["stars"] if s["id"] == "0,0")
+    assert center_s["phase"] == "anchored" and center_s["anchored"] is True
+    assert len(serial["stars"]) == len(world_visited["stars"])
+
     await render_mod.shutdown()
     print("render ok")
 

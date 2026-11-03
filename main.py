@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import random
 import time
 from pathlib import Path
 
@@ -11,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, battle, boss, catalog, cultivate, dibing, equipment, items, linggen, addict, endless, motou, npc, occupation, plane, pet, quest, raid, rift, secret, sect, shenjie, story_npc, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, boss, calamity, catalog, cultivate, dibing, equipment, items, linggen, addict, endless, lingjie, motou, npc, occupation, plane, pet, quest, raid, rift, secret, sect, shenjie, story_npc, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -223,13 +224,47 @@ CMD_RIFT_LOOT = "#裂界寻宝"
 CMD_RIFT_FORCE = "#裂界强攻"
 CMD_RIFT_OUT = "#撤离裂界"
 CMD_RIFT_EXCHANGE = "#界源兑换"
+CMD_CALAMITY_SUMMON = "#召唤域外灾厄"
+CMD_CALAMITY_LIST = "#域外灾厄"
+CMD_CALAMITY_FIGHT = "#讨伐域外灾厄"
+CMD_CALAMITY_CLAIM = "#领取域外战利品"
+CMD_OVERLORD_INFO = "#灾厄魔主"
+CMD_OVERLORD_FIGHT = "#讨伐灾厄魔主"
+CMD_OVERLORD_CONTRIB = "#灾厄魔主贡献"
+CMD_OVERLORD_CLAIM = "#领取魔主战利品"
+CMD_OVERLORD_REFINE = "#天魔炼化魔主"
+CMD_FOREIGN_COMBINE = "#合成域外功法"
+CMD_LINGJIE = "#灵界裂缝"
+CMD_LINGJIE_OPEN = "#开启灵界裂缝"
+CMD_LINGJIE_GOTO = "#前往裂缝"
+CMD_LINGJIE_EXPLORE = "#探索灵界裂缝"
+CMD_LINGJIE_ANCHOR = "#使用界隙锚符"
+CMD_TOWER_RANK = "#镇妖塔榜"
+CMD_ANCIENT = "#彼岸古文明"
+CMD_ANCIENT_PUSH = "#推进古文明事件"
+CMD_ANCIENT_CLAIM = "#领取古文明奖励"
+CMD_OSW = "#彼岸世界"
+CMD_OSW_LEAVE = "#离开彼岸世界"
+CMD_OSW_STATUS = "#彼岸世界状态"
+CMD_OSW_COORD = "#彼岸坐标"
+CMD_OSW_OBSERVE = "#观测彼岸星图"
+CMD_OSW_GOTO = "#前往星辰"
+CMD_OSW_EXPLORE = "#贡献探索"
+CMD_OSW_ANCHOR = "#建立道标"
+CMD_OSW_CLEAR = "#完成大星"
+CMD_OSW_NEAREST = "#最近星辰"
+CMD_SHENPO = "#炼神魄"
+CMD_SHENPO_ALL = "#一键炼神魄"
+CMD_ERA_STATUS = "#纪元"
+CMD_ERA_NEXT = "#下一千年"
+CMD_ERA_LOSSES = "#查看损失"
+CMD_ERA_CHARM = "#使用星宇护身符"
+CMD_ERA_EVENTS = "#位面大事件"
 CMD_DARK_OPEN = "#开启黑暗动乱"
 CMD_DARK_CLOSE = "#关闭黑暗动乱"
 CMD_DARK_STATUS = "#禁区至尊状态"
 CMD_DARK_FIGHT = "#平定黑暗动乱"
 CMD_DARK_RANK = "#黑暗动乱帝战贡献榜"
-CMD_SHENPO = "#炼神魄"
-CMD_SHENPO_ALL = "#一键炼神魄"
 CMD_OFFER = "#供奉神石"
 CMD_CANWU = "#参悟神石"
 CMD_STONE = "#敲开闪闪发光的石头"
@@ -265,6 +300,12 @@ CMD_WORLD_MY = "#我的小世界"
 CMD_WORLD_AVATAR = "#将分身化入小世界"
 CMD_WORLD_HARVEST = "#收获小世界资源"
 CMD_WORLD_PLANT = "#小世界栽种"
+CMD_WORLD_PLANT2 = "#小世界种植"
+CMD_WORLD_WORKSHOP = "#小世界工坊"
+CMD_WORLD_WORKSHOP_UP = "#升级小世界工坊"
+CMD_WORLD_GUARD = "#小世界守卫"
+CMD_WORLD_RIPEN = "#催熟小世界作物"
+CMD_WORLD_STEAL = "#小世界偷菜"
 CMD_WORLD_BATCH = "#一键种植"
 CMD_WORLD_WATER = "#一键浇灌普通"
 CMD_PLANT_GUIDE = "#种植指南"
@@ -407,10 +448,14 @@ class ZhutianPlugin(Star):
     async def initialize(self) -> None:
         await self.db.connect()
         self._reminder_task = asyncio.create_task(self._daily_reminder_loop())
+        self._lingjie_task = asyncio.create_task(self._lingjie_loop())
         logger.info("[zhutian] M0 插件已加载。")
 
     async def terminate(self) -> None:
         task = getattr(self, "_reminder_task", None)
+        if task:
+            task.cancel()
+        task = getattr(self, "_lingjie_task", None)
         if task:
             task.cancel()
         await self.db.close()
@@ -673,6 +718,7 @@ class ZhutianPlugin(Star):
                 (CMD_DARK_RANK, "帝战贡献榜"),
                 (CMD_SHENPO, "炼神魄（锻神池，2 分钟 CD，胜则神魄+5 血气+）"),
                 (CMD_SHENPO_ALL, "一键炼神魄（连破到败）"),
+                (CMD_TOWER_RANK, "镇妖塔层数榜（前十，附神魄段数）"),
             ]},
             {"title": "神界邪道", "lines": [
                 (CMD_OFFER, "供奉神石（进度 /200，魔道值>0 被拒）"),
@@ -691,6 +737,11 @@ class ZhutianPlugin(Star):
                 (f"{CMD_WORLD_PLANT} 种子名", "栽种神药（#种植指南 查看）"),
                 (f"{CMD_WORLD_BATCH} 种子名", "一键种植"),
                 (CMD_WORLD_WATER, "一键浇灌（生长-30 分，6h 冷却）"),
+                (CMD_WORLD_WORKSHOP, "工坊总览（灵田/丹房/器阁/符台/矿脉 + 守卫）"),
+                (f"{CMD_WORLD_WORKSHOP_UP} 名称", "升级工坊（灵石 + 世界石）"),
+                (CMD_WORLD_GUARD, "募请守卫（每级偷菜成功率 -15%）"),
+                (CMD_WORLD_RIPEN, "催熟全部在种作物（每株 800 万灵石，-24h）"),
+                (f"{CMD_WORLD_STEAL} @某人", "潜入他人小世界偷一株成熟神药（有守卫则可能被抓）"),
             ]},
             {"title": "师徒道侣", "lines": [
                 (f"{CMD_RECRUIT_ON} / {CMD_RECRUIT_OFF}", "开启/关闭收徒"),
@@ -760,6 +811,28 @@ class ZhutianPlugin(Star):
                 (CMD_RIFT_OUT, "撤离并结算界源+修为+血气"),
                 (f"{CMD_RIFT_EXCHANGE} 名字", "界源兑换（星图/宝盒/无尽秘钥等）"),
             ]},
+            {"title": "千年灾劫", "lines": [
+                (CMD_ERA_STATUS, "纪元/灾难状态/域外灾厄与魔主一览"),
+                (CMD_CALAMITY_LIST, "域外灾厄列表（战斗与领奖状态）"),
+                (f"{CMD_CALAMITY_FIGHT} 编号", "讨伐域外灾厄（15 分钟冷却，胜后领取战利品）"),
+                (CMD_CALAMITY_CLAIM, "领取域外战利品（残页/遗珍/强化道具）"),
+                (CMD_OVERLORD_INFO, "灾厄魔主状态与贡献榜"),
+                (f"{CMD_OVERLORD_FIGHT} [1-100]", "讨伐魔主（单次最多 100 层）"),
+                (CMD_OVERLORD_CONTRIB, "魔主贡献明细"),
+                (CMD_OVERLORD_CLAIM, "领取魔主战利品（裂界残忆 35%）"),
+                (CMD_OVERLORD_REFINE, "天魔炼化魔主（需魔道/岁云，魔道值 +50）"),
+                (CMD_FOREIGN_COMBINE, "10 枚域外残页合成 1 部域外功法"),
+                (f"{CMD_CALAMITY_SUMMON} [类型] [数量]", "管理员召唤域外灾厄"),
+                (CMD_ERA_NEXT, "管理员推进下一千年（1000/2000 年触发灾难）"),
+                (CMD_ERA_LOSSES, "查看纪元损失与位面青睐"),
+                (CMD_ERA_CHARM, "使用星宇护身符（免疫下一次损失）"),
+                (CMD_ERA_EVENTS, "位面大事件记录"),
+            ]},
+            {"title": "彼岸古文明", "lines": [
+                (CMD_ANCIENT, "四章贡献链状态（全服共享进度 + 你的贡献）"),
+                (f"{CMD_ANCIENT_PUSH} [章节]", "推进当前/指定章节：连战两场，胜则贡献进度"),
+                (f"{CMD_ANCIENT_CLAIM} 章节", "领取已通关章节奖励（需有贡献，每章一次）"),
+            ]},
             {"title": "团本讨伐", "lines": [
                 (f"{CMD_TR_CREATE} 名字", "创建讨伐队伍（5 人，24h 有效）"),
                 (f"{CMD_TR_JOIN} 队伍码", "加入队伍"),
@@ -792,6 +865,25 @@ class ZhutianPlugin(Star):
                 (CMD_ENDLESS_TREASURE, "无尽至宝（通关解锁/升级/装备）"),
                 (CMD_ENDLESS_SWEEP, "扫荡（按最高层结算道痕，每日一次）"),
                 (CMD_ENDLESS_REROLL, "劫机重演（需道碑参悟，刷新三选一）"),
+            ]},
+            {"title": "灵界裂缝", "lines": [
+                (CMD_LINGJIE, "裂缝状态：坐标 / 坍塌倒计时 / 你的界印"),
+                (f"{CMD_LINGJIE_GOTO} 12,34", "前往凡间坐标（0~999）"),
+                (CMD_LINGJIE_EXPLORE, "进入裂缝探索（15 分钟，洞照境起）"),
+                (CMD_LINGJIE_ANCHOR, "界隙锚符：同一裂缝追加 1 重界印"),
+                (CMD_LINGJIE_OPEN, "管理员开启一道灵界裂缝（6 小时现世）"),
+            ]},
+            {"title": "彼岸世界", "lines": [
+                (CMD_OSW, "沧澜界世界：坐标 / 星辰阶段 / 探索贡献 / 道标 / 移动路径"),
+                (f"{CMD_OSW_LEAVE}", "离开沧澜界（写回世界状态）"),
+                (f"{CMD_OSW_STATUS} [坐标]", "世界状态与星辰进度（坐标可选，默认中心）"),
+                (f"{CMD_OSW_COORD}", "当前坐标（在沧澜界内）"),
+                (f"{CMD_OSW_OBSERVE} [范围]", "观测半径内星辰（默认 1）"),
+                (f"{CMD_OSW_GOTO} 6,4", "前往星辰坐标（六边形坐标，路径由相邻大星组成）"),
+                (f"{CMD_OSW_EXPLORE} 数值", "贡献探索度（须已踏足，建道标需达标）"),
+                (f"{CMD_OSW_ANCHOR}", "建立道标（须已踏足且探索贡献达标）"),
+                (f"{CMD_OSW_CLEAR}", "完成大星（须已建立道标）"),
+                (f"{CMD_OSW_NEAREST}", "最近可进入星辰（默认半径内）"),
             ]},
             {"title": "剧情人物", "lines": [
                 (CMD_NPC, "剧情人物图鉴（11 位 · 立绘/关系/线索）"),
@@ -2183,6 +2275,17 @@ class ZhutianPlugin(Star):
         async for r in self._world_plant(event, seed):
             yield r
 
+    @filter.command(CMD_WORLD_PLANT2, "栽种神药（别名）")
+    async def handle_world_plant2(self, event: AstrMessageEvent, seed: str = ""):
+        if not self._allowed(event):
+            return
+        seed = (seed or "").strip()
+        if not seed:
+            yield event.plain_result(f"格式：{CMD_WORLD_PLANT2} 种子名（#种植指南 查看）")
+            return
+        async for r in self._world_plant(event, seed):
+            yield r
+
     @filter.command(CMD_WORLD_BATCH, "一键种植")
     async def handle_world_batch(self, event: AstrMessageEvent, seed: str = ""):
         if not self._allowed(event):
@@ -2238,6 +2341,156 @@ class ZhutianPlugin(Star):
         if ok:
             d = doc.model_copy(deep=True)
             d.ext["xiaoshijie"] = nw
+            await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_WORLD_WORKSHOP, "小世界工坊")
+    async def handle_world_workshop(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = doc.ext.get("xiaoshijie")
+        if not w:
+            yield event.plain_result("道友尚无小世界，先「#开辟小世界 世界名」。")
+            return
+        async for r in self._smart(event, xiaoshijie.workshop_text(w), "小世界工坊"):
+            yield r
+
+    @filter.command(CMD_WORLD_WORKSHOP_UP, "升级小世界工坊")
+    async def handle_world_workshop_up(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = doc.ext.get("xiaoshijie")
+        if not w:
+            yield event.plain_result("道友尚无小世界。")
+            return
+        kind = self._calamity_arg(event.message_str, CMD_WORLD_WORKSHOP_UP)
+        if not kind:
+            yield event.plain_result(
+                f"格式：{CMD_WORLD_WORKSHOP_UP} 灵田|丹房|器阁|符台|矿脉（详见 {CMD_WORLD_WORKSHOP}）"
+            )
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        need_ws = xiaoshijie.workshop_level(w, kind) + 1
+        ok, msg, nw, cost = xiaoshijie.upgrade_workshop(
+            w, kind, int(doc.stones), int(inv.get(xiaoshijie.WORKSHOP_NAME, 0) or 0)
+        )
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = doc.model_copy(deep=True)
+        d.ext["xiaoshijie"] = nw
+        d.stones = int(d.stones) - cost
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            await self.db.remove_item(doc.uid, xiaoshijie.WORKSHOP_NAME, need_ws)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_WORLD_GUARD, "小世界守卫")
+    async def handle_world_guard(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = doc.ext.get("xiaoshijie")
+        if not w:
+            yield event.plain_result("道友尚无小世界。")
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        need_ws = int(w.get("guard") or 0) + 1
+        ok, msg, nw, cost = xiaoshijie.guard_upgrade(
+            w, int(doc.stones), int(inv.get(xiaoshijie.WORKSHOP_NAME, 0) or 0)
+        )
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = doc.model_copy(deep=True)
+        d.ext["xiaoshijie"] = nw
+        d.stones = int(d.stones) - cost
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            await self.db.remove_item(doc.uid, xiaoshijie.WORKSHOP_NAME, need_ws)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_WORLD_RIPEN, "催熟小世界作物")
+    async def handle_world_ripen(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = doc.ext.get("xiaoshijie")
+        if not w:
+            yield event.plain_result("道友尚无小世界。")
+            return
+        ok, msg, nw, cost = xiaoshijie.ripen(w, int(doc.stones))
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = doc.model_copy(deep=True)
+        d.ext["xiaoshijie"] = nw
+        d.stones = int(d.stones) - cost
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_WORLD_STEAL, "小世界偷菜")
+    async def handle_world_steal(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        arg = self._calamity_arg(event.message_str, CMD_WORLD_STEAL)
+        target_uid = self._at_target(event) or arg.strip()
+        if not target_uid:
+            yield event.plain_result(f"格式：{CMD_WORLD_STEAL} @某人（或填其世界名）")
+            return
+        target_doc = None
+        if target_uid.startswith("u_"):
+            raw = await self.db.get_player(target_uid)
+            target_doc = PlayerDoc(**raw) if raw else None
+        if target_doc is None:
+            for uid in (await self.db.all_player_uids())[:80]:
+                if uid == doc.uid:
+                    continue
+                raw = await self.db.get_player(uid)
+                if not raw:
+                    continue
+                other = PlayerDoc(**raw)
+                ww = other.ext.get("xiaoshijie") or {}
+                if target_uid in (uid, other.name, str(ww.get("name") or "")):
+                    target_doc = other
+                    break
+        if target_doc is None:
+            yield event.plain_result("找不到这个世界（确认对方已有小世界，或改用 @）。")
+            return
+        if target_doc.uid == doc.uid:
+            yield event.plain_result("偷自己的菜不算本事。")
+            return
+        tw = target_doc.ext.get("xiaoshijie") or {}
+        ok, msg, nw, item, fine = xiaoshijie.steal(tw, int(doc.exp), random.Random())
+        if item:
+            async with self.db.transaction():
+                t = target_doc.model_copy(deep=True)
+                t.ext["xiaoshijie"] = nw
+                await self.db.save_player(t.model_dump())
+                await self.db.add_items(doc.uid, {item: 1})
+            yield event.plain_result(msg)
+            return
+        if fine:
+            d = doc.model_copy(deep=True)
+            d.stones = max(0, int(d.stones) - fine)
             await self.db.save_player(d.model_dump())
         yield event.plain_result(msg)
 
@@ -6502,6 +6755,1118 @@ class ZhutianPlugin(Star):
             await self.db.save_player(doc.model_dump())
             await self.db.add_items(doc.uid, got)
         yield event.plain_result(msg)
+
+    # ---- 千年灾劫·域外来敌（B11） ----
+
+    async def _calamity_avg(self) -> dict:
+        """全服玩家均值（最多取样 50 人），供灾厄数值锚定。"""
+        rows: list[dict] = []
+        uids = await self.db.all_player_uids()
+        for uid in uids[:50]:
+            raw = await self.db.get_player(uid)
+            if not raw:
+                continue
+            st = self._stats(PlayerDoc(**raw))
+            rows.append({"atk": st.atk, "defense": st.defense, "hp": st.hp, "bao": st.bao})
+        return calamity.average_stats(rows)
+
+    @staticmethod
+    def _calamity_arg(message: str, cmd: str) -> str:
+        rest = str(message or "").strip()
+        if rest.startswith(cmd):
+            rest = rest[len(cmd):]
+        return rest.strip()
+
+    @filter.command(CMD_CALAMITY_SUMMON, "召唤域外灾厄")
+    async def handle_calamity_summon(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not event.is_admin:
+            yield event.plain_result("此权柄唯管理员可执。")
+            return
+        arg = self._calamity_arg(event.message_str, CMD_CALAMITY_SUMMON)
+        count = int(arg) if arg.isdigit() else 3
+        avg = await self._calamity_avg()
+        rng = random.Random()
+        async with self.db.transaction():
+            state = calamity.ensure(await self.db.get_calamity())
+            made = calamity.spawn_wave(state, state["era"]["years"], count, avg, rng, source="summon")
+            await self.db.save_calamity(state)
+        if not made:
+            yield event.plain_result("域外灾厄已达存世上限，静待道友讨伐。")
+            return
+        lines = [f"【灾劫降临】虚空裂开，{len(made)} 道气息降临此界："]
+        lines += [f"· {e['name']}（{e['type']}·{e['hp']:,} 气血）" for e in made]
+        report = calamity.cull_report_text(state.get("report"))
+        if report:
+            lines.append("")
+            lines.append(report)
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command(CMD_CALAMITY_LIST, "域外灾厄")
+    async def handle_calamity_list(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        state = calamity.ensure(await self.db.get_calamity())
+        avg = await self._calamity_avg()
+        active = calamity.active_calamities(state)
+        era = state["era"]
+        lines = [
+            f"【千年灾劫】第 {era['index']} 纪元 · 第 {era['years']} 年",
+            f"绝灵压制：{int(era['suppression'] * 100)}%（灾厄奖励 ×{calamity.reward_multiplier(doc, state, time.time()):.2f}）",
+            f"存世灾厄：{len(active)} / {calamity.MAX_ACTIVE} 尊",
+        ]
+        if not active:
+            lines.append("此界暂无域外灾厄，可待千年轮转或由管理员召唤。")
+        for i, e in enumerate(active[:10], 1):
+            lines.append(
+                f"{i}. {e['name']}｜{e['type']}｜{e['hp']:,}/{e['max_hp']:,} 气血｜第 {e['world_year']} 年"
+            )
+        report = calamity.cull_report_text(state.get("report"))
+        if report:
+            lines += ["", report]
+        async for _r in self._smart(event, "\n".join(lines), "千年灾劫"):
+            yield _r
+
+    @filter.command(CMD_CALAMITY_FIGHT, "讨伐域外灾厄")
+    async def handle_calamity_fight(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        arg = self._calamity_arg(event.message_str, CMD_CALAMITY_FIGHT)
+        if not arg:
+            yield event.plain_result("用法：#讨伐域外灾厄 编号（编号见 #域外灾厄）")
+            return
+        now = time.time()
+        last = float(doc.ext.get("calamity_battle_at") or 0)
+        if now - last < calamity.BATTLE_CD_SECONDS:
+            left = int(calamity.BATTLE_CD_SECONDS - (now - last)) // 60 + 1
+            yield event.plain_result(f"你刚经历一场大战，需调息 {left} 分钟。")
+            return
+        stats = self._stats(doc)
+        hp_cur = max(1, int(doc.ext.get("hp") or stats.hp))
+        rng = random.Random()
+        async with self.db.transaction():
+            state = calamity.ensure(await self.db.get_calamity())
+            entity = calamity.resolve(state, arg)
+            if not entity:
+                yield event.plain_result("未找到这尊灾厄（可能已被讨伐或巡猎）。")
+                return
+            res = calamity.battle_calamity(doc, entity, {
+                "atk": stats.atk, "defense": stats.defense, "hp": hp_cur, "bao": stats.bao,
+            }, rng, now)
+            doc.ext["calamity_battle_at"] = now
+            doc.ext["hp"] = max(1, res["a_hp"]) if not res["won"] else int(stats.hp)
+            items: dict[str, int] = {}
+            lines = list(res["log"])
+            if res["won"]:
+                mult = calamity.reward_multiplier(doc, state, now)
+                state["kills"] = int(state.get("kills", 0)) + 1
+                calamity.grant_refine(doc, entity, now)
+                lines.append(f"【伏诛】{entity['name']} 陨落，你打掉 {res['damage']:,} 气血。")
+                # 战利品：两组随机奖励 + 修为/血气（受绝灵压制折算）
+                pool = rng.sample(range(4), k=2)
+                if 0 in pool:
+                    n = rng.randint(1, 3)
+                    items[f"{rng.choice(calamity.TECHNIQUES)['name']}残页"] = n
+                if 1 in pool:
+                    items["域外遗珍"] = 1
+                if 2 in pool:
+                    items[rng.choice(calamity.STRENGTHEN_ITEMS)] = rng.randint(1, 10)
+                if 3 in pool:
+                    items[rng.choice(calamity.TOKENS)] = rng.randint(1, 10)
+                exp = int(2000 * mult)
+                doc.exp += exp
+                lines.append(f"战利品：{'、'.join(f'{k}×{v}' for k, v in items.items())}；修为 +{exp:,}")
+                overlord = calamity.maybe_spawn_overlord(state, await self._calamity_avg(), rng, now)
+                if overlord:
+                    lines.append(f"【裂界魔临】击杀惊动虚空，{overlord['name']}降临！")
+            else:
+                lines.append(f"你不敌 {entity['name']}，被打掉 {res['damage']:,} 气血，可再来磨血。")
+            await self.db.save_player(doc.model_dump())
+            if items:
+                await self.db.add_items(doc.uid, items)
+            await self.db.save_calamity(state)
+        async for _r in self._smart(event, "\n".join(lines), "域外灾厄"):
+            yield _r
+
+    @filter.command(CMD_CALAMITY_CLAIM, "领取域外战利品")
+    async def handle_calamity_claim(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async with self.db.transaction():
+            state = calamity.ensure(await self.db.get_calamity())
+            mine = [
+                e for e in state["calamities"]
+                if e.get("status") == "defeated" and e.get("defeated_by") == doc.uid
+                and not e.get("looted")
+            ]
+            if not mine:
+                yield event.plain_result("你没有待领取的域外战利品。")
+                return
+            items: dict[str, int] = {}
+            for e in mine:
+                page = f"{random.choice(calamity.TECHNIQUES)['name']}残页"
+                items[page] = items.get(page, 0) + 1
+                items["域外遗珍"] = items.get("域外遗珍", 0) + 1
+                e["looted"] = True
+            await self.db.add_items(doc.uid, items)
+            await self.db.save_calamity(state)
+        yield event.plain_result(
+            f"领取 {len(mine)} 份域外战利品：" + "、".join(f"{k}×{v}" for k, v in items.items())
+        )
+
+    @filter.command(CMD_OVERLORD_INFO, "灾厄魔主")
+    async def handle_overlord_info(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        state = calamity.ensure(await self.db.get_calamity())
+        ov = state.get("overlord")
+        if not isinstance(ov, dict):
+            yield event.plain_result("虚空平静，暂无灾厄魔主降临（击杀 9-12 尊灾厄后降临）。")
+            return
+        lines = [
+            f"【灾厄魔主】{ov['name']}（{ov['status']}）",
+            f"本体气血：{int(ov['hp']):,}/{int(ov['max_hp']):,}",
+            f"攻 {int(ov['atk']):,} / 防 {int(ov['defense']):,}",
+        ]
+        rank = calamity.overlord_rank(ov)
+        if rank:
+            lines.append("贡献榜：")
+            for i, r in enumerate(rank[:10], 1):
+                me = "（你）" if r["uid"] == doc.uid else ""
+                lines.append(f"{i}. {r['name']}{me}｜{r['damage']:,} 伤害｜{r['challenges']} 次")
+        async for _r in self._smart(event, "\n".join(lines), "灾厄魔主"):
+            yield _r
+
+    @filter.command(CMD_OVERLORD_FIGHT, "讨伐灾厄魔主")
+    async def handle_overlord_fight(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        arg = self._calamity_arg(event.message_str, CMD_OVERLORD_FIGHT)
+        layers = int(arg) if arg.isdigit() else 1
+        layers = max(1, min(100, layers))
+        stats = self._stats(doc)
+        rng = random.Random()
+        async with self.db.transaction():
+            state = calamity.ensure(await self.db.get_calamity())
+            if not isinstance(state.get("overlord"), dict) or state["overlord"].get("status") != "active":
+                yield event.plain_result("当前没有灾厄魔主降临。")
+                return
+            lines: list[str] = []
+            for _ in range(layers):
+                res = calamity.battle_overlord(state, doc, {
+                    "atk": stats.atk, "defense": stats.defense, "hp": stats.hp, "bao": stats.bao,
+                }, rng, time.time())
+                if res.get("error"):
+                    lines.append(res["error"])
+                    break
+                if lines:
+                    lines.append(f"第 {len(lines)} 击：造成 {res['damage']:,} 伤害")
+                else:
+                    lines.extend(res["log"])
+                    lines.append(f"造成 {res['damage']:,} 伤害，魔主剩余 {res['hp']:,} 气血")
+                if res["defeated"]:
+                    lines.append(f"【魔主伏诛】{state['overlord']['name']} 被镇压！")
+                    break
+            await self.db.save_calamity(state)
+        async for _r in self._smart(event, "\n".join(lines), "灾厄魔主"):
+            yield _r
+
+    @filter.command(CMD_OVERLORD_CONTRIB, "灾厄魔主贡献")
+    async def handle_overlord_contrib(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        state = calamity.ensure(await self.db.get_calamity())
+        ov = state.get("overlord")
+        if not isinstance(ov, dict):
+            yield event.plain_result("暂无灾厄魔主。")
+            return
+        rank = calamity.overlord_rank(ov)
+        hit = next((r for r in rank if r["uid"] == doc.uid), None)
+        if not hit:
+            yield event.plain_result("你尚未对魔主造成伤害。")
+            return
+        reward = calamity.overlord_reward(ov, doc.uid)
+        yield event.plain_result(
+            f"你的贡献：{hit['damage']:,} 伤害（{hit['challenges']} 次）｜名次 {rank.index(hit) + 1}\n"
+            f"预计战利品：{reward['page']}×{reward['amount']}"
+        )
+
+    @filter.command(CMD_OVERLORD_CLAIM, "领取魔主战利品")
+    async def handle_overlord_claim(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async with self.db.transaction():
+            state = calamity.ensure(await self.db.get_calamity())
+            ov = state.get("overlord")
+            if not isinstance(ov, dict) or ov.get("status") != "defeated":
+                yield event.plain_result("魔主尚未伏诛，无法领取。")
+                return
+            claims = dict(ov.get("claims") or {})
+            if claims.get(doc.uid):
+                yield event.plain_result("你已领取过此战奖励。")
+                return
+            reward = calamity.overlord_reward(ov, doc.uid)
+            if not reward:
+                yield event.plain_result("你未参与此战，无奖励可领。")
+                return
+            items = {reward["page"]: int(reward["amount"])}
+            lines = [f"魔主战利品：{reward['page']}×{reward['amount']}（第 {reward['rank']} 名）"]
+            memory = calamity.rift_memory(doc, str(ov.get("id")))
+            doc.ext["rift_memory"] = memory["state"]
+            if memory["granted"]:
+                lines.append("【裂界残忆】你拾得一丝界外残忆。")
+            claims[doc.uid] = True
+            ov["claims"] = claims
+            await self.db.save_player(doc.model_dump())
+            await self.db.add_items(doc.uid, items)
+            await self.db.save_calamity(state)
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command(CMD_OVERLORD_REFINE, "天魔炼化魔主")
+    async def handle_overlord_refine(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if int(doc.ext.get("modao") or 0) <= 0:
+            yield event.plain_result("天魔炼化需以魔道为引（魔道值 > 0）。")
+            return
+        now = time.time()
+        pending = calamity.take_refine(doc, now)
+        if not pending:
+            yield event.plain_result("没有可炼化的灾厄残躯（需在伏诛后 5 分钟内炼化）。")
+            return
+        state = calamity.ensure(await self.db.get_calamity())
+        stats = self._stats(doc)
+        gain = max(1, int(stats.atk * 0.05))
+        doc.ext["modao"] = int(doc.ext.get("modao") or 0) + 50
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            await self.db.save_calamity(state)
+        yield event.plain_result(
+            f"【天魔炼化】你炼化【{pending['name']}】残躯，攻击 +{gain}，魔道值 +50。"
+        )
+
+    @filter.command(CMD_FOREIGN_COMBINE, "合成域外功法")
+    async def handle_foreign_combine(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        pages = {k: v for k, v in inv.items() if k.endswith("残页") and v >= 10}
+        if not pages:
+            yield event.plain_result("需集齐 10 枚同种域外残页方可合成一部功法。")
+            return
+        page = max(pages, key=lambda k: pages[k])
+        technique = page[:-2]
+        known = set(doc.ext.get("foreign_techniques") or [])
+        if technique in known:
+            yield event.plain_result(f"你已参悟《{technique}》，无需重复合成。")
+            return
+        async with self.db.transaction():
+            if not await self.db.remove_item(doc.uid, page, 10):
+                yield event.plain_result("残页不足 10 枚。")
+                return
+            known.add(technique)
+            doc.ext["foreign_techniques"] = sorted(known)
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(f"【合成】10 枚残页归一，你参悟了域外功法《{technique}》。")
+
+    @filter.command(CMD_ERA_STATUS, "纪元")
+    async def handle_era_status(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        state = calamity.ensure(await self.db.get_calamity())
+        era = state["era"]
+        lines = [
+            f"【纪元】第 {era['index']} 纪元 · 第 {era['years']} 年",
+            f"绝灵压制：{int(era['suppression'] * 100)}%（上限 50%）",
+            f"域外灾厄：{len(calamity.active_calamities(state))} 尊存世 / {calamity.MAX_ACTIVE}",
+            f"你的奖励折算：×{calamity.reward_multiplier(doc, state, time.time()):.2f}",
+        ]
+        if era.get("losses"):
+            last = era["losses"][-1]
+            lines.append(f"最近位面损失：{last['note']}")
+        async for _r in self._smart(event, "\n".join(lines), "纪元"):
+            yield _r
+
+    @filter.command(CMD_ERA_NEXT, "下一千年")
+    async def handle_era_next(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not event.is_admin:
+            yield event.plain_result("此权柄唯管理员可执。")
+            return
+        avg = await self._calamity_avg()
+        rng = random.Random()
+        now = time.time()
+        async with self.db.transaction():
+            state = calamity.ensure(await self.db.get_calamity())
+            res = calamity.advance_era(state, avg, rng, now)
+            await self.db.save_calamity(state)
+        yield event.plain_result(
+            f"【纪元轮转】第 {res['index']} 纪元（第 {res['years']} 年）降临。\n"
+            f"绝灵压制加深至 {int(res['suppression'] * 100)}%，新增灾厄 {res['spawned']} 尊。\n"
+            f"{res['loss']['note']}"
+        )
+
+    @filter.command(CMD_ERA_LOSSES, "查看损失")
+    async def handle_era_losses(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        state = calamity.ensure(await self.db.get_calamity())
+        era = state["era"]
+        if not era.get("losses"):
+            yield event.plain_result("此界尚未经历纪元损失。")
+            return
+        lines = ["【位面损失记录】"]
+        for loss in era["losses"][-12:]:
+            lines.append(f"第 {loss['year']} 年｜{loss['note']}")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command(CMD_ERA_CHARM, "使用星宇护身符")
+    async def handle_era_charm(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        state = calamity.ensure(await self.db.get_calamity())
+        era_index = int(state["era"].get("index", 0))
+        if int(doc.ext.get("era_charm_until") or 0) >= era_index:
+            yield event.plain_result("你已受星宇护身符护持，本纪元免疫绝灵压制。")
+            return
+        if int(doc.ext.get("era_charm") or 0) <= 0:
+            yield event.plain_result("你没有星宇护身符。")
+            return
+        doc.ext["era_charm"] = int(doc.ext["era_charm"]) - 1
+        doc.ext["era_charm_until"] = era_index
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result("星宇护身符化作星光笼罩周身，本纪元绝灵压制对你无效。")
+
+    @filter.command(CMD_ERA_EVENTS, "位面大事件")
+    async def handle_era_events(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        state = calamity.ensure(await self.db.get_calamity())
+        events = state["era"].get("events") or []
+        if not events:
+            yield event.plain_result("此界尚无纪元大事记。")
+            return
+        lines = ["【纪元大事记】"]
+        for e in events[-12:]:
+            lines.append("· " + str(e.get("text")))
+        yield event.plain_result("\n".join(lines))
+
+    # ---- 彼岸世界 / 真世界（基础世界层：世界 / 坐标 / 星辰 / 探索 / 道标） ----
+
+    def _osw_remain(self, message: str, cmd: str) -> str:
+        if not isinstance(message, str) or not cmd:
+            return ""
+        if message.startswith(cmd):
+            return message[len(cmd):].lstrip()
+        return message
+
+    @staticmethod
+    def _osw_explicit_coord(message: str, cmd: str) -> dict | None:
+        remainder = ""
+        if isinstance(message, str) and cmd:
+            remainder = message[len(cmd):].lstrip()
+        if not remainder or "," not in remainder:
+            return None
+        parts = remainder.split(",")
+        if len(parts) != 2:
+            return None
+        try:
+            return {"q": int(parts[0].strip()), "r": int(parts[1].strip())}
+        except ValueError:
+            return None
+
+    def _osw_center(self) -> dict:
+        return {"q": 0, "r": 0}
+
+    @staticmethod
+    def _osw_nearest(state: dict, prefer_visited: bool = True) -> dict:
+        center = {"q": 0, "r": 0}
+        best: dict | None = None
+        best_dist: int | None = None
+        for star in state.get("stars", []):
+            coord = other_shore_world._normalize_coordinate(star.get("q"), star.get("r"))
+            dist = other_shore_world.get_other_shore_hex_distance(center, coord)
+            if best_dist is None or dist < best_dist:
+                best, best_dist = star, dist
+            elif dist == best_dist:
+                if best_dist == 1:
+                    continue
+                if prefer_visited and not (best.get("phase") == "cleared"):
+                    continue
+        return best or center
+
+    async def _osw_ensure(self, seed: str = "canglan") -> dict:
+        doc = await self.db.get_other_shore()
+        if doc:
+            return doc
+        world = other_shore_world.create_other_shore_world(seed)
+        await self.db.save_other_shore(world)
+        return world
+
+    async def _osw_save(self, doc: dict) -> None:
+        await self.db.save_other_shore(doc)
+
+    @filter.command(CMD_OSW, "彼岸世界")
+    async def handle_other_shore(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        state = await self._osw_ensure()
+        center = other_shore_world._normalize_coordinate(0, 0)
+        star = other_shore_world.require_star(state, center)
+        lines = [
+            f"【沧澜界世界】种子 {state.get('seed')}，半径 {state.get('radius')}，中心星「{star.get('name')}」",
+            "阶段：" + " → ".join(
+                {
+                    other_shore_world.OTHER_SHORE_PHASES[index]: phase
+                    for index, phase in enumerate(other_shore_world.OTHER_SHORE_PHASES)
+                    if (state.get("states", {}).get(star["id"], {}).get("phase")
+                        == phase)
+                }
+            ) or "—",
+            "坐标为六边形 (q, r)；在沧澜界内用 #前往 坐标 移动，踏足后 #贡献探索 可建道标。",
+        ]
+        async for r in self._smart(event, "\\n".join(lines), "彼岸世界"):
+            yield r
+
+    @filter.command(CMD_OSW_LEAVE, "离开彼岸世界")
+    async def handle_other_shore_leave(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        state = await self._osw_ensure()
+        await self._osw_save(state)
+        yield event.plain_result("已离开沧澜界，世界状态已写回。")
+
+    @filter.command(CMD_OSW_STATUS, "彼岸世界状态")
+    async def handle_other_shore_status(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        state = await self._osw_ensure()
+        center = other_shore_world._normalize_coordinate(0, 0)
+        star = other_shore_world.require_star(state, center)
+        center_state = state["states"].get(star["id"], {})
+        lines = [
+            f"【沧澜界状态】中心星「{star.get('name')}」：阶段 {center_state.get('phase')}，探索贡献 {center_state.get('contribution')}",
+            "贡献来源：" + "、".join(f"{name}={v}" for name, v in (center_state.get("contributors") or {}).items()) or "无",
+        ]
+        discovered = [
+            f"{item.get('name')}（{item.get('phase')}）：贡献 {item.get('contribution')}"
+            for item in state.get("stars", [])
+            if item.get("discovered")
+        ]
+        if discovered:
+            lines.append("星辰进度：")
+            lines.extend(discovered)
+        async for r in self._smart(event, "\\n".join(lines), "彼岸世界"):
+            yield r
+
+    @filter.command(CMD_OSW_COORD, "彼岸坐标")
+    async def handle_other_shore_coord(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        state = await self._osw_ensure()
+        center = other_shore_world._normalize_coordinate(0, 0)
+        lines = [
+            f"当前坐标 {center['q']},{center['r']}（中心星，初始道标锚定）",
+            "在沧澜界内可用 #前往 坐标 移动，坐标为六边形 (q, r)。",
+        ]
+        async for r in self._smart(event, "\\n".join(lines), "彼岸世界"):
+            yield r
+
+    @filter.command(CMD_OSW_OBSERVE, "观测彼岸星图")
+    async def handle_other_shore_observe(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        state = await self._osw_ensure()
+        raw = self._osw_remain(event.message_str, CMD_OSW_OBSERVE)
+        try:
+            range_ = int(raw.strip()) if raw.strip() else 1
+        except ValueError:
+            yield event.plain_result("观测范围需为正整数。")
+            return
+        if range_ < 1:
+            yield event.plain_result("观测范围需为正整数。")
+            return
+        new_state = other_shore_world.observe_other_shore_stars(state, self._osw_center(), range_)
+        await self._osw_save(new_state)
+        lines = [f"已观测半径 {range_} 内的沧澜星，可踏足观测到的星辰。"]
+        async for r in self._smart(event, "\\n".join(lines), "彼岸世界"):
+            yield r
+
+    @filter.command(CMD_OSW_GOTO, "前往星辰")
+    async def handle_other_shore_goto(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        state = await self._osw_ensure()
+        coord = self._osw_explicit_coord(event.message_str, CMD_OSW_GOTO)
+        if coord is None:
+            coord = self._osw_center()
+            star = other_shore_world.require_star(state, coord)
+            if other_shore_world.visit_other_shore_star(state, coord):
+                new_state = state
+            else:
+                yield event.plain_result(f"{star.get('name')} 需先观测才能踏足。")
+                return
+        else:
+            star = other_shore_world.require_star(state, coord)
+            new_state = other_shore_world.visit_other_shore_star(state, coord)
+        await self._osw_save(new_state)
+        lines = [f"已前往「{star.get('name')}」，坐标 {coord['q']},{coord['r']}。"]
+        async for r in self._smart(event, "\\n".join(lines), "彼岸世界"):
+            yield r
+
+    @filter.command(CMD_OSW_EXPLORE, "贡献探索")
+    async def handle_other_shore_explore(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        state = await self._osw_ensure()
+        raw = self._osw_remain(event.message_str, CMD_OSW_EXPLORE)
+        amount = 1
+        if raw.strip():
+            try:
+                amount = float(raw.strip())
+            except ValueError:
+                yield event.plain_result("探索贡献需为数值。")
+                return
+        if amount <= 0:
+            yield event.plain_result("探索贡献必须大于 0。")
+            return
+        coord = self._osw_explicit_coord(event.message_str, CMD_OSW_EXPLORE) or self._osw_nearest(state)
+        star = other_shore_world.require_star(state, coord)
+        new_state = other_shore_world.contribute_other_shore_exploration(state, coord, doc.uid, amount)
+        await self._osw_save(new_state)
+        lines = [
+            f"已贡献探索度 {amount} 至「{star.get('name')}」，当前贡献 {new_state['states'][star['id']].get('contribution')}。",
+            "达成「建立道标」阈值后可 #建立道标，完成后可 #完成大星。",
+        ]
+        async for r in self._smart(event, "\\n".join(lines), "彼岸世界"):
+            yield r
+
+    @filter.command(CMD_OSW_ANCHOR, "建立道标")
+    async def handle_other_shore_anchor(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        state = await self._osw_ensure()
+        coord = self._osw_explicit_coord(event.message_str, CMD_OSW_ANCHOR) or self._osw_nearest(state, prefer_visited=True)
+        star = other_shore_world.require_star(state, coord)
+        new_state = other_shore_world.anchor_other_shore_star(state, coord)
+        await self._osw_save(new_state)
+        lines = [f"已为「{star.get('name')}」建立道标（需贡献达阈值 {star.get('anchorRequirement')}）。"]
+        async for r in self._smart(event, "\\n".join(lines), "彼岸世界"):
+            yield r
+
+    @filter.command(CMD_OSW_CLEAR, "完成大星")
+    async def handle_other_shore_clear(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        state = await self._osw_ensure()
+        coord = self._osw_explicit_coord(event.message_str, CMD_OSW_CLEAR) or self._osw_nearest(state, prefer_visited=False)
+        star = other_shore_world.require_star(state, coord)
+        new_state = other_shore_world.clear_other_shore_campaign_star(state, coord)
+        await self._osw_save(new_state)
+        lines = [f"「{star.get('name')}」已完成（{new_state['states'][star['id']].get('phase')}）。"]
+        async for r in self._smart(event, "\\n".join(lines), "彼岸世界"):
+            yield r
+
+    @filter.command(CMD_OSW_NEAREST, "最近星辰")
+    async def handle_other_shore_nearest(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        state = await self._osw_ensure()
+        center = other_shore_world._normalize_coordinate(0, 0)
+        best = self._osw_nearest(state)
+        if not best:
+            yield event.plain_result("沧澜界尚无可进入的星辰。")
+            return
+        coord = other_shore_world._normalize_coordinate(best.get("q"), best.get("r"))
+        lines = [
+            f"最近星辰「{best.get('name')}」（{best.get('phase')}），距离中心 {other_shore_world.get_other_shore_hex_distance(center, coord)}。",
+        ]
+        async for r in self._smart(event, "\\n".join(lines), "彼岸世界"):
+            yield r
+
+    # ---- 灵界裂缝（凡间限时副本） ----
+
+    @filter.command(CMD_LINGJIE, "灵界裂缝")
+    async def handle_lingjie(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        state = lingjie.ensure(await self.db.get_lingjie())
+        rift = state.get("rift")
+        now = time.time()
+        rem = lingjie.remaining_attempts(state, doc.uid, rift) if rift else 0
+        task = (state.get("tasks") or {}).get(doc.uid)
+        text = lingjie.status_text(rift, now, doc, rem)
+        if task:
+            left = max(0, int(float(task.get("end", 0) or 0) - now))
+            text += f"\n你正在裂缝中探索，约 {left // 60} 分 {left % 60} 秒后返回。"
+        async for r in self._smart(event, text, "灵界裂缝"):
+            yield r
+
+    @filter.command(CMD_LINGJIE_OPEN, "开启灵界裂缝")
+    async def handle_lingjie_open(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not event.is_admin:
+            yield event.plain_result("此权柄唯管理员可执。")
+            return
+        from astrbot.api.event import MessageChain
+        from astrbot.api.message_components import Plain
+
+        now = time.time()
+        rng = random.Random()
+        existing = lingjie.ensure(await self.db.get_lingjie()).get("rift")
+        if existing and float(existing.get("expires_at", 0) or 0) > now:
+            yield event.plain_result("灵界裂缝已在现世，静待其自行坍塌。")
+            return
+        async with self.db.transaction():
+            state = lingjie.ensure(await self.db.get_lingjie())
+            era = (await self.db.get_calamity()).get("era") or {}
+            state["rift"] = lingjie.create_rift(era, rng, now)
+            state["tasks"] = {}
+            state["visits"] = {}
+            state["milestone"] = str(int(era.get("years", 0) or 0))
+            await self.db.save_lingjie(state)
+            rift = state["rift"]
+        text = (
+            "【界壁开裂】凡间上空撕开一道幽蓝裂隙，灵界气息外泄。\n"
+            f"现世坐标为 {rift['x']},{rift['y']}，六小时后自行坍塌。\n"
+            f"洞照境以上道友可 #前往 {rift['x']},{rift['y']} 后 #探索灵界裂缝。"
+        )
+        for gid in self.whitelist_groups:
+            try:
+                await self.context.send_message(
+                    f"大肥鱼:GroupMessage:{gid}",
+                    MessageChain(chain=[Plain(text)]),
+                )
+            except Exception as e:
+                logger.warning(f"[zhutian] 灵界裂缝广播失败 {gid}: {e}")
+        yield event.plain_result(text)
+
+    @filter.command(CMD_LINGJIE_GOTO, "前往坐标")
+    async def handle_lingjie_goto(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        pos = lingjie.parse_coordinate(event.message_str.strip())
+        if not pos:
+            yield event.plain_result("坐标格式：#前往裂缝 12,34（0~999）")
+            return
+        doc.ext["lingjie_pos"] = [pos[0], pos[1]]
+        await self.db.save_player(doc.model_dump())
+        state = lingjie.ensure(await self.db.get_lingjie())
+        rift = state.get("rift")
+        if rift and lingjie.is_at([pos[0], pos[1]], rift):
+            yield event.plain_result(
+                f"你踏过空间褶皱，落在灵界裂缝入口（{pos[0]},{pos[1]}）。\n#探索灵界裂缝"
+            )
+        else:
+            yield event.plain_result(f"你御风抵达凡间坐标 {pos[0]},{pos[1]}，此处并无裂隙。")
+
+    @filter.command(CMD_LINGJIE_EXPLORE, "探索灵界裂缝")
+    async def handle_lingjie_explore(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        pos = lingjie.parse_coordinate(event.message_str.strip())
+        if pos:
+            doc.ext["lingjie_pos"] = [pos[0], pos[1]]
+        now = time.time()
+        state = lingjie.ensure(await self.db.get_lingjie())
+        rift = state.get("rift")
+        dur, fast = lingjie.explore_duration(doc)
+        ok, why = lingjie.can_start(doc, rift, now, dur)
+        if not ok:
+            tips = {
+                "collapsed": "凡间此刻没有灵界裂缝现世，静候下一个两千年。",
+                "realm": f"界壁压力过甚，需洞照境以上（realm_index ≥ {lingjie.REALM_GATE}）方可进入。",
+                "coordinate": (
+                    f"你尚未抵达裂缝入口。先 #前往 {rift.get('x')},{rift.get('y')}。"
+                    if rift else "你尚未抵达裂缝入口。"
+                ),
+                "time": "裂缝即将坍塌，来不及深入了。",
+            }
+            yield event.plain_result(tips.get(why, "此刻无法探索。"))
+            return
+        if (state.get("tasks") or {}).get(doc.uid):
+            yield event.plain_result("你已在裂缝之中，安心等待归来。")
+            return
+        if lingjie.remaining_attempts(state, doc.uid, rift) <= 0:
+            yield event.plain_result(
+                f"你的界印已耗尽。可使用【{lingjie.ANCHOR_ITEM}】重新锚定一次。"
+            )
+            return
+        async with self.db.transaction():
+            lingjie.bump_attempt(state, doc.uid, rift, "used")
+            state.setdefault("tasks", {})[doc.uid] = {
+                "uid": doc.uid,
+                "gid": event.get_group_id() or "",
+                "start": now,
+                "end": now + dur,
+                "rift_id": rift.get("id"),
+                "name": doc.name,
+            }
+            await self.db.save_lingjie(state)
+            await self.db.save_player(doc.model_dump())
+        left = lingjie.remaining_attempts(state, doc.uid, rift)
+        lines = [
+            f"你一步踏入灵界裂缝，界壁在身后合拢（约 {max(1, dur // 60)} 分钟）。",
+            *fast,
+            f"此裂缝内你尚余界印 {left} 重。",
+        ]
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command(CMD_LINGJIE_ANCHOR, "使用界隙锚符")
+    async def handle_lingjie_anchor(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        state = lingjie.ensure(await self.db.get_lingjie())
+        rift = state.get("rift")
+        now = time.time()
+        if not rift or float(rift.get("expires_at", 0) or 0) <= now:
+            yield event.plain_result("凡间此刻没有灵界裂缝现世，锚符无处着力。")
+            return
+        st = lingjie.attempt_state(state, doc.uid, rift)
+        if st["extra"] >= lingjie.MAX_ANCHOR_EXTRA:
+            yield event.plain_result("同一道裂缝只能重新锚定一次。")
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        if int(inv.get(lingjie.ANCHOR_ITEM, 0) or 0) <= 0:
+            yield event.plain_result(f"纳戒中没有【{lingjie.ANCHOR_ITEM}】。")
+            return
+        async with self.db.transaction():
+            await self.db.remove_item(doc.uid, lingjie.ANCHOR_ITEM, 1)
+            lingjie.bump_attempt(state, doc.uid, rift, "extra")
+            await self.db.save_lingjie(state)
+        left = lingjie.remaining_attempts(state, doc.uid, rift)
+        yield event.plain_result(
+            f"锚符化作银线钉入界壁，界印重新凝定。\n此裂缝内你尚余界印 {left} 重。"
+        )
+
+    async def _lingjie_loop(self) -> None:
+        try:
+            while True:
+                await asyncio.sleep(45)
+                try:
+                    await self._lingjie_tick()
+                except Exception as e:  # 单次结算失败不拖垮循环
+                    logger.warning(f"[zhutian] 灵界裂缝结算异常: {e}")
+        except asyncio.CancelledError:
+            pass
+
+    async def _lingjie_tick(self) -> None:
+        now = time.time()
+        state = lingjie.ensure(await self.db.get_lingjie())
+        rift = state.get("rift")
+        changed = False
+        for uid, task in list((state.get("tasks") or {}).items()):
+            if float(task.get("end", 0) or 0) > now:
+                continue
+            state["tasks"].pop(uid, None)
+            changed = True
+            try:
+                await self._lingjie_finish(state, task, now)
+            except Exception as e:
+                logger.warning(f"[zhutian] 灵界裂缝结算失败 {uid}: {e}")
+        if rift and float(rift.get("expires_at", 0) or 0) <= now:
+            state["rift"] = None
+            state["tasks"] = {}
+            state["visits"] = {}
+            changed = True
+        if changed:
+            await self.db.save_lingjie(state)
+
+    async def _lingjie_finish(self, state: dict, task: dict, now: float) -> None:
+        from astrbot.api.event import MessageChain
+        from astrbot.api.message_components import Plain
+
+        raw = await self.db.get_player(task.get("uid", ""))
+        if not raw:
+            return
+        doc = PlayerDoc(**raw)
+        st = self._stats(doc)
+        cur, mx = self._hp_pair(doc)
+        rng = random.Random()
+        me = battle.Unit(doc.name, st.atk, st.defense, mx, st.bao)
+        me.hp = max(cur, 1)
+        base = (st.atk, st.defense, mx)
+        mult, mult_msgs = lingjie.reward_multiplier(doc)
+        drops: dict[str, int] = {}
+        lines: list[str] = []
+        won = True
+
+        monster = lingjie.make_monster(base, rng)
+        winner, _log, a_hp, _b = battle.spar_full(me, monster, rng, max_rounds=20)
+        if winner == 0:
+            lines.append(f"你斩落【{monster.name}】，界壁震颤。")
+            for r in lingjie.roll_rewards(rng, mult):
+                drops[r["name"]] = drops.get(r["name"], 0) + int(r["count"])
+        else:
+            won = False
+            lines.append(f"你被【{monster.name}】击退，狼狈退出裂缝。")
+
+        aftermath = lingjie.roll_aftermath(rng) if won else "none"
+        if aftermath in ("ambush", "triple_ambush"):
+            count = 1 if aftermath == "ambush" else 3
+            lines.append("【伏杀】界壁后闪出人影，冲你而来！")
+            for i in range(count):
+                foe = lingjie.make_ambusher(base, rng, rng.choice(lingjie.AMBUSH_NAMES))
+                w, _l, a_hp, _b = battle.spar_full(me, foe, rng, max_rounds=20)
+                if w != 0:
+                    won = False
+                    lines.append(f"你不敌{foe.name}，遁出裂缝。")
+                    break
+                lines.append(f"你击退{foe.name}。")
+                if i == count - 1:
+                    lines.append("三人皆退，裂缝重归死寂。")
+        elif aftermath == "corpse":
+            extras = lingjie.roll_corpse_extras(rng)
+            lines.append("【尸骸余波】你在裂缝角落发现前人遗蜕。")
+            drops["天药"] = drops.get("天药", 0) + 1
+            if extras["grass"]:
+                drops["凡品道心果"] = drops.get("凡品道心果", 0) + 1
+                lines.append("捡到一株灵草，凝成【凡品道心果】。")
+            if extras["water"]:
+                drops["九转天药"] = drops.get("九转天药", 0) + 1
+                lines.append("石缝渗出根水，聚成【九转天药】。")
+
+        exp_gain = int(2000 * max(1, int(doc.realm_index or 1)))
+        if not won:  # 败退只留修为残渣，不结算战利品
+            drops = {}
+            exp_gain //= 5
+        doc.exp += exp_gain
+        doc.ext["hp"] = max(1, int(a_hp))
+        async with self.db.transaction():
+            if drops:
+                await self.db.add_items(doc.uid, drops)
+            await self.db.save_player(doc.model_dump())
+            await self.db.save_lingjie(state)
+
+        lines.append(f"修为 +{exp_gain:,}")
+        if drops:
+            lines.append("获得：" + "、".join(f"【{n}】×{c}" for n, c in drops.items()))
+        lines += mult_msgs
+        text = "【灵界裂缝·归来】\n" + "\n".join(lines)
+        gid = str(task.get("gid") or "")
+        if gid:
+            try:
+                await self.context.send_message(
+                    f"大肥鱼:GroupMessage:{gid}",
+                    MessageChain(chain=[Plain(text)]),
+                )
+            except Exception as e:
+                logger.warning(f"[zhutian] 灵界裂缝战报发送失败 {gid}: {e}")
+
+    # ---- 镇妖塔榜（P2-2）：按 ext["tower_floor"] 排序，附炼神魄段数 ----
+
+    @filter.command(CMD_TOWER_RANK, "镇妖塔榜")
+    async def handle_tower_rank(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        players = await self.db.all_players()
+        rows = []
+        for p in players:
+            ext = p.get("ext") or {}
+            floor = int(ext.get("tower_floor", 0) or 0)
+            stage = int(ext.get("shenpo", 0) or 0)
+            if floor or stage:
+                rows.append((floor, stage, p.get("name") or str(p.get("uid", ""))[:8] + "…"))
+        if not rows:
+            yield event.plain_result("尚无人登临镇妖塔。\n发送 #挑战镇妖塔 开始攀登。")
+            return
+        rows.sort(key=lambda r: (-r[0], -r[1]))
+        lines = ["--- 镇妖塔 · 层数前十 ---"]
+        for i, (floor, stage, name) in enumerate(rows[:10], 1):
+            lines.append(f"{i}. {name} 第 {floor} 层（神魄 {stage} 段）")
+        yield event.plain_result("\n".join(lines))
+
+    # ------------------------------------------------------------ 彼岸古文明
+
+    @filter.command(CMD_ANCIENT, "彼岸古文明")
+    async def handle_ancient(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        state = ancient.ensure(await self.db.get_ancient())
+        async for r in self._smart(event, ancient.status_text(state, doc.uid), "彼岸古文明"):
+            yield r
+
+    @filter.command(CMD_ANCIENT_PUSH, "推进古文明事件")
+    async def handle_ancient_push(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        state = ancient.ensure(await self.db.get_ancient())
+        arg = self._calamity_arg(event.message_str, CMD_ANCIENT_PUSH)
+        entry = ancient.resolve_chapter(arg) if arg else ancient.active_chapter(state)
+        if not entry:
+            yield event.plain_result(
+                "没有可推进的章节。用法：#推进古文明事件 序号" if not arg
+                else f"找不到章节「{arg}」。用 #彼岸古文明 查看四章。"
+            )
+            return
+        now = time.time()
+        last = float(doc.ext.get("ancient_cd") or 0)
+        if now - last < ancient.CONTRIBUTE_CD_SECONDS:
+            left = int(ancient.CONTRIBUTE_CD_SECONDS - (now - last))
+            yield event.plain_result(f"刚从前线退下，调息中（还需 {left // 60 + 1} 分钟）。")
+            return
+        stats = self._stats(doc)
+        rng = random.Random()
+        result = ancient.fight_chapter(entry, stats, rng)
+        hp_cur = max(1, int(result["hp_left"]))
+        doc.ext["hp"] = hp_cur
+        doc.ext["ancient_cd"] = now
+        if not result["won"]:
+            async with self.db.transaction():
+                await self.db.save_player(doc.model_dump())
+            yield event.plain_result(
+                f"{result['log']}\n\n敌群未破，你退回营地（气血 {hp_cur}）。"
+            )
+            return
+        amount = ancient.contribution_amount(entry, result["wins"], doc.realm_index)
+        applied = ancient.contribute(state, entry, doc.uid, doc.name, amount, int(now))
+        if not applied.get("ok"):
+            async with self.db.transaction():
+                await self.db.save_player(doc.model_dump())
+            yield event.plain_result(applied.get("reason") or "未能推进。")
+            return
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            await self.db.save_ancient(state)
+        lines = [
+            result["log"],
+            "",
+            ancient.brief_text(entry, applied),
+            f"你个人累计贡献 {applied['playerContribution']}，气血 {hp_cur}。",
+        ]
+        if applied["chapterCompleted"]:
+            lines.append(f"「{entry['name']}」就此通关！贡献过本章者可 {CMD_ANCIENT_CLAIM} {entry['order']}。")
+            if applied["chainCompleted"]:
+                lines.append("四章皆尽 —— 逻辑彼岸的观测链断了。")
+            elif applied.get("nextEventId"):
+                nxt = ancient.BY_ID.get(applied["nextEventId"])
+                if nxt:
+                    lines.append(f"下一章解锁：{nxt['name']}（{nxt['coordinate']}）。")
+        async for r in self._smart(event, "\n".join(lines), f"古文明·{entry['name']}"):
+            yield r
+
+    @filter.command(CMD_ANCIENT_CLAIM, "领取古文明奖励")
+    async def handle_ancient_claim(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        arg = self._calamity_arg(event.message_str, CMD_ANCIENT_CLAIM)
+        entry = ancient.resolve_chapter(arg) if arg else None
+        if not entry:
+            yield event.plain_result("请指明章节。用法：#领取古文明奖励 序号（见 #彼岸古文明）")
+            return
+        state = ancient.ensure(await self.db.get_ancient())
+        result = ancient.claim(state, entry, doc.uid, int(time.time()))
+        if not result.get("ok"):
+            yield event.plain_result(result.get("reason") or "无法领取。")
+            return
+        items = {name: qty for name, qty in result["items"]}
+        doc.stones = int(doc.stones) + int(result["stones"])
+        doc.exp = int(doc.exp) + int(result["exp"])
+        async with self.db.transaction():
+            await self.db.add_items(doc.uid, items)
+            await self.db.save_player(doc.model_dump())
+            await self.db.save_ancient(state)
+        lines = [f"【{entry['name']}】古文明奖励已入手（贡献 {result['contribution']}）："]
+        lines.extend(f"· {name} ×{qty}" for name, qty in result["items"])
+        lines.append(f"· 灵石 ×{result['stones']}")
+        lines.append(f"· 修为 +{result['exp']}")
+        yield event.plain_result("\n".join(lines))
 
     @filter.command(CMD_HEAL, "灵石疗伤")
     async def handle_heal(self, event: AstrMessageEvent):

@@ -10,7 +10,7 @@ from typing import Any, AsyncIterator, Optional
 
 import aiosqlite
 
-LATEST_DB_VERSION = 10
+LATEST_DB_VERSION = 14
 
 
 def _shanghai_date_key(ts: float) -> str:
@@ -72,11 +72,15 @@ class DataBase:
                 await _v8_dark_boss(self.conn)
                 await _v9_raid(self.conn)
                 await _v10_rift(self.conn)
+                await _v11_calamity(self.conn)
+                await _v12_lingjie(self.conn)
+                await _v13_ancient(self.conn)
+                await _v14_other_shore(self.conn)
                 await self.conn.execute("INSERT INTO db_info (version) VALUES (?)", (LATEST_DB_VERSION,))
             return
 
         # 后续版本在此登记：MIGRATIONS[n] = upgrade_fn
-        MIGRATIONS = {2: _v2_inventory, 3: _v3_world_boss, 4: _v4_sects, 5: _v5_auction, 6: _v6_sect_score, 7: _v7_daily_tasks, 8: _v8_dark_boss, 9: _v9_raid, 10: _v10_rift}
+        MIGRATIONS = {2: _v2_inventory, 3: _v3_world_boss, 4: _v4_sects, 5: _v5_auction, 6: _v6_sect_score, 7: _v7_daily_tasks, 8: _v8_dark_boss, 9: _v9_raid, 10: _v10_rift, 11: _v11_calamity, 12: _v12_lingjie, 13: _v13_ancient, 14: _v14_other_shore}
         for version in sorted(v for v in MIGRATIONS if v > current):
             async with self.transaction():
                 await MIGRATIONS[version](self.conn)
@@ -301,6 +305,98 @@ class DataBase:
         owned = not self.conn.in_transaction
         await self.conn.execute(
             "INSERT OR REPLACE INTO rift_state (id, doc) VALUES (1, ?)",
+            (json.dumps(doc, ensure_ascii=False),),
+        )
+        if owned:
+            await self.conn.commit()
+
+    # ---- 千年灾劫：全服单例状态（灾厄列表 + 魔主 + 纪元） ----
+
+    async def get_calamity(self) -> dict[str, Any]:
+        assert self.conn is not None
+        async with self.conn.execute("SELECT doc FROM calamity_state WHERE id = 1") as cur:
+            row = await cur.fetchone()
+        if not row:
+            return {}
+        try:
+            return json.loads(row[0]) or {}
+        except Exception:
+            return {}
+
+    async def save_calamity(self, doc: dict[str, Any]) -> None:
+        assert self.conn is not None
+        owned = not self.conn.in_transaction
+        await self.conn.execute(
+            "INSERT OR REPLACE INTO calamity_state (id, doc) VALUES (1, ?)",
+            (json.dumps(doc, ensure_ascii=False),),
+        )
+        if owned:
+            await self.conn.commit()
+
+    # ---- 灵界裂缝：全服单例状态（现世裂缝 + 探索任务 + 界印记录） ----
+
+    async def get_lingjie(self) -> dict[str, Any]:
+        assert self.conn is not None
+        async with self.conn.execute("SELECT doc FROM lingjie_state WHERE id = 1") as cur:
+            row = await cur.fetchone()
+        if not row:
+            return {}
+        try:
+            return json.loads(row[0]) or {}
+        except Exception:
+            return {}
+
+    async def save_lingjie(self, doc: dict[str, Any]) -> None:
+        assert self.conn is not None
+        owned = not self.conn.in_transaction
+        await self.conn.execute(
+            "INSERT OR REPLACE INTO lingjie_state (id, doc) VALUES (1, ?)",
+            (json.dumps(doc, ensure_ascii=False),),
+        )
+        if owned:
+            await self.conn.commit()
+
+    # ---- 彼岸古文明：全服单例状态（四章贡献链） ----
+
+    async def get_ancient(self) -> dict[str, Any]:
+        assert self.conn is not None
+        async with self.conn.execute("SELECT doc FROM ancient_state WHERE id = 1") as cur:
+            row = await cur.fetchone()
+        if not row:
+            return {}
+        try:
+            return json.loads(row[0]) or {}
+        except Exception:
+            return {}
+
+    async def save_ancient(self, doc: dict[str, Any]) -> None:
+        assert self.conn is not None
+        owned = not self.conn.in_transaction
+        await self.conn.execute(
+            "INSERT OR REPLACE INTO ancient_state (id, doc) VALUES (1, ?)",
+            (json.dumps(doc, ensure_ascii=False),),
+        )
+        if owned:
+            await self.conn.commit()
+
+    # ---- 彼岸世界/真世界：全服单例状态（世界 + 星辰 + 路径） ----
+
+    async def get_other_shore(self) -> dict[str, Any]:
+        assert self.conn is not None
+        async with self.conn.execute("SELECT doc FROM other_shore_state WHERE id = 1") as cur:
+            row = await cur.fetchone()
+        if not row:
+            return {}
+        try:
+            return json.loads(row[0]) or {}
+        except Exception:
+            return {}
+
+    async def save_other_shore(self, doc: dict[str, Any]) -> None:
+        assert self.conn is not None
+        owned = not self.conn.in_transaction
+        await self.conn.execute(
+            "INSERT OR REPLACE INTO other_shore_state (id, doc) VALUES (1, ?)",
             (json.dumps(doc, ensure_ascii=False),),
         )
         if owned:
@@ -827,3 +923,41 @@ async def _v10_rift(conn: aiosqlite.Connection) -> None:
         " id INTEGER PRIMARY KEY CHECK (id = 1),"
         " doc TEXT NOT NULL)"
     )
+
+
+async def _v13_ancient(conn: aiosqlite.Connection) -> None:
+    """彼岸古文明：全服单例状态（四章贡献链 + 领取记录）。"""
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS ancient_state ("
+        " id INTEGER PRIMARY KEY CHECK (id = 1),"
+        " doc TEXT NOT NULL)"
+    )
+
+
+async def _v11_calamity(conn: aiosqlite.Connection) -> None:
+    """千年灾劫·域外来敌：全服单例状态（灾厄列表 + 魔主 + 纪元）。"""
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS calamity_state ("
+        " id INTEGER PRIMARY KEY CHECK (id = 1),"
+        " doc TEXT NOT NULL)"
+    )
+
+
+async def _v12_lingjie(conn: aiosqlite.Connection) -> None:
+    """凡间限时副本·灵界裂缝：全服单例状态（现世裂缝 + 探索任务）。"""
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS lingjie_state ("
+        " id INTEGER PRIMARY KEY CHECK (id = 1),"
+        " doc TEXT NOT NULL)"
+    )
+
+
+async def _v14_other_shore(conn: aiosqlite.Connection) -> None:
+    """彼岸世界/真世界：全服单例状态（世界 + 星辰 + 探索）。"""
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS other_shore_state ("
+        " id INTEGER PRIMARY KEY CHECK (id = 1),"
+        " doc TEXT NOT NULL)"
+    )
+
+

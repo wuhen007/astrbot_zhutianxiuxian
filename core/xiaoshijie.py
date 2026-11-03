@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import random
 import time
 from collections.abc import Mapping
 from typing import Any
@@ -53,6 +54,145 @@ SEEDS: dict[str, tuple[str, int]] = {
 
 WATER_CD_HOURS = 6        # 普通浇灌冷却
 WATER_REDUCE_HOURS = 0.5  # 普通浇灌减少的生长时间（有效小时）
+
+# ---- 工坊 / 守卫 / 催熟 / 偷菜（P3-1 补充：原版 Garden 的工坊与偷菜线） ----
+
+WORKSHOP_MAX = 5
+WORKSHOPS: dict[str, dict[str, Any]] = {
+    "灵田": {"desc": "成熟作物收获 +8%/级", "base_cost": 3_000_000},
+    "丹房": {"desc": "炼丹加成（预留，未接线）", "base_cost": 5_000_000},
+    "器阁": {"desc": "锻造加成（预留，未接线）", "base_cost": 5_000_000},
+    "符台": {"desc": "制符加成（预留，未接线）", "base_cost": 4_000_000},
+    "矿脉": {"desc": "灵矿产出 +10%/级", "base_cost": 4_000_000},
+}
+WORKSHOP_NAME = "世界石"
+
+GUARD_MAX = 5
+GUARD_BASE_COST = 4_000_000
+GUARD_BLOCK_PER_LEVEL = 0.15   # 每级守卫 -15% 偷菜成功率
+STEAL_BASE_RATE = 0.65
+STEAL_FAIL_PENALTY = 2_000_000  # 被抓罚灵石
+
+RIPEN_COST = 8_000_000         # 每株催熟灵石
+RIPEN_HOURS = 24.0             # 每株催熟推进的现实小时
+
+
+def _defaults(world: Mapping[str, Any]) -> dict[str, Any]:
+    w = dict(world)
+    ws = w.get("workshops")
+    w["workshops"] = dict(ws) if isinstance(ws, Mapping) else {}
+    w["guard"] = int(w.get("guard") or 0)
+    return w
+
+
+def workshop_cost(kind: str, level: int) -> int:
+    cfg = WORKSHOPS[kind]
+    nxt = int(level) + 1
+    return int(cfg["base_cost"] * nxt * nxt)
+
+
+def workshop_level(world: Mapping[str, Any], kind: str) -> int:
+    ws = world.get("workshops") or {}
+    return int(ws.get(kind, 0) or 0) if isinstance(ws, Mapping) else 0
+
+
+def upgrade_workshop(world: Mapping[str, Any], kind: str, stones: int,
+                     world_stones: int) -> tuple[bool, str, dict[str, Any], int]:
+    """升一级工坊。返回 (ok, 提示, world, 消耗灵石)。"""
+    if kind not in WORKSHOPS:
+        return False, f"工坊只有：{'、'.join(WORKSHOPS)}。", dict(world), 0
+    w = _defaults(world)
+    lv = workshop_level(w, kind)
+    if lv >= WORKSHOP_MAX:
+        return False, f"{kind} 已至 {WORKSHOP_MAX} 级。", w, 0
+    cost = workshop_cost(kind, lv)
+    need_ws = lv + 1
+    if int(stones) < cost:
+        return False, f"升级{kind}需灵石 {cost}，道友当前 {int(stones)}。", w, 0
+    if int(world_stones) < need_ws:
+        return False, f"升级{kind}还需{WORKSHOP_NAME}×{need_ws}。", w, 0
+    w["workshops"][kind] = lv + 1
+    return True, f"{kind} 升至 {lv + 1} 级（{WORKSHOPS[kind]['desc']}），耗灵石 {cost}、{WORKSHOP_NAME}×{need_ws}。", w, cost
+
+
+def workshop_text(world: Mapping[str, Any]) -> str:
+    w = _defaults(world)
+    lines = [f"【{w.get('name')}·工坊】"]
+    for kind, cfg in WORKSHOPS.items():
+        lv = workshop_level(w, kind)
+        nxt = "已满级" if lv >= WORKSHOP_MAX else f"升级需灵石 {workshop_cost(kind, lv)} + {WORKSHOP_NAME}×{lv + 1}"
+        lines.append(f"· {kind} {lv}/{WORKSHOP_MAX}（{cfg['desc']}）— {nxt}")
+    lines.append(f"· 守卫 {int(w.get('guard') or 0)}/{GUARD_MAX}（每级偷菜成功率 -{int(GUARD_BLOCK_PER_LEVEL * 100)}%）")
+    return "\n".join(lines)
+
+
+def guard_upgrade(world: Mapping[str, Any], stones: int,
+                  world_stones: int) -> tuple[bool, str, dict[str, Any], int]:
+    w = _defaults(world)
+    lv = int(w["guard"])
+    if lv >= GUARD_MAX:
+        return False, f"守卫已至 {GUARD_MAX} 级。", w, 0
+    cost = GUARD_BASE_COST * (lv + 1) * (lv + 1)
+    need_ws = lv + 1
+    if int(stones) < cost:
+        return False, f"募请守卫需灵石 {cost}，道友当前 {int(stones)}。", w, 0
+    if int(world_stones) < need_ws:
+        return False, f"募请守卫还需{WORKSHOP_NAME}×{need_ws}。", w, 0
+    w["guard"] = lv + 1
+    return True, f"小世界守卫扩至 {lv + 1} 级，偷菜成功率再降 {int(GUARD_BLOCK_PER_LEVEL * 100)}%。", w, cost
+
+
+def ripe_crops(world: Mapping[str, Any]) -> int:
+    return sum(1 for f in (world.get("fields") or []) if float(f.get("remaining", 0)) <= 0)
+
+
+def ripen(world: Mapping[str, Any], stones: int) -> tuple[bool, str, dict[str, Any], int]:
+    """催熟：把未成熟作物整体推进 24 小时，按株计费。"""
+    w = _defaults(world)
+    fields = [dict(f) for f in (w.get("fields") or [])]
+    growing = [f for f in fields if float(f.get("remaining", 0)) > 0]
+    if not growing:
+        return False, "药田里没有在生长的作物。", w, 0
+    cost = RIPEN_COST * len(growing)
+    if int(stones) < cost:
+        return False, f"催熟 {len(growing)} 株需灵石 {cost}，道友当前 {int(stones)}。", w, 0
+    for f in growing:
+        f["remaining"] = round(max(0.0, float(f["remaining"]) - RIPEN_HOURS), 2)
+    w["fields"] = fields
+    done = sum(1 for f in fields if float(f["remaining"]) <= 0)
+    return True, f"灵雨催熟 {len(growing)} 株（每株 -{int(RIPEN_HOURS)} 小时），耗灵石 {cost}；已成熟 {done} 株。", w, cost
+
+
+def steal_rate(world: Mapping[str, Any]) -> float:
+    guard = int(_defaults(world).get("guard") or 0)
+    return max(0.05, STEAL_BASE_RATE - guard * GUARD_BLOCK_PER_LEVEL)
+
+
+def steal(target: Mapping[str, Any], thief_exp: int,
+          rng: Any) -> tuple[bool, str, dict[str, Any], str, int]:
+    """偷菜。返回 (成功?, 文案, 新目标世界, 偷到的东西, 罚款)。"""
+    w = _defaults(target)
+    fields = [dict(f) for f in (w.get("fields") or [])]
+    mature = [f for f in fields if float(f.get("remaining", 0)) <= 0]
+    if not mature:
+        return False, f"【{w.get('name')}】药田里没有成熟的作物。", dict(target), "", 0
+    if int(thief_exp) < AVATAR_COST:
+        return False, "修为太浅（需 100 万修为），潜不进去。", dict(target), "", 0
+    rate = steal_rate(w)
+    if rng.random() >= rate:
+        return False, (
+            f"你潜入【{w.get('name')}】，被守卫察觉（成功率 {int(rate * 100)}%），"
+            f"仓皇退回并掉落灵石 {STEAL_FAIL_PENALTY}。"
+        ), dict(target), "", STEAL_FAIL_PENALTY
+    pick = mature[0]
+    seed = str(pick.get("seed", ""))
+    item = SEEDS.get(seed, ("?", 0))[0]
+    fields.remove(pick)
+    w["fields"] = fields
+    return True, (
+        f"你趁夜摸进【{w.get('name')}】，摘走了一株{item}（守卫 {int(w.get('guard') or 0)} 级，"
+        f"成功率 {int(rate * 100)}%）。"
+    ), w, item, 0
 
 
 def create_world(name: str, realm_id: int, inv: Mapping[str, int]) -> tuple[bool, str, dict[str, Any]]:
@@ -118,11 +258,15 @@ def harvest(world: Mapping[str, Any]) -> tuple[bool, str, dict[str, Any], dict[s
         return False, "距离上次收获时间太短，暂无资源可收获。", w, {}
     lv = int(w.get("level", 1))
     out: dict[str, int] = {}
+    mine_lv = workshop_level(w, "矿脉")
     for k, per_hour in HOURLY_YIELD[lv].items():
         n = int(per_hour * eff_hours)
+        if n > 0 and k == "灵矿" and mine_lv:
+            n = int(n * (1 + 0.10 * mine_lv))
         if n > 0:
             out[k] = out.get(k, 0) + n
-    # 成熟作物收获 + 50% 概率返种
+    # 成熟作物收获（灵田每级 +8%，小数部分按概率进位）
+    field_lv = workshop_level(w, "灵田")
     fields = [dict(f) for f in (w.get("fields") or [])]
     kept: list[dict[str, Any]] = []
     grown: dict[str, int] = {}
@@ -130,7 +274,9 @@ def harvest(world: Mapping[str, Any]) -> tuple[bool, str, dict[str, Any], dict[s
         if f.get("remaining", 0) <= 0:
             seed = str(f.get("seed", ""))
             harvest_name = SEEDS.get(seed, ("?", 0))[0]
-            grown[harvest_name] = grown.get(harvest_name, 0) + 1
+            n = 1 + 0.08 * field_lv
+            amount = int(n) + (1 if random.random() < n - int(n) else 0)
+            grown[harvest_name] = grown.get(harvest_name, 0) + amount
         else:
             kept.append(f)
     w["fields"] = kept
