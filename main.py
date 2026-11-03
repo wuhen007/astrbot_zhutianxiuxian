@@ -11,7 +11,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, battle, boss, catalog, cultivate, dibing, equipment, items, linggen, addict, endless, motou, npc, occupation, plane, pet, quest, raid, secret, sect, shenjie, story_npc, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, battle, boss, catalog, cultivate, dibing, equipment, items, linggen, addict, endless, motou, npc, occupation, plane, pet, quest, raid, rift, secret, sect, shenjie, story_npc, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -216,6 +216,13 @@ CMD_PLANE_CLUE = "#求购位面线索"
 CMD_PLANE_EXPLORE = "#探索位面线索"
 CMD_PLANE_TRAVEL = "#穿梭"
 CMD_PLANE_ARRIVE = "#抵达"
+CMD_RIFT = "#裂界副本"
+CMD_RIFT_ENTER = "#进入裂界"
+CMD_RIFT_STABLE = "#裂界稳阵"
+CMD_RIFT_LOOT = "#裂界寻宝"
+CMD_RIFT_FORCE = "#裂界强攻"
+CMD_RIFT_OUT = "#撤离裂界"
+CMD_RIFT_EXCHANGE = "#界源兑换"
 CMD_DARK_OPEN = "#开启黑暗动乱"
 CMD_DARK_CLOSE = "#关闭黑暗动乱"
 CMD_DARK_STATUS = "#禁区至尊状态"
@@ -745,6 +752,13 @@ class ZhutianPlugin(Star):
                 (CMD_PLANE_EXPLORE, "每日一次，概率补全未记位面坐标"),
                 (f"{CMD_PLANE_TRAVEL} 位面", "穿梭（耗修为/血气，按等级差计时）"),
                 (CMD_PLANE_ARRIVE, "抵达落位"),
+            ]},
+            {"title": "裂界副本", "lines": [
+                (CMD_RIFT, "全服裂界状态（6 小时轮换）/锚定度/你的远征"),
+                (CMD_RIFT_ENTER, "进入（需先 #穿梭 到裂界所在位面）"),
+                (f"{CMD_RIFT_STABLE} / {CMD_RIFT_LOOT} / {CMD_RIFT_FORCE}", "三路线共 3 层（稳阵/寻宝/强攻）"),
+                (CMD_RIFT_OUT, "撤离并结算界源+修为+血气"),
+                (f"{CMD_RIFT_EXCHANGE} 名字", "界源兑换（星图/宝盒/无尽秘钥等）"),
             ]},
             {"title": "团本讨伐", "lines": [
                 (f"{CMD_TR_CREATE} 名字", "创建讨伐队伍（5 人，24h 有效）"),
@@ -6350,6 +6364,144 @@ class ZhutianPlugin(Star):
             return
         async for r in self._smart(event, msg, "抵达"):
             yield r
+
+    # ---- B10：裂界副本（全服共享 6 小时窗口 / 三路线 / 界源兑换） ----
+
+    async def _rift_ensure(self, now: float) -> dict:
+        """加载全服裂界，按 6 小时窗口自动轮换。"""
+        import random as _random
+        g = await self.db.get_rift()
+        g, _r, created = rift.ensure(g, now, _random.Random(int(now // rift.WINDOW_SECONDS)))
+        if created:
+            await self.db.save_rift(g)
+        return g
+
+    async def _rift_settle(self, g: dict, doc: PlayerDoc, now: float) -> str | None:
+        note = rift.settle_if_needed(g, doc, now)
+        if note:
+            await self.db.save_player(doc.model_dump())
+        return note
+
+    @filter.command(CMD_RIFT, "裂界副本")
+    async def handle_rift(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        now = time.time()
+        g = await self._rift_ensure(now)
+        note = await self._rift_settle(g, doc, now)
+        text = rift.status_text(g, doc, now)
+        if note:
+            text = note + "\n\n" + text
+        async for r in self._smart(event, text, "裂界副本"):
+            yield r
+
+    @filter.command(CMD_RIFT_ENTER, "进入裂界")
+    async def handle_rift_enter(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        now = time.time()
+        g = await self._rift_ensure(now)
+        note = await self._rift_settle(g, doc, now)
+        ok, msg = rift.join(g, doc, now)
+        if not ok:
+            yield event.plain_result((note + "\n" if note else "") + msg)
+            return
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            await self.db.save_rift(g)
+        async for r in self._smart(event, (note + "\n" if note else "") + msg, "进入裂界"):
+            yield r
+
+    async def _rift_explore(self, event: AstrMessageEvent, route: str):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        import random as _random
+        now = time.time()
+        g = await self.db.get_rift()
+        note = await self._rift_settle(g, doc, now)
+        st = self._stats(doc)
+        hp_cur, _hp_max = self._hp_pair(doc)
+        stats = {"atk": st.atk, "defense": st.defense, "hp": st.hp, "bao": st.bao, "hp_cur": hp_cur}
+        ok, msg = rift.explore(
+            g, doc, route, stats, _random.Random(f"{doc.uid}:rift:{now}"), now
+        )
+        if not ok:
+            yield event.plain_result((note + "\n" if note else "") + msg)
+            return
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            await self.db.save_rift(g)
+        async for r in self._smart(event, (note + "\n" if note else "") + msg, f"裂界{route}"):
+            yield r
+
+    @filter.command(CMD_RIFT_STABLE, "裂界稳阵")
+    async def handle_rift_stable(self, event: AstrMessageEvent):
+        async for r in self._rift_explore(event, "稳阵"):
+            yield r
+
+    @filter.command(CMD_RIFT_LOOT, "裂界寻宝")
+    async def handle_rift_loot(self, event: AstrMessageEvent):
+        async for r in self._rift_explore(event, "寻宝"):
+            yield r
+
+    @filter.command(CMD_RIFT_FORCE, "裂界强攻")
+    async def handle_rift_force(self, event: AstrMessageEvent):
+        async for r in self._rift_explore(event, "强攻"):
+            yield r
+
+    @filter.command(CMD_RIFT_OUT, "撤离裂界")
+    async def handle_rift_out(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        g = await self.db.get_rift()
+        ok, msg = rift.withdraw(g, doc, time.time())
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            await self.db.save_rift(g)
+        async for r in self._smart(event, msg, "撤离裂界"):
+            yield r
+
+    @filter.command(CMD_RIFT_EXCHANGE, "界源兑换")
+    async def handle_rift_exchange(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        raw = (name or "").strip()
+        if not raw:
+            yield event.plain_result(
+                f"格式：{CMD_RIFT_EXCHANGE} 名字（可换：{'、'.join(rift.EXCHANGES)}）"
+            )
+            return
+        ok, msg, got = rift.exchange(doc, raw)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            await self.db.add_items(doc.uid, got)
+        yield event.plain_result(msg)
 
     @filter.command(CMD_HEAL, "灵石疗伤")
     async def handle_heal(self, event: AstrMessageEvent):

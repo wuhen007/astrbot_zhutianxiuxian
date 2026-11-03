@@ -155,9 +155,9 @@ async def main():
     ok, _, _ = items_mod.sell(inv_doc, junk, 1)
     assert not ok, "出售价 0 不可出售"
 
-    # 10. 迁移版本 = 9
+    # 10. 迁移版本 = 10
     async with db.conn.execute("SELECT version FROM db_info") as cur:
-        assert (await cur.fetchone())[0] == 9
+        assert (await cur.fetchone())[0] == 10
 
     # 11. 装备：穿戴/换位/卸下 + 比例与固定加成聚合
     from core import battle as battle_mod   # noqa: E402
@@ -1518,6 +1518,109 @@ async def main():
     html_p = render_mod._jinja().get_template("plane.html").render(**payload)
     assert "仙界" in html_p and "rg" in html_p
     print("plane ok")
+
+    # 16i. 裂界副本：窗口/进入/三路线/结算/兑换
+    from core import rift as rift_mod  # noqa: E402
+
+    class _Seq:
+        """可控随机：random() 依次取值，randrange 取 0，choice 取首项。"""
+
+        def __init__(self, vals=(0.0,)):
+            self.vals = list(vals)
+
+        def random(self):
+            return self.vals.pop(0) if self.vals else 0.0
+
+        def randrange(self, n):
+            return 0
+
+        def choice(self, seq):
+            return seq[0]
+
+    t0 = 1_800_000_000.0
+    g, r0, created = rift_mod.ensure({}, t0, _Seq())
+    win0 = int(t0 // rift_mod.WINDOW_SECONDS)
+    assert created and r0["plane"] == rift_mod.PLANES[win0 % 2] and r0["expires_at"] > t0, r0
+    g2, r_same, created2 = rift_mod.ensure(g, t0 + 60, _Seq())
+    assert not created2 and r_same["id"] == r0["id"]
+    g3, r_next, created3 = rift_mod.ensure(g2, t0 + rift_mod.WINDOW_SECONDS + 5, _Seq())
+    assert created3 and r_next["plane"] == rift_mod.PLANES[(win0 + 1) % 2] and r_next["id"] != r0["id"]
+    assert g3["history"], "旧裂界应入历史"
+
+    rd = PlayerDoc(uid="rift_p", name="裂客", realm_index=46, stones=0, exp=1_000_000)
+    rd.ext["xueqi"] = 1_000_000
+    rd.ext["hp"] = 1_000_000
+    ok, msg = rift_mod.join(g, rd, t0)
+    assert not ok and "穿梭" in msg, msg
+    plane_mod.state_of(rd)["current"] = r0["plane"]
+    ok, msg = rift_mod.join(g, rd, t0)
+    assert ok and rd.ext["rift"]["status"] == "active", msg
+    ok, msg = rift_mod.join(g, rd, t0)
+    assert not ok, "重复进入应拒绝"
+
+    stats = {"atk": 5_000_000, "defense": 5_000_000, "hp": 10_000_000, "bao": 0.2, "hp_cur": 10_000_000}
+    ok, msg = rift_mod.explore(g, rd, "稳阵", stats, _Seq([0.9, 0.0]), t0)
+    assert ok and rd.ext["rift"]["depth"] == 1 and rd.ext["rift"]["loot"] == 3, msg
+    assert g["rift"]["anchor"] == 6, g["rift"]["anchor"]
+    ok, msg = rift_mod.explore(g, rd, "寻宝", stats, _Seq([0.9, 0.0, 0.0]), t0)
+    assert ok and rd.ext["rift"]["depth"] == 2, msg
+    assert "潜行" in msg or "战利品" in msg
+    src_before = rift_mod.source_of(rd)
+    ok, msg = rift_mod.explore(g, rd, "强攻", stats, _Seq([0.0]), t0)
+    assert ok and rd.ext["rift"] is None, msg
+    assert "通关" in msg and rift_mod.source_of(rd) > src_before, msg
+    assert rd.exp > 1_000_000, rd.exp
+    assert g["rift"]["anchor"] >= 12
+
+    # 强攻失败：属性极弱 → 折半结算
+    weak = PlayerDoc(uid="rift_w", name="弱者", realm_index=20, exp=0)
+    weak.ext["xueqi"] = 0
+    weak.ext["hp"] = 100
+    plane_mod.state_of(weak)["current"] = r0["plane"]
+    ok, _ = rift_mod.join(g, weak, t0)
+    assert ok
+    weak.ext["rift"]["loot"] = 10
+    weak_stats = {"atk": 1, "defense": 1, "hp": 100, "bao": 0.0, "hp_cur": 100}
+    ok, msg = rift_mod.explore(g, weak, "强攻", weak_stats, _Seq([0.0]), t0)
+    assert ok and "失败" in msg and weak.ext["rift"] is None, msg
+    assert weak.ext["rift_last"]["status"] == "failed"
+    assert weak.ext["rift_last"]["source"] <= 10
+
+    # 撤离结算
+    wd = PlayerDoc(uid="rift_out", name="离客", realm_index=30, exp=0)
+    wd.ext["xueqi"] = 0
+    plane_mod.state_of(wd)["current"] = r0["plane"]
+    ok, _ = rift_mod.join(g, wd, t0)
+    assert ok
+    wd.ext["rift"]["loot"] = 7
+    ok, msg = rift_mod.withdraw(g, wd, t0)
+    assert ok and "撤离" in msg and wd.ext["rift"] is None, msg
+
+    # 过期自动结算
+    od = PlayerDoc(uid="rift_exp", name="迟客", realm_index=30, exp=0)
+    od.ext["xueqi"] = 0
+    plane_mod.state_of(od)["current"] = r0["plane"]
+    ok, _ = rift_mod.join(g, od, t0)
+    assert ok
+    od.ext["rift"]["loot"] = 5
+    note = rift_mod.settle_if_needed(g, od, t0 + rift_mod.WINDOW_SECONDS + 1)
+    assert note and "裂界闭合" in note and od.ext["rift"] is None, note
+
+    # 兑换
+    xd = PlayerDoc(uid="rift_x", name="换客")
+    xd.ext["rift_source"] = 100
+    ok, msg, got = rift_mod.exchange(xd, "星图")
+    assert ok and got == {"星图": 1} and rift_mod.source_of(xd) == 60, msg
+    ok, msg, _ = rift_mod.exchange(xd, "无尽秘钥配方")
+    assert not ok, "界源不足应拒绝"
+    ok, msg, _ = rift_mod.exchange(xd, "不存在")
+    assert not ok
+    assert "裂界副本" in rift_mod.status_text(g, xd, t0)
+
+    await db.save_rift(g)
+    g_back = await db.get_rift()
+    assert g_back["rift"]["id"] == g["rift"]["id"], "裂界状态应可持久化"
+    print("rift ok")
 
     # 17. 宗门纯函数 + 存取
     from core import sect as sect_mod  # noqa: E402

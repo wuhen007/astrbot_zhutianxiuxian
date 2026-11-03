@@ -10,7 +10,7 @@ from typing import Any, AsyncIterator, Optional
 
 import aiosqlite
 
-LATEST_DB_VERSION = 9
+LATEST_DB_VERSION = 10
 
 
 def _shanghai_date_key(ts: float) -> str:
@@ -71,11 +71,12 @@ class DataBase:
                 await _v7_daily_tasks(self.conn)
                 await _v8_dark_boss(self.conn)
                 await _v9_raid(self.conn)
+                await _v10_rift(self.conn)
                 await self.conn.execute("INSERT INTO db_info (version) VALUES (?)", (LATEST_DB_VERSION,))
             return
 
         # 后续版本在此登记：MIGRATIONS[n] = upgrade_fn
-        MIGRATIONS = {2: _v2_inventory, 3: _v3_world_boss, 4: _v4_sects, 5: _v5_auction, 6: _v6_sect_score, 7: _v7_daily_tasks, 8: _v8_dark_boss, 9: _v9_raid}
+        MIGRATIONS = {2: _v2_inventory, 3: _v3_world_boss, 4: _v4_sects, 5: _v5_auction, 6: _v6_sect_score, 7: _v7_daily_tasks, 8: _v8_dark_boss, 9: _v9_raid, 10: _v10_rift}
         for version in sorted(v for v in MIGRATIONS if v > current):
             async with self.transaction():
                 await MIGRATIONS[version](self.conn)
@@ -281,6 +282,29 @@ class DataBase:
             (round_no,),
         ) as cur:
             return {row[0]: (row[1], row[2]) for row in await cur.fetchall()}
+
+    # ---- 裂界副本：全服单例状态（当前裂界 + 锚定度 + 贡献） ----
+
+    async def get_rift(self) -> dict[str, Any]:
+        assert self.conn is not None
+        async with self.conn.execute("SELECT doc FROM rift_state WHERE id = 1") as cur:
+            row = await cur.fetchone()
+        if not row:
+            return {}
+        try:
+            return json.loads(row[0]) or {}
+        except Exception:
+            return {}
+
+    async def save_rift(self, doc: dict[str, Any]) -> None:
+        assert self.conn is not None
+        owned = not self.conn.in_transaction
+        await self.conn.execute(
+            "INSERT OR REPLACE INTO rift_state (id, doc) VALUES (1, ?)",
+            (json.dumps(doc, ensure_ascii=False),),
+        )
+        if owned:
+            await self.conn.commit()
 
     async def all_player_uids(self) -> list[str]:
         assert self.conn is not None
@@ -793,4 +817,13 @@ async def _v9_raid(conn: aiosqlite.Connection) -> None:
     )
     await conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_raid_member_uid ON raid_member(uid)"
+    )
+
+
+async def _v10_rift(conn: aiosqlite.Connection) -> None:
+    """裂界副本：全服共享裂界状态（单例 JSON，窗口轮换 + 锚定度 + 贡献账本）。"""
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS rift_state ("
+        " id INTEGER PRIMARY KEY CHECK (id = 1),"
+        " doc TEXT NOT NULL)"
     )
