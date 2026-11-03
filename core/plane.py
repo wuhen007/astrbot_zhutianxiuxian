@@ -142,6 +142,12 @@ def realm_reduce(doc: Any) -> float:
     return min(REDUCE_MAX, max(0, int(getattr(doc, "realm_index", 0) or 0)) / 63 * 0.7)
 
 
+def _meets(doc: Any, gate: int) -> bool:
+    """双轨任一轨达标即通过（W0-2：位面门槛走 authority 换算）。"""
+    from .authority import meets
+    return meets(doc, gate)
+
+
 def quote(doc: Any, target: str) -> dict:
     """返回 {distance, minutes, exp, xueqi, gate, ok, reason}。"""
     src = current(state_of(doc))
@@ -153,7 +159,7 @@ def quote(doc: Any, target: str) -> dict:
     return {
         "ok": True, "reason": "", "distance": distance, "minutes": minutes,
         "exp": int(distance * EXP_PER_LEVEL), "xueqi": int(distance * XUEQI_PER_LEVEL),
-        "gate": gate, "enough_realm": int(getattr(doc, "realm_index", 0) or 0) >= gate,
+        "gate": gate, "enough_realm": _meets(doc, gate),
     }
 
 
@@ -179,7 +185,9 @@ def begin_travel(doc: Any, target: str, data: Mapping, now: float) -> tuple[bool
         return False, f"道友正在「{doc.state}」中，无法分神穿梭。"
     q = quote(doc, target)
     if not q["enough_realm"]:
-        return False, f"穿越【{target}】需境界达到第 {q['gate']} 境（当前 {doc.realm_index}），界壁压力过强。"
+        from .authority import dual_level
+        return False, (f"穿越【{target}】需境界达到第 {q['gate']} 境"
+                       f"（当前练气 {doc.realm_index}／炼体 {doc.physique_index}），界壁压力过强。")
     if target not in known_of(st):
         return False, (f"你不知「{target}」的星空坐标。\n"
                        f"可 `#记坐标 {target}`、`#求购位面线索 {target}` 或每日 `#探索位面线索` 获取。")

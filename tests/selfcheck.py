@@ -2054,6 +2054,27 @@ async def main():
     assert st_s.atk == row_q["基础攻击"]
     print("body dual ok")
 
+    # 16r. 权柄换算（W0-2）：双轨取高 + 位面门槛接 authority
+    from core import authority as auth_mod  # noqa: E402
+
+    lo = PlayerDoc(uid="auth_lo", realm_index=10, physique_index=4)
+    hi_body = PlayerDoc(uid="auth_body", realm_index=10, physique_index=30)
+    assert auth_mod.authority_of(lo) == 10 and auth_mod.dual_level(lo) == 11
+    assert auth_mod.authority_of(hi_body) == 30 and auth_mod.authority_21(hi_body) == 10
+    assert auth_mod.authority_21(PlayerDoc(uid="x", realm_index=63, physique_index=63)) == 21
+    # 位面门槛：炼体 30 解锁界海（31? 否——界海 gate 31），用遮天 21 验证
+    assert auth_mod.meets(hi_body, plane_mod.GATES["遮天位面"])
+    assert not auth_mod.meets(lo, plane_mod.GATES["遮天位面"])
+    pd_body = PlayerDoc(uid="plane_body", name="体修", realm_index=10, physique_index=30)
+    pd_body.ext["xueqi"] = 10 ** 9
+    pd_body.exp = 10 ** 9
+    plane_mod.state_of(pd_body)["known"].append("遮天位面")
+    ok, msg = plane_mod.begin_travel(pd_body, "遮天位面", pdata, 1_900_000_000)
+    assert ok, msg  # 炼体 30 ≥ 遮天门槛 21：双轨任一达标即可
+    q = plane_mod.quote(lo, "遮天位面")
+    assert not q["enough_realm"]
+    print("authority ok")
+
     # 17. 宗门纯函数 + 存取
     from core import sect as sect_mod  # noqa: E402
 
