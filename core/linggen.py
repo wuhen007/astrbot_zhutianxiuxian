@@ -84,4 +84,7 @@ def describe(snap: Mapping | None) -> str:
     except (TypeError, ValueError):
         eff = 0.0
     tail = f"，稀有度 {snap.get('rarity')}" if snap.get("rarity") else ""
-    return f"{snap.get('name')}（{snap.get('type')}{tail}）· 修炼效率加成 +{eff:g}"
+    inner = str(snap.get("type") or "") + tail
+    inner = inner.lstrip("，") if inner.startswith("，") else inner
+    mid = f"（{inner}）" if inner else ""
+    return f"{snap.get('name')}{mid} · 修炼效率加成 +{eff:g}"

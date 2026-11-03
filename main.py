@@ -623,32 +623,67 @@ class ZhutianPlugin(Star):
         st = self._stats(doc)
         hp_cur, hp_max = self._hp_pair(doc)
         body_entry = cultivate.physique_entry(doc, self.content.table("Level/炼体境界"))
+        power = (st.atk + st.defense * 1.1 + st.hp * 0.5) / 10000   # 原版战力公式
+        if power >= 1e8:
+            power_txt = f"{power / 1e8:.2f} 亿"
+        elif power >= 1e4:
+            power_txt = f"{power / 1e4:.1f} 万"
+        else:
+            power_txt = f"{power:.0f}"
+        equips = []
+        enh = doc.ext.get("enh") or {}
+        for slot, name in (doc.ext.get("equipment") or {}).items():
+            item = self.item_index.get(name) or {}
+            parts = []
+            for key, label in (("atk", "攻"), ("def", "防"), ("HP", "血"), ("bao", "暴")):
+                f_, r_ = equipment._split(item.get(key))
+                if f_:
+                    parts.append(f"{label}+{int(f_):,}")
+                elif r_:
+                    parts.append(f"{label}+{r_:.0%}")
+            lv = int((enh.get(slot, 0) or 0))
+            equips.append({
+                "slot": slot, "name": name,
+                "meta": " ".join(parts) if parts else "无加成",
+                "enh": f"+{lv}" if lv else "",
+            })
+        endSt = endless.state_of(doc)
         data = {
             "name": doc.name or doc.uid[:8] + "…",
+            "uid": doc.uid,
             "realm": entry.get("level", "未知"),
             "physique": body_entry.get("level", ""),
+            "title": (endless.title_of(endSt).get("name") or ""),
+            "power": power_txt,
             "exp": doc.exp, "req": req,
             "next": nxt["level"] if nxt else "",
             "progress": min(100.0, doc.exp / req * 100) if req else 100.0,
             "hp_cur": hp_cur, "hp_max": hp_max,
+            "xueqi": int(float(doc.ext.get("xueqi", 0) or 0)),
             "stones": doc.stones,
             "atk": st.atk, "defense": st.defense, "hp": st.hp,
             "bao": f"{st.bao:.0%}" if st.bao else "",
             "set_lines": list(st.set_lines),
+            "equips": equips,
+            "footer": "状态面板",
         }
         lg = doc.ext.get("linggen")
         data["linggen"] = linggen.describe(lg) if isinstance(lg, dict) else ""
         lines = [
             f"--- 道友 {data['name']} 的仙途 ---",
-            f"境界：{data['realm']}｜炼体：{data['physique']}",
+            f"境界：{data['realm']}｜炼体：{data['physique']}"
+            + (f"｜称号：{data['title']}" if data["title"] else ""),
+            f"战力：{data['power']}",
             f"修为：{data['exp']}" + (f" / {data['req']}（下一境 {data['next']}）" if nxt else "（已臻化境）"),
-            f"气血：{hp_cur} / {hp_max}",
+            f"气血：{hp_cur} / {hp_max}｜血气：{data['xueqi']:,}",
             f"灵石：{doc.stones}",
             f"攻击 {st.atk} · 防御 {st.defense} · 血量 {st.hp}"
             + (f" · 暴击 {st.bao:.0%}" if st.bao else ""),
         ]
         if data["linggen"]:
             lines.append(f"灵根：{data['linggen']}")
+        if equips:
+            lines.append("装备：" + "、".join(f"[{e['slot']}]{e['name']}{e['enh']}" for e in equips))
         state_note = ""
         if doc.state == "闭关中":
             cap = int(self._val("CULTIVATE_MAX_MINUTES", 7200))

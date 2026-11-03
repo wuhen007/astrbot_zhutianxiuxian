@@ -1,24 +1,107 @@
 {% extends "base.html" %}
 {% block body %}
-<div class="row"><span class="k">道友</span><span class="v">{{ name }}</span></div>
-<div class="row"><span class="k">境界</span><span class="v gold">{{ realm }}</span></div>
-<div class="row"><span class="k">炼体</span><span class="v gold">{{ physique }}</span></div>
+<style>
+  .head-card { display: flex; align-items: center; gap: 12px; padding: 4px 0 12px; }
+  .avatar { width: 62px; height: 62px; border-radius: 50%; flex: none;
+    background: radial-gradient(circle at 35% 30%, #2c3648, #151b26 75%);
+    border: 2px solid rgba(212, 175, 55, .55);
+    box-shadow: 0 0 0 3px rgba(212, 175, 55, .12), 0 0 14px rgba(212, 175, 55, .25);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 26px; font-weight: 800; color: #f0d78c; }
+  .who { min-width: 0; flex: 1; }
+  .who .dao { font-size: 17px; font-weight: 800; color: #e8edf4; letter-spacing: 1px; }
+  .who .uid { font-size: 10px; color: #55637a; margin-top: 2px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chips { margin-top: 5px; display: flex; flex-wrap: wrap; gap: 4px; }
+  .chip2 { font-size: 10.5px; padding: 2px 8px; border-radius: 7px;
+    background: rgba(212, 175, 55, .1); border: 1px solid rgba(212, 175, 55, .3); color: #e8d9a0; }
+  .chip2.cyan { background: rgba(111, 211, 199, .08); border-color: rgba(111, 211, 199, .3); color: #9adfd6; }
+  .badges { display: flex; gap: 8px; margin: 2px 0 10px; }
+  .badge { flex: 1; border-radius: 10px; padding: 8px 6px; text-align: center; min-width: 0;
+    background: linear-gradient(160deg, rgba(212, 175, 55, .16), rgba(212, 175, 55, .05));
+    border: 1px solid rgba(212, 175, 55, .4); }
+  .badge .bl { font-size: 10px; color: #b9a25e; letter-spacing: 2px; }
+  .badge .bv { font-size: 12.5px; font-weight: 800; color: #f0d78c; margin-top: 3px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .badge.cy { background: linear-gradient(160deg, rgba(111, 211, 199, .14), rgba(111, 211, 199, .04));
+    border-color: rgba(111, 211, 199, .4); }
+  .badge.cy .bv { color: #9adfd6; }
+  .res { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin-bottom: 4px; }
+  .res .row { padding: 5px 2px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 10px; }
+  .cell { background: rgba(0,0,0,.22); border: 1px solid rgba(122,138,160,.14);
+    border-radius: 8px; padding: 7px 9px; }
+  .cell .k { font-size: 10px; color: #7a8aa0; }
+  .cell .v { font-size: 13px; font-weight: 700; color: #e8edf4; margin-top: 2px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cell .v.gold { color: #f0d78c; }
+  .ecards { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; }
+  .ecard { position: relative; background: rgba(0,0,0,.22); border: 1px solid rgba(212,175,55,.22);
+    border-radius: 9px; padding: 8px 9px; min-width: 0; }
+  .ecard .eslot { position: absolute; top: 6px; right: 8px; font-size: 9.5px; color: #6a7a92; }
+  .ecard .ename { font-size: 12.5px; font-weight: 700; color: #e8edf4;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 34px; }
+  .ecard .emeta { font-size: 10px; color: #9adfd6; margin-top: 3px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ecard .eenh { color: #f0d78c; font-weight: 800; }
+  .linggen { font-size: 11.5px; color: #c3cdd9; line-height: 1.65;
+    background: rgba(0,0,0,.18); border-radius: 8px; padding: 7px 9px; margin-top: 4px; }
+</style>
+<div class="head-card">
+  <div class="avatar">{{ name[:1] }}</div>
+  <div class="who">
+    <div class="dao">道号 · {{ name }}</div>
+    <div class="uid">UID {{ uid }}</div>
+    <div class="chips">
+      {% if title %}<span class="chip2">称号 · {{ title }}</span>{% endif %}
+      {% if linggen %}<span class="chip2 cyan">灵根加成</span>{% endif %}
+    </div>
+  </div>
+</div>
+<div class="badges">
+  <div class="badge"><div class="bl">战力</div><div class="bv">{{ power }}</div></div>
+  <div class="badge"><div class="bl">练气境界</div><div class="bv">{{ realm }}</div></div>
+  <div class="badge cy"><div class="bl">炼体境界</div><div class="bv">{{ physique }}</div></div>
+</div>
+<div class="res">
+  <div class="row"><span class="k">气血</span><span class="v">{{ hp_cur }} / {{ hp_max }}</span></div>
+  <div class="row"><span class="k">血气</span><span class="v">{{ xueqi }}</span></div>
+  <div class="row"><span class="k">灵石</span><span class="v gold">{{ stones }}</span></div>
+  <div class="row"><span class="k">暴击</span><span class="v warn">{{ bao if bao else "—" }}</span></div>
+</div>
 <div class="row"><span class="k">修为</span><span class="v">{{ exp }}{% if next %} <span class="cyan">/ {{ req }}（下一境 {{ next }}）</span>{% endif %}</span></div>
 {% if progress is defined %}<div class="bar gold"><div style="width: {{ progress }}%"></div></div>{% endif %}
-<div class="row"><span class="k">气血</span><span class="v">{{ hp_cur }} / {{ hp_max }}</span></div>
-<div class="row"><span class="k">灵石</span><span class="v gold">{{ stones }}</span></div>
-{% if linggen %}<div class="row"><span class="k">灵根</span><span class="v gold">{{ linggen }}</span></div>{% endif %}
+
 <div class="section">
-  <div class="head">三维属性</div>
-  <div class="row"><span class="k">攻击</span><span class="v">{{ atk }}</span></div>
-  <div class="row"><span class="k">防御</span><span class="v">{{ defense }}</span></div>
-  <div class="row"><span class="k">血量</span><span class="v">{{ hp }}</span></div>
-  {% if bao %}<div class="row"><span class="k">暴击</span><span class="v warn">{{ bao }}</span></div>{% endif %}
+  <div class="head">基础信息</div>
+  <div class="grid2">
+    <div class="cell"><div class="k">攻击</div><div class="v gold">{{ atk }}</div></div>
+    <div class="cell"><div class="k">防御</div><div class="v gold">{{ defense }}</div></div>
+    <div class="cell"><div class="k">血量</div><div class="v gold">{{ hp }}</div></div>
+    <div class="cell"><div class="k">灵石</div><div class="v">{{ stones }}</div></div>
+  </div>
+  {% if linggen %}<div class="linggen">灵根：{{ linggen }}</div>{% endif %}
 </div>
+
 {% if state_note %}
 <div class="section"><div class="head">当前状态</div><div class="chip plain">{{ state_note }}</div></div>
 {% endif %}
-{% if set_lines %}
-<div class="section"><div class="head">套装共鸣</div>{% for s in set_lines %}<div class="chip">{{ s }}</div>{% endfor %}</div>
-{% endif %}
+
+<div class="section">
+  <div class="head">装备信息</div>
+  {% if equips %}
+  <div class="ecards">
+    {% for e in equips %}
+    <div class="ecard">
+      <div class="eslot">{{ e.slot }}</div>
+      <div class="ename">{{ e.name }}{% if e.enh %} <span class="eenh">{{ e.enh }}</span>{% endif %}</div>
+      <div class="emeta">{{ e.meta }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}<div style="font-size:11px;color:#6a7a92;">尚未穿戴装备（#装备 物品名）</div>{% endif %}
+  {% if set_lines %}
+  <div style="margin-top:7px;">{% for s2 in set_lines %}<span class="chip">{{ s2 }}</span> {% endfor %}</div>
+  {% endif %}
+</div>
 {% endblock %}
