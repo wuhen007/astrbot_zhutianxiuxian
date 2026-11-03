@@ -99,17 +99,26 @@ def aggregate(
     item_lookup: Callable[[str], Mapping[str, Any] | None],
     enhance: Mapping[str, int] | None = None,
     imperial: set[str] | None = None,
+    physique_table: list[dict] | None = None,
 ) -> Stats:
-    """基础属性（境界表）+ 已装备加成（× 强化乘数；认主帝兵再 ×2）→ 总属性。"""
+    """基础属性（练气 + 炼体双轨，对齐原版四体系求和；秘境/仙古/花粉未开为 0）
+    + 已装备加成（× 强化乘数；认主帝兵再 ×2）→ 总属性。"""
     entry = realm_entry(doc, level_table)
     base_atk = float(entry.get("基础攻击", 0) or 0)
     base_def = float(entry.get("基础防御", 0) or 0)
     base_hp = float(entry.get("基础血量", 0) or 0)
+    bao = float(entry.get("基础暴击", 0) or 0)   # 原版：暴击率 = 练气 + 炼体 + 命格
+    if physique_table:
+        # 原版：四体系基础 = 练气 + 炼体 + 秘境 + 仙古 + 花粉×倍率；本移植后三轨未开放
+        prow = physique_table[max(0, min(int(getattr(doc, "physique_index", 0) or 0), len(physique_table) - 1))]
+        base_atk += float(prow.get("基础攻击", 0) or 0)
+        base_def += float(prow.get("基础防御", 0) or 0)
+        base_hp += float(prow.get("基础血量", 0) or 0)
+        bao += float(prow.get("基础暴击", 0) or 0)
 
     enhance = enhance or {}
     flat = {"atk": 0.0, "def": 0.0, "hp": 0.0}
     ratio = {"atk": 0.0, "def": 0.0, "hp": 0.0}
-    bao = 0.0
     for slot, name in (doc.ext.get("equipment") or {}).items():
         item = item_lookup(name)
         if not item:

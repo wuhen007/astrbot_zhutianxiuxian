@@ -17,6 +17,7 @@ class PlayerDoc(BaseModel):
     name: str = ""
     realm_table: str = DEFAULT_REALM_TABLE
     realm_index: int = 0
+    physique_index: int = 0   # 炼体轨（0-based，对齐原版 Physique_id-1，表：Level/炼体境界）
     exp: int = 0
     stones: int = 0
     state: str = "空闲"

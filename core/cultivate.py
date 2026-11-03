@@ -205,3 +205,75 @@ def gate_state(doc: PlayerDoc, allowed: set[str]) -> str | None:
     if doc.state == "空闲" or doc.state in allowed:
         return None
     return f"道友正在「{doc.state}」中，无法分心他顾。"
+
+# ---------------------------------------------------------------- 炼体轨（W0 双轨）
+
+BODY_COST_SCALE = 0.001   # shortcut: 原版炼体 exp 量级 300 亿，按全局缩放约定 ÷1000，见《数值缩放对照表》
+
+
+def physique_entry(doc: PlayerDoc, table: list[dict]) -> dict:
+    """当前炼体境界行（physique_index 0-based，越界钳到最高）。"""
+    idx = max(0, min(int(getattr(doc, "physique_index", 0) or 0), len(table) - 1))
+    return table[idx]
+
+
+def body_breakthrough(
+    doc: PlayerDoc,
+    table: list[dict],
+    xueqi: float,
+    rng: random.Random,
+    success_bonus: float = 0.0,
+    cost_scale: float = BODY_COST_SCALE,
+    luck: bool = False,
+) -> tuple[bool, str, int]:
+    """炼体突破（原版 Level.js 炼体支线直译，量级按 cost_scale 缩放）。
+
+    - 消耗血气 = 当前境界行 exp × cost_scale（向上取整）
+    - 成功率 = max(1%, 1 - (境界+1)/60) + success_bonus；luck 把失败部分减半
+    - 成功：境界 +1，扣全部消耗；失败：按 40%/20%/10%/0% 分档扣血气
+    返回 (是否成功, 文案, 应扣血气)。境界自增由本函数完成，扣费由调用方执行。
+    """
+    idx = int(getattr(doc, "physique_index", 0) or 0)
+    if idx >= len(table) - 1:
+        return False, f"肉身已至【{table[-1]['level']}】，天地再无进境之路。", 0
+    row, nxt = table[idx], table[idx + 1]
+    cost = int(float(row.get("exp", 0) or 0) * cost_scale + 0.999)
+    if xueqi < cost:
+        return False, f"突破【{nxt['level']}】需血气 {cost:,}（当前 {int(xueqi):,}）。", 0
+    prob = max(0.01, 1 - (idx + 1) / 60) + max(0.0, float(success_bonus or 0))
+    if luck:
+        prob += (1 - prob) * 0.5
+    prob = min(0.99, prob)
+    if rng.random() < prob:
+        doc.physique_index = idx + 1
+        return True, (f"炼体突破成功，肉身升华！\n"
+                      f"【{row['level']}】→【{nxt['level']}】｜血气 -{cost:,}"), cost
+    roll = rng.random()
+    if roll > 0.9:
+        lost = int(cost * 0.4)
+    elif roll > 0.8:
+        lost = int(cost * 0.2)
+    elif roll > 0.7:
+        lost = int(cost * 0.1)
+    else:
+        lost = 0
+    return False, ("炼体突破失败！" + (f"气血逆冲，损失 {lost:,} 血气。" if lost else "")), lost
+
+
+def physique_text(doc: PlayerDoc, table: list[dict]) -> str:
+    row = physique_entry(doc, table)
+    nxt = table[int(doc.physique_index) + 1] if int(doc.physique_index) < len(table) - 1 else None
+    cost = int(float(row.get("exp", 0) or 0) * BODY_COST_SCALE + 0.999)
+    lines = [
+        "--- 炼体 ---",
+        f"境界：{row['level']}（第 {int(doc.physique_index) + 1} 重）",
+        f"肉身：攻 {int(row.get('基础攻击', 0)):,}｜防 {int(row.get('基础防御', 0)):,}"
+        f"｜血 {int(row.get('基础血量', 0)):,}｜暴 {float(row.get('基础暴击', 0)):.0%}",
+    ]
+    if nxt:
+        lines.append(f"下境：{nxt['level']}｜突破耗血气 {cost:,}"
+                     f"｜成功率 ≥{max(1, int((1 - (int(doc.physique_index) + 1) / 60) * 100))}%")
+    else:
+        lines.append("已至炼体顶点。")
+    lines.append(f"突破：#炼体突破（原版语义：血气支付，失败气血逆冲）")
+    return "\n".join(lines)

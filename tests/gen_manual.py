@@ -29,7 +29,8 @@ def main() -> int:
 
     # 分组归属：按 handler 名与帮助分组的近似映射（人工维护组标签）
     GROUPS = [
-        ("基础修炼", ("handle_start", "handle_status", "handle_sign", "handle_closed", "handle_open", "handle_break")),
+        ("基础修炼", ("handle_start", "handle_status", "handle_sign", "handle_closed", "handle_open", "handle_break",
+                   "handle_body_break", "handle_body_my")),
         ("每日任务", ("handle_task_get", "handle_task_my", "handle_task_submit", "handle_task_claim")),
         ("灵根天资", ("handle_linggen", "handle_linggen_my", "handle_yaoxiao")),
         ("物品装备", ("handle_bag", "handle_shop", "handle_buy", "handle_sell", "handle_use", "handle_equip",

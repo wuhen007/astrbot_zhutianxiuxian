@@ -2008,6 +2008,52 @@ async def main():
     await osst.save_other_shore_world(conn, await osst.ensure_other_shore_world(conn, "canglan"))
     print("other_shore world ok")
 
+    # 16q. 双轨境界：炼体突破 + 属性聚合叠加（原版四体系求和，量级 ÷1000）
+    body_table = store.table("Level/炼体境界")
+    assert len(body_table) == 63 and body_table[0]["level"] == "莽夫"
+    bd = PlayerDoc(uid="body", name="肉身", realm_index=10, exp=0)
+    assert cultivate.physique_entry(bd, body_table)["level"] == "莽夫"
+
+    # 血气不足拒绝
+    ok, msg, cost = cultivate.body_breakthrough(bd, body_table, 0, _random.Random(1))
+    assert not ok and "血气" in msg and cost == 0, msg
+    # 成功：莽夫 exp=500 → 消耗 1（÷1000 进位），概率 (1-1/60)≈98%
+    xq = 10_000.0
+    ok, msg, cost = cultivate.body_breakthrough(bd, body_table, xq, _random.Random(0))
+    assert ok and bd.physique_index == 1 and cost == 1, (msg, cost)
+    ok, msg, cost = cultivate.body_breakthrough(bd, body_table, xq - cost, _random.Random(0))
+    assert ok and bd.physique_index == 2, msg
+    # 失败分档：构造必败 rng
+    class _AlwaysFail(_random.Random):
+        def random(self):
+            return 0.999
+
+    bd.physique_index = 20
+    fail_cost = int(body_table[20]["exp"] * cultivate.BODY_COST_SCALE + 0.999)
+    ok, msg, lost = cultivate.body_breakthrough(
+        bd, body_table, 10 ** 9, _AlwaysFail(1)
+    )
+    assert not ok and bd.physique_index == 20 and lost == int(fail_cost * 0.4), (msg, lost, fail_cost)
+    # 最高境
+    bd.physique_index = 62
+    ok, msg, cost = cultivate.body_breakthrough(bd, body_table, 10 ** 9, _random.Random(1))
+    assert not ok and "进境" in msg and cost == 0
+    assert "炼体" in cultivate.physique_text(bd, body_table)
+
+    # 聚合：双轨叠加 + 暴击 = 练气 + 炼体
+    duo = PlayerDoc(uid="duo", name="双轨", realm_index=3, physique_index=2)
+    row_q = store.table("Level/练气境界")[3]
+    row_t = body_table[2]
+    st_d = equip_mod.aggregate(duo, store.table("Level/练气境界"), lookup.get,
+                               physique_table=body_table)
+    assert st_d.atk == row_q["基础攻击"] + row_t["基础攻击"], (st_d, row_q, row_t)
+    assert st_d.hp == row_q["基础血量"] + row_t["基础血量"]
+    assert abs(st_d.bao - (float(row_q.get("基础暴击", 0)) + float(row_t.get("基础暴击", 0)))) < 1e-9, st_d.bao
+    # 单轨（不传 physique_table）行为不变
+    st_s = equip_mod.aggregate(duo, store.table("Level/练气境界"), lookup.get)
+    assert st_s.atk == row_q["基础攻击"]
+    print("body dual ok")
+
     # 17. 宗门纯函数 + 存取
     from core import sect as sect_mod  # noqa: E402
 

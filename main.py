@@ -39,6 +39,8 @@ CMD_SIGN = "#修仙签到"
 CMD_CLOSED = "#闭关"
 CMD_OPEN = "#出关"
 CMD_BREAK = "#突破"
+CMD_BODY_BREAK = "#炼体突破"
+CMD_BODY_MY = "#我的炼体"
 CMD_BAG = "#我的纳戒"
 CMD_BAG_ALIAS = "#纳戒"
 CMD_SHOP = "#商店"
@@ -586,6 +588,7 @@ class ZhutianPlugin(Star):
         st = equipment.aggregate(
             doc, self.content.table(doc.realm_table), lookup,
             doc.ext.get("enh"), set(doc.ext.get("imperial") or []),
+            physique_table=self.content.table("Level/炼体境界"),
         )
         # 魔头禁术：魔功 + 魂奴 三维加成（乘法叠加）
         ev = motou.state_of(doc)
@@ -686,6 +689,8 @@ class ZhutianPlugin(Star):
                 (f"{CMD_CLOSED} 120分钟", "闭关修炼（时长可省略）"),
                 (CMD_OPEN, "出关结算（×灵根效率）"),
                 (CMD_BREAK, "境界突破"),
+                (CMD_BODY_BREAK, "炼体突破（血气支付，失败气血逆冲）"),
+                (CMD_BODY_MY, "炼体境界与肉身属性"),
             ]},
             {"title": "灵根天资", "lines": [
                 (CMD_LINGGEN, "查看灵根（/我的灵根 同效）"),
@@ -1372,6 +1377,39 @@ class ZhutianPlugin(Star):
         if ok and d.realm_index != doc.realm_index or ok and d.exp != doc.exp:
             await self.db.save_player(d.model_dump())
         yield event.plain_result(msg)
+    @filter.command(CMD_BODY_BREAK, "炼体突破")
+    async def handle_body_break(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        import random as _random
+        xueqi = float(doc.ext.get("xueqi", 0) or 0)
+        ok, msg, cost = cultivate.body_breakthrough(
+            doc, self.content.table("Level/炼体境界"), xueqi,
+            _random.Random(f"{doc.uid}:body:{doc.physique_index}:{int(time.time())}"),
+        )
+        if cost:
+            doc.ext["xueqi"] = max(0.0, xueqi - cost)
+        if cost or ok:
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_BODY_MY, "我的炼体")
+    async def handle_body_my(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(
+            event, cultivate.physique_text(doc, self.content.table("Level/炼体境界")), "我的炼体"
+        ):
+            yield r
+
 
     # ---- 装备 / 切磋 ----
 
