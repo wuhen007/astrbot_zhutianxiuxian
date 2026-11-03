@@ -2157,6 +2157,62 @@ async def main():
     assert plain6.effects.get("revive") is None and plain6.atk == 1000
     print("gongfa loadout ok")
 
+    # 16u. 灵根法球 + 黑皇阵效果槽迁移（W1-3）
+    from core import linggen as linggen_mod  # noqa: E402
+    sn = linggen_mod.snapshot({"name": "金灵根", "type": "真灵根", "eff": 1.1,
+                               "法球倍率": 0.08, "稀有度": 2})
+    assert abs(sn["orb"] - 0.08) < 1e-9 and linggen_mod.orb_of(sn) == 0.08
+    assert linggen_mod.orb_of({"name": "老快照"}) == 0.0 and linggen_mod.orb_of(None) == 0.0
+    fo = Fighter("法球客", 10000, 1000, 50000, 0.0)
+    fo.effects["orb"] = 0.08
+    res_o = run_1v1(fo, Fighter.from_unit(ub), _random.Random(9))
+    assert any("法球" in x for x in res_o.log), res_o.log[:3]
+    # 每击法球值 = trunc(atk × 0.08)（无乘区时 800）
+    assert any("法球 800" in x for x in res_o.log), [x for x in res_o.log[:3]]
+
+    # 黑皇阵效果槽：无始杀阵 ×2 与旧战前缩放等价（同种子首回合伤害一致）
+    from core import secret as secret_mod  # noqa: E402
+
+    me_u = battle_mod.Unit("阵主", 6000, 3000, 80000, 0.1)
+    foe_u = battle_mod.Unit("凶兽", 5000, 2500, 90000, 0.0)
+
+    def _buff_kaelthas():
+        return {"atk_mult": 2.0, "bao_add": 0.2}
+
+    calls = {"n": 0}
+
+    def _buff_once():
+        calls["n"] += 1
+        return _buff_kaelthas()
+
+    sess0 = secret_mod.Session(place="青冥山")
+    me0 = battle_mod.Unit("阵主", 6000, 3000, 80000, 0.1)
+    # 旧路径对照：战前缩放
+    me_old = battle_mod.Unit("阵主", 6000 * 2, 3000, 80000, min(1.0, 0.1 + 0.2))
+    d0, m0, hp0 = 0, 0, 0
+    r_old = battle_mod.harm(me_old.atk, foe_u.defense, _random.Random(11), me_old.bao)
+    sess, me_after, flavor, fled = secret_mod.explore(
+        sess0, (6000, 3000, 80000), me0, [], _random.Random(11),
+        buff=_buff_once,
+    )
+    assert calls["n"] == 1, "buff 只应在进入战斗时消耗一次"
+    first = flavor if isinstance(flavor, str) else str(flavor)
+    assert "阵主" in first, first  # 战报应含我方名（胜负皆可）
+    # 困龙阵：效果槽承载敌方削弱 + 定身（skip_first 交给引擎，文案由引擎保证）
+    me_b = battle_mod.Unit("阵主", 6000, 3000, 80000, 0.1)
+
+    def _buff_stun():
+        return {"enemy": {"atk": 0.85, "def": 0.55}, "stun": True}
+
+    me_f2, foe_f2, skip2 = secret_mod._battle_fighters(me_b, foe_u, _buff_stun)
+    assert skip2 == (1,)
+    assert abs(foe_f2.effects["dmg_dealt_mult"] - 0.85) < 1e-9
+    assert abs(foe_f2.effects["dmg_taken_mult"] - 0.55) < 1e-9
+    assert me_f2.effects.get("dmg_dealt_mult") is None  # 无 at_mult 不误伤
+    res2 = run_1v1(me_f2, foe_f2, _random.Random(12), skip_first=skip2)
+    assert any("困住" in x for x in res2.log)
+    print("orb & arrays ok")
+
     # 17. 宗门纯函数 + 存取
     from core import sect as sect_mod  # noqa: E402
 

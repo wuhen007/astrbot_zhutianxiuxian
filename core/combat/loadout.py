@@ -44,9 +44,14 @@ def build_fighter(
     doc: Any, name: str, atk: int, defense: int, hp: int, bao: float,
     item_lookup: Mapping[str, Any],
 ) -> Fighter:
-    """从玩家文档构建带功法的战斗单位。"""
+    """从玩家文档构建带功法与灵根法球的战斗单位。"""
+    from .. import linggen
+
     f = Fighter(name=name, atk=int(atk), defense=int(defense), hp=int(hp),
                 hp_max=int(hp), bao=float(bao or 0.0))
+    orb = linggen.orb_of(getattr(doc, "ext", {}).get("linggen"))
+    if orb > 0:
+        f.effects["orb"] = orb
     battle_skills = learned_battle_skills(doc, item_lookup)
     if battle_skills:
         f = apply_start_bonuses(f, battle_skills)

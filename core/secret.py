@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .battle import spar_full, Unit
+from .combat import run_1v1
 
 # 秘境地点：名称 → (境界门槛 realm_index, 地点系数, 描述)
 PLACES: dict[str, tuple[int, float, str]] = {
@@ -106,27 +107,28 @@ def roll_drop(
     return rng.choice(pool) if pool else None
 
 
-def _scale_enemy(monster: Unit, mods: Mapping | None) -> None:
-    """黑皇阵法对敌方的削弱（原地修改）。"""
-    if not mods:
-        return
-    atk_scale = float(mods.get("atk", 1) or 1)
-    def_scale = float(mods.get("def", 1) or 1)
-    monster.atk = max(1, int(monster.atk * atk_scale))
-    monster.defense = max(0, int(monster.defense * def_scale))
+def _battle_fighters(me: Unit, monster: Unit, buff: Any):
+    """阵法回调 → Fighter 对（W1-3：阵法乘区/定身走引擎效果槽，不再战前改值）。
 
+    返回 (me_f, foe_f, skip_first)；buff 只在真正进入战斗时消耗一次。
+    """
+    from .combat import Fighter
 
-def _battle_buff(me: Unit, monster: Unit, buff: Any) -> tuple[int, ...]:
-    """战斗开始时结算阵法：返回 spar_full 的 skip_first。"""
-    if not buff:
-        return ()
-    b = buff() or {}
-    if b.get("atk_mult"):
-        me.atk = max(1, int(me.atk * float(b["atk_mult"])))
-    if b.get("bao_add"):
-        me.bao = min(1.0, float(me.bao) + float(b["bao_add"]))
-    _scale_enemy(monster, b.get("enemy"))
-    return (1,) if b.get("stun") else ()
+    me_f, foe_f = Fighter.from_unit(me), Fighter.from_unit(monster)
+    skip: tuple[int, ...] = ()
+    if buff:
+        b = buff() or {}
+        if b.get("atk_mult"):
+            me_f.effects["dmg_dealt_mult"] = float(b["atk_mult"])
+        if b.get("bao_add"):
+            me_f.bao = min(1.0, me_f.bao + float(b["bao_add"]))
+        enemy = b.get("enemy") or {}
+        if enemy:
+            foe_f.effects["dmg_dealt_mult"] = float(enemy.get("atk", 1) or 1)
+            foe_f.effects["dmg_taken_mult"] = float(enemy.get("def", 1) or 1)
+        if b.get("stun"):
+            skip = (1,)
+    return me_f, foe_f, skip
 
 
 def explore(
@@ -160,8 +162,9 @@ def explore(
             session.place, session.floor - 1, base, rng,
             elite=False, factor_override=pf * 3.0,
         )
-        skip = _battle_buff(me, monster, buff)
-        winner, log, hp_left, _ = spar_full(me, monster, rng, skip_first=skip)
+        me_f, foe_f, skip = _battle_fighters(me, monster, buff)
+        res = run_1v1(me_f, foe_f, rng, skip_first=skip)
+        winner, log, hp_left = res.winner, res.log, res.a_hp
         me.hp = max(0, hp_left)
         tail = log[-1] if log else ""
         if winner == 0:
@@ -193,8 +196,9 @@ def explore(
             session.place, session.floor - 1, base, rng,
             elite=(kind == "elite"), factor_override=pf,
         )
-        skip = _battle_buff(me, monster, buff)
-        winner, log, hp_left, _ = spar_full(me, monster, rng, skip_first=skip)
+        me_f, foe_f, skip = _battle_fighters(me, monster, buff)
+        res = run_1v1(me_f, foe_f, rng, skip_first=skip)
+        winner, log, hp_left = res.winner, res.log, res.a_hp
         me.hp = max(0, hp_left)
         tail = log[-1] if log else ""
         if winner == 0:

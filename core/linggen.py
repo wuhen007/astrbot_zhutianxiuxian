@@ -26,13 +26,28 @@ def snapshot(entry: Mapping) -> dict:
         rarity = int(entry.get("稀有度", 1) or 1)
     except (TypeError, ValueError):
         rarity = 1
+    try:
+        orb = float(entry.get("法球倍率", 0) or 0)
+    except (TypeError, ValueError):
+        orb = 0.0
     return {
         "id": entry.get("id"),
         "name": str(entry.get("name", "?")),
         "type": str(entry.get("type", "?")),
         "eff": float(entry.get("eff", 1.0) or 1.0),
+        "orb": orb,
         "rarity": rarity,
     }
+
+
+def orb_of(snap: Mapping | None) -> float:
+    """法球倍率：老快照缺字段时按 0（洗炼一次即补齐）。"""
+    if not isinstance(snap, Mapping):
+        return 0.0
+    try:
+        return max(0.0, float(snap.get("orb", 0) or 0))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def roll(entries: Sequence[Mapping], rng: random.Random) -> dict:

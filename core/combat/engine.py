@@ -111,21 +111,26 @@ def run_1v1(
             max(1, int(def_u.defense * float(def_u.eff("dmg_taken_mult", 1.0)))),
             rng, atk_u.bao,
         )
-        # 护盾先吸收
+        # 灵根法球：每击额外 trunc(攻 × 倍率)，不参与暴击放大（原版 伤害 = 暴击伤害 + 法球伤害）
+        orb = float(atk_u.eff("orb", 0.0) or 0.0)
+        orb_dmg = int(atk_u.atk * orb) if orb > 0 else 0
+        dealt = dmg + orb_dmg
+        # 护盾先吸收（法球并入总伤后一击结算）
         shield = int(def_u.eff("shield", 0) or 0)
         suffix = ""
         if shield > 0:
-            absorbed = min(shield, dmg)
+            absorbed = min(shield, dealt)
             def_u.effects["shield"] = shield - absorbed
-            dmg -= absorbed
+            dealt -= absorbed
             if absorbed:
                 suffix += f"（护盾吸收 {absorbed}）"
-        hp[j] = max(0, hp[j] - dmg)
-        line = (f"第{rnd}回合：{atk_u.name}出手，对{def_u.name}造成 {dmg} 点伤害"
+        hp[j] = max(0, hp[j] - dealt)
+        if orb_dmg > 0:
+            suffix += f"，法球 {orb_dmg}"
+        line = (f"第{rnd}回合：{atk_u.name}出手，对{def_u.name}造成 {dealt} 点伤害"
                 + ("（暴击！）" if crit else "") + suffix
                 + f"，{def_u.name}剩余 {hp[j]}")
         # 反噬 / 汲取（按实际造成的伤害；护盾吸收部分不触发）
-        dealt = dmg
         reflect = float(def_u.eff("reflect", 0.0) or 0.0)
         if reflect > 0 and dealt > 0:
             back = min(int(dealt * reflect), hp[i])
