@@ -2,6 +2,7 @@
 {% block body %}
 <div class="row"><span class="k">道友</span><span class="v">{{ name }}</span></div>
 <div class="row"><span class="k">境界</span><span class="v gold">{{ realm }}</span></div>
+<div class="row"><span class="k">炼体</span><span class="v gold">{{ physique }}</span></div>
 <div class="row"><span class="k">修为</span><span class="v">{{ exp }}{% if next %} <span class="cyan">/ {{ req }}（下一境 {{ next }}）</span>{% endif %}</span></div>
 {% if progress is defined %}<div class="bar gold"><div style="width: {{ progress }}%"></div></div>{% endif %}
 <div class="row"><span class="k">气血</span><span class="v">{{ hp_cur }} / {{ hp_max }}</span></div>

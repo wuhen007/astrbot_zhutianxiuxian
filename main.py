@@ -622,9 +622,11 @@ class ZhutianPlugin(Star):
         req = entry.get("exp", 0)
         st = self._stats(doc)
         hp_cur, hp_max = self._hp_pair(doc)
+        body_entry = cultivate.physique_entry(doc, self.content.table("Level/炼体境界"))
         data = {
             "name": doc.name or doc.uid[:8] + "…",
             "realm": entry.get("level", "未知"),
+            "physique": body_entry.get("level", ""),
             "exp": doc.exp, "req": req,
             "next": nxt["level"] if nxt else "",
             "progress": min(100.0, doc.exp / req * 100) if req else 100.0,
@@ -638,7 +640,7 @@ class ZhutianPlugin(Star):
         data["linggen"] = linggen.describe(lg) if isinstance(lg, dict) else ""
         lines = [
             f"--- 道友 {data['name']} 的仙途 ---",
-            f"境界：{data['realm']}",
+            f"境界：{data['realm']}｜炼体：{data['physique']}",
             f"修为：{data['exp']}" + (f" / {data['req']}（下一境 {data['next']}）" if nxt else "（已臻化境）"),
             f"气血：{hp_cur} / {hp_max}",
             f"灵石：{doc.stones}",
