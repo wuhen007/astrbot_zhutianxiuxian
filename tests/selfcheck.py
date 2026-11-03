@@ -2128,6 +2128,35 @@ async def main():
     cskills.clear()
     print("combat engine ok")
 
+    # 16t. 功法战斗装填（W1-2）：复活技能 + 开场乘区 + 切磋接入
+    from core.combat import loadout as loadout_mod  # noqa: E402
+
+    lookup2 = {"凰劫再生术": {"name": "凰劫再生术", "class": "功法", "复活技能": 1,
+                              "恢复比例": 0.7, "pr": 1, "msg2": "涅槃真火焚身！",
+                              "攻击加成": 0.5, "防御加成": 0.5, "生命加成": 1.0}}
+    gd = PlayerDoc(uid="gp", name="凤主", realm_index=30)
+    gd.ext["gongfa"] = ["凰劫再生术", "不存在的功法"]
+    got = loadout_mod.learned_battle_skills(gd, lookup2)
+    assert len(got) == 1 and got[0]["name"] == "凰劫再生术", got
+    fa6 = loadout_mod.build_fighter(gd, "凤主", 10000, 10000, 100000, 0.2, lookup2)
+    assert fa6.atk == 15000 and fa6.defense == 15000 and fa6.hp_max == 200000 and fa6.hp == 200000
+    assert fa6.effects["revive"]["ratio"] == 0.7 and fa6.effects["revive"]["pr"] == 1.0
+    # 致死 → 复活 70%，再致死 → 判负（一场一次）
+    killer = Fighter("判官", 10 ** 9, 10, 999999999, 0.0)
+    res6 = run_1v1(fa6, killer, _random.Random(1))
+    assert any("凰劫再生术" in x and "复活" in x for x in res6.log), res6.log[:4]
+    assert res6.winner == 1, "复活一次后仍应落败"
+    assert sum("凰劫再生术" in x for x in res6.log) == 1
+    # pr=0 永不复活
+    fa7 = loadout_mod.build_fighter(gd, "凤主", 10000, 10000, 100000, 0.0, lookup2)
+    fa7.effects["revive"]["pr"] = 0.0
+    res7 = run_1v1(fa7, Fighter("判官", 10 ** 9, 10, 999999999, 0.0), _random.Random(2))
+    assert res7.winner == 1 and not any("复活" in x for x in res7.log)
+    # 无功法玩家不受影响
+    plain6 = loadout_mod.build_fighter(PlayerDoc(uid="np"), "素人", 1000, 1000, 1000, 0.0, lookup2)
+    assert plain6.effects.get("revive") is None and plain6.atk == 1000
+    print("gongfa loadout ok")
+
     # 17. 宗门纯函数 + 存取
     from core import sect as sect_mod  # noqa: E402
 

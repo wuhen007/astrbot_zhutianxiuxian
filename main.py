@@ -1008,7 +1008,7 @@ class ZhutianPlugin(Star):
                 (f"{CMD_GEM_UNSET} 部位 序号", "拆除宝石"),
             ]},
             {"title": "战斗秘境", "lines": [
-                (f"{CMD_SPAR} @道友", "切磋（60 秒冷却）"),
+                (f"{CMD_SPAR} @道友", "切磋（60 秒冷却，功法加成/复活技生效）"),
                 (CMD_BOSS, "世界 Boss 状态与贡献榜"),
                 (CMD_BOSS_FIGHT, "讨伐妖王（气血>10%，按贡献分奖池）"),
                 (CMD_HEAL, "花灵石疗伤回满"),
@@ -1591,12 +1591,19 @@ class ZhutianPlugin(Star):
         name_b = foe.name or foe.uid[:8] + "…"
 
         import random as _random
+        from .core.combat.loadout import build_fighter
+        from .core.combat import run_1v1
         rng = _random.Random(f"{doc.uid}:{foe.uid}:{now}")
-        winner, log = battle.spar(
-            battle.Unit(name_a, sa.atk, sa.defense, sa.hp, sa.bao),
-            battle.Unit(name_b, sb.atk, sb.defense, sb.hp, sb.bao),
-            rng,
-        )
+        lookup = self.item_index.get
+        fa = build_fighter(doc, name_a, sa.atk, sa.defense, sa.hp, sa.bao, lookup)
+        fb = build_fighter(foe, name_b, sb.atk, sb.defense, sb.hp, sb.bao, lookup)
+        res = run_1v1(fa, fb, rng)
+        winner, log = res.winner, res.log
+        # 面板头部展示开场乘区后的实际数值
+        sa = equipment.Stats(atk=fa.atk, defense=fa.defense, hp=fa.hp_max, bao=sa.bao,
+                             set_lines=sa.set_lines)
+        sb = equipment.Stats(atk=fb.atk, defense=fb.defense, hp=fb.hp_max, bao=sb.bao,
+                             set_lines=sb.set_lines)
         doc.ext["spar_ts"] = now
         await self.db.save_player(doc.model_dump())
 

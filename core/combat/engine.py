@@ -59,6 +59,23 @@ class BattleResult:
         return self.winner, self.log, self.a_hp, self.b_hp
 
 
+def _try_revive(f: Fighter, hp: list[int], idx: int, log: list[str], rng: random.Random) -> bool:
+    """致死一击的复活判定（原版 performRevival：掷 pr，恢复 上限×比例，一场一次）。"""
+    rev = f.eff("revive")
+    if not isinstance(rev, dict) or rev.get("used"):
+        return False
+    raw_pr = rev.get("pr")
+    pr = 1.0 if raw_pr is None else min(1.0, max(0.0, float(raw_pr)))   # pr=0 合法：永不触发
+    if rng.random() >= pr:
+        return False
+    rev["used"] = True
+    hp[idx] = max(1, int(f.hp_max * min(1.0, max(0.05, float(rev.get("ratio", 0.7) or 0.7)))))
+    msg = str(rev.get("msg") or "")
+    name = str(rev.get("name") or "复活技")
+    log.append(f"【{name}】{msg}" + (f"｜{f.name} 复活，血量 {hp[idx]}" if hp[idx] else ""))
+    return True
+
+
 def run_1v1(
     a: Fighter, b: Fighter, rng: random.Random,
     max_rounds: int = DEFAULT_MAX_ROUNDS, skip_first: tuple[int, ...] = (),
@@ -123,9 +140,13 @@ def run_1v1(
                 line += f"，汲取 {heal}"
         log.append(line)
         if hp[j] <= 0:
+            if _try_revive(def_u, hp, j, log, rng):
+                continue
             winner = i
             break
         if hp[i] <= 0:      # 反噬致死
+            if _try_revive(atk_u, hp, i, log, rng):
+                continue
             winner = j
             break
 
