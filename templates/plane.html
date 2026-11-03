@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block body %}
+<style>
+  .mapwrap { position: relative; width: 100%; aspect-ratio: 1 / 1; margin: 8px 0 10px;
+    background: radial-gradient(circle at 30% 18%, #1b2432, #0c1118 72%);
+    border: 1px solid rgba(212, 175, 55, .22); border-radius: 10px; overflow: hidden; }
+  .grid { position: absolute; inset: 0;
+    background-image: linear-gradient(rgba(122,138,160,.08) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(122,138,160,.08) 1px, transparent 1px);
+    background-size: 10% 10%; }
+  .rg { position: absolute; border: 1px dashed rgba(212,175,55,.36); border-radius: 4px;
+    background: rgba(212,175,55,.028); overflow: hidden; }
+  .rg .lb { position: absolute; top: 1px; left: 3px; font-size: 9px; color: #c9b273;
+    letter-spacing: .4px; white-space: nowrap; }
+  .rg .lb.deep { top: auto; left: auto; bottom: 1px; right: 3px; font-size: 8.5px; color: #9c8a5c; }
+  .st { position: absolute; border: 1px solid rgba(111,211,199,.3); border-radius: 4px;
+    background: rgba(111,211,199,.075); display: flex; align-items: center;
+    justify-content: center; overflow: hidden; }
+  .st .lb { font-size: 8px; color: #9adfd6; text-align: center; line-height: 1.06;
+    padding: 0; word-break: break-all; }
+  .st.unk { border-color: rgba(122,138,160,.2); background: rgba(122,138,160,.045); }
+  .st.unk .lb { color: #4f5d73; }
+  .dot { position: absolute; width: 8px; height: 8px; border-radius: 50%; background: #ff6b5e;
+    box-shadow: 0 0 0 3px rgba(255,107,94,.22), 0 0 10px rgba(255,107,94,.75);
+    transform: translate(-50%, -50%); z-index: 6; }
+  .legend { font-size: 10.5px; color: #6a7a92; display: flex; gap: 12px; margin-bottom: 8px; }
+  .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px;
+    margin-right: 4px; vertical-align: middle; }
+  .here { font-size: 11.5px; color: #8a97ab; line-height: 1.6;
+    background: rgba(0,0,0,.2); border-radius: 8px; padding: 7px 9px; margin-bottom: 8px; }
+  .here b { color: #f0d78c; font-weight: 600; }
+  .cgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; font-size: 11px; }
+  .cgrid .c { display: flex; justify-content: space-between; color: #a9b6c6; }
+  .cgrid .c .xy { color: #6fd3c7; font-family: Consolas, monospace; font-size: 10.5px; }
+  .cgrid .c.unk { color: #5a6879; }
+  .cgrid .c.unk .xy { color: #46536a; }
+  .un { font-size: 10.5px; color: #6a7a92; margin-top: 6px; }
+</style>
+<div class="row"><span class="k">位面</span><span class="v gold">{{ plane }}</span></div>
+<div class="row"><span class="k">坐标</span><span class="v">{{ sub }}</span></div>
+<div class="mapwrap">
+  <div class="grid"></div>
+  {% for r in regions %}
+  <div class="rg" style="left:{{ r.left }}%;top:{{ r.top }}%;width:{{ r.w }}%;height:{{ r.h }}%">
+    <div class="lb{% if r.depth %} deep{% endif %}">{{ r.name }}</div>
+  </div>
+  {% endfor %}
+  {% for s in sites %}
+  <div class="st{% if not s.known %} unk{% endif %}"
+       style="left:{{ s.left }}%;top:{{ s.top }}%;width:{{ s.w }}%;height:{{ s.h }}%">
+    <div class="lb">{% if s.known %}{{ s.name }}{% else %}？？{% endif %}</div>
+  </div>
+  {% endfor %}
+  {% if dot %}
+  <div class="dot" style="left:{{ dot.left }}%;top:{{ dot.top }}%"></div>
+  {% endif %}
+</div>
+<div class="legend">
+  <span><i style="background:rgba(212,175,55,.5)"></i>区域</span>
+  <span><i style="background:rgba(111,211,199,.55)"></i>已探地点</span>
+  <span><i style="background:rgba(122,138,160,.4)"></i>未探</span>
+  <span><i style="background:#ff6b5e;border-radius:50%"></i>你</span>
+</div>
+<div class="here"><b>{{ where }}</b>{% if here %} · {{ here }}{% endif %}</div>
+{% if coords or unknown_n %}
+<div class="section">
+  <div class="head">已探地点坐标</div>
+  <div class="cgrid">
+    {% for c in coords %}
+    <div class="c{% if not c.known %} unk{% endif %}">
+      <span>{% if c.known %}{{ c.name }}{% else %}？？{% endif %}</span>
+      <span class="xy">{{ c.xy }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% if unknown_n %}
+  <div class="un">尚有 {{ unknown_n }} 处地点未探明（#前往 x,y 逐步探索）</div>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

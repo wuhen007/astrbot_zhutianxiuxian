@@ -11,7 +11,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, battle, boss, catalog, cultivate, dibing, equipment, items, linggen, addict, endless, motou, npc, occupation, pet, quest, raid, secret, sect, shenjie, story_npc, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, battle, boss, catalog, cultivate, dibing, equipment, items, linggen, addict, endless, motou, npc, occupation, plane, pet, quest, raid, secret, sect, shenjie, story_npc, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -207,6 +207,15 @@ CMD_ENDLESS_SWEEP = "#扫荡无尽劫境"
 CMD_ADDICT = "#沉迷秘境"
 CMD_ADDICT_CLAIM = "#沉迷收获"
 CMD_ADDICT_CLEAR = "#清除沉迷记录"
+CMD_PLANE = "#位面"
+CMD_PLANE_MAP = "#位面地图"
+CMD_PLANE_GO = "#前往"
+CMD_PLANE_REMEMBER = "#记坐标"
+CMD_PLANE_KNOWN = "#坐标记忆"
+CMD_PLANE_CLUE = "#求购位面线索"
+CMD_PLANE_EXPLORE = "#探索位面线索"
+CMD_PLANE_TRAVEL = "#穿梭"
+CMD_PLANE_ARRIVE = "#抵达"
 CMD_DARK_OPEN = "#开启黑暗动乱"
 CMD_DARK_CLOSE = "#关闭黑暗动乱"
 CMD_DARK_STATUS = "#禁区至尊状态"
@@ -725,6 +734,17 @@ class ZhutianPlugin(Star):
                 (f"{CMD_ADDICT} 地点*次数", "沉迷秘境（1-12 次，限时挂机）"),
                 (CMD_ADDICT_CLAIM, "沉迷到点一次性结算"),
                 (CMD_ADDICT_CLEAR, "清除沉迷记录"),
+            ]},
+            {"title": "位面旅行", "lines": [
+                (CMD_PLANE, "诸天星路：当前位置/记忆坐标/11 位面航程"),
+                (f"{CMD_PLANE_MAP} [位面]", "位面方图（区域/地点/未探灰化）"),
+                (f"{CMD_PLANE_GO} x,y", "界内移动（首次抵达地点得灵石+修为）"),
+                (f"{CMD_PLANE_REMEMBER} 位面", f"记坐标（星图×1，或灵石 {plane.STAR_MAP_ALT_COST:,}）"),
+                (CMD_PLANE_KNOWN, "坐标记忆与地点探索度"),
+                (f"{CMD_PLANE_CLUE} 位面", f"求购线索（{plane.CLUE_COST:,} 灵石）"),
+                (CMD_PLANE_EXPLORE, "每日一次，概率补全未记位面坐标"),
+                (f"{CMD_PLANE_TRAVEL} 位面", "穿梭（耗修为/血气，按等级差计时）"),
+                (CMD_PLANE_ARRIVE, "抵达落位"),
             ]},
             {"title": "团本讨伐", "lines": [
                 (f"{CMD_TR_CREATE} 名字", "创建讨伐队伍（5 人，24h 有效）"),
@@ -6109,6 +6129,227 @@ class ZhutianPlugin(Star):
         d.ext.pop("addiction_history", None)
         await self.db.save_player(d.model_dump())
         yield event.plain_result(f"已清除 {len(hist)} 条沉迷记录。")
+
+    # ---- B10：凡间坐标 / 位面旅行 ----
+
+    def _plane_data(self) -> dict:
+        return self.content.table("位面坐标") or {}
+
+    def _realm_names(self) -> list[str]:
+        rows = self.content.table("Level/练气境界") or []
+        return [str(r.get("level") or "") for r in rows]
+
+    async def _plane_sync(self, doc: PlayerDoc):
+        """旅行到点则落位并存库。返回 (doc, 抵达文案)。"""
+        d, msg = plane.settle(doc, self._plane_data(), time.time())
+        if msg:
+            await self.db.save_player(d.model_dump())
+        return d, msg
+
+    @filter.command(CMD_PLANE, "诸天星路")
+    async def handle_plane(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        doc, arrived = await self._plane_sync(doc)
+        text = plane.plane_text(doc, self._plane_data(), self._realm_names(), time.time())
+        if arrived:
+            text = arrived + "\n\n" + text
+        async for r in self._smart(event, text, "诸天星路"):
+            yield r
+
+    @filter.command(CMD_PLANE_MAP, "位面地图")
+    async def handle_plane_map(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        doc, _arrived = await self._plane_sync(doc)
+        target = (name or "").strip() or plane.current(plane.state_of(doc))
+        if target not in plane.LEVELS:
+            yield event.plain_result(f"没有「{target}」这个位面。可选：{'、'.join(plane.PLANES)}")
+            return
+        data = plane.map_payload(doc, self._plane_data(), target, time.time())
+        if self.render_on:
+            png = await render.render_panel("plane", data, self.panel_dir)
+            if png:
+                yield event.image_result(str(png))
+                return
+        async for r in self._smart(
+            event, plane.map_text(doc, self._plane_data(), target), f"位面地图·{target}"
+        ):
+            yield r
+
+    @filter.command(CMD_PLANE_GO, "界内移动")
+    async def handle_plane_go(self, event: AstrMessageEvent, pos: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        raw = (pos or "").strip().replace("，", ",")
+        parts = [x.strip() for x in raw.split(",")]
+        if len(parts) != 2 or not all(x.lstrip("-").isdigit() for x in parts):
+            yield event.plain_result(f"格式：{CMD_PLANE_GO} x,y（如 {CMD_PLANE_GO} 520,180）")
+            return
+        doc, arrived = await self._plane_sync(doc)
+        ok, msg = plane.move_to(doc, self._plane_data(), int(parts[0]), int(parts[1]))
+        if not ok:
+            yield event.plain_result((arrived + "\n" if arrived else "") + msg)
+            return
+        await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, (arrived + "\n" if arrived else "") + msg, "界内移动"):
+            yield r
+
+    @filter.command(CMD_PLANE_REMEMBER, "记坐标")
+    async def handle_plane_remember(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        raw = (name or "").strip()
+        if not raw:
+            yield event.plain_result(
+                f"格式：{CMD_PLANE_REMEMBER} 位面名（星图×1，或灵石 {plane.STAR_MAP_ALT_COST:,}）"
+            )
+            return
+        if raw not in plane.LEVELS:
+            yield event.plain_result(f"没有「{raw}」这个位面。可选：{'、'.join(plane.PLANES)}")
+            return
+        st = plane.state_of(doc)
+        if raw in plane.known_of(st):
+            yield event.plain_result(f"你已记住「{raw}」的坐标。")
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        if int(inv.get("星图", 0) or 0) > 0:
+            ok, msg = plane.remember(doc, raw)
+            if not ok:
+                yield event.plain_result(msg)
+                return
+            async with self.db.transaction():
+                await self.db.save_player(doc.model_dump())
+                await self.db.remove_item(doc.uid, "星图", 1)
+            msg += "\n※ 星图 -1"
+        else:
+            if int(doc.stones) < plane.STAR_MAP_ALT_COST:
+                yield event.plain_result(
+                    f"无星图可拓印，以灵石替代需 {plane.STAR_MAP_ALT_COST:,}（当前 {int(doc.stones):,}）。"
+                )
+                return
+            ok, msg = plane.remember(doc, raw)
+            if not ok:
+                yield event.plain_result(msg)
+                return
+            doc.stones = int(doc.stones) - plane.STAR_MAP_ALT_COST
+            await self.db.save_player(doc.model_dump())
+            msg += f"\n※ 灵石 -{plane.STAR_MAP_ALT_COST:,}（无星图，以灵石代拓）"
+        async for r in self._smart(event, msg, "记坐标"):
+            yield r
+
+    @filter.command(CMD_PLANE_KNOWN, "坐标记忆")
+    async def handle_plane_known(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        doc, arrived = await self._plane_sync(doc)
+        text = plane.memory_text(doc, self._plane_data(), self._realm_names(), time.time())
+        if arrived:
+            text = arrived + "\n\n" + text
+        async for r in self._smart(event, text, "坐标记忆"):
+            yield r
+
+    @filter.command(CMD_PLANE_CLUE, "求购位面线索")
+    async def handle_plane_clue(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        raw = (name or "").strip()
+        if not raw:
+            yield event.plain_result(
+                f"格式：{CMD_PLANE_CLUE} 位面名（{plane.CLUE_COST:,} 灵石）"
+            )
+            return
+        ok, msg = plane.buy_clue(doc, raw)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, msg, "求购线索"):
+            yield r
+
+    @filter.command(CMD_PLANE_EXPLORE, "探索位面线索")
+    async def handle_plane_explore(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            yield event.plain_result("本群未开启修仙。")
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        import random as _random
+        now = time.time()
+        ok, msg = plane.explore_clue(doc, now, _random.Random(f"{doc.uid}:{now:.0f}"))
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, msg, "探索线索"):
+            yield r
+
+    @filter.command(CMD_PLANE_TRAVEL, "穿梭位面")
+    async def handle_plane_travel(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        raw = (name or "").strip()
+        if not raw:
+            yield event.plain_result(f"格式：{CMD_PLANE_TRAVEL} 位面名（如 {CMD_PLANE_TRAVEL} 仙界）")
+            return
+        doc, arrived = await self._plane_sync(doc)
+        ok, msg = plane.begin_travel(doc, raw, self._plane_data(), time.time())
+        if not ok:
+            yield event.plain_result((arrived + "\n" if arrived else "") + msg)
+            return
+        await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, (arrived + "\n" if arrived else "") + msg, "穿梭位面"):
+            yield r
+
+    @filter.command(CMD_PLANE_ARRIVE, "抵达")
+    async def handle_plane_arrive(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        tr = plane.travel_state(plane.state_of(doc), time.time())
+        if not tr:
+            yield event.plain_result(f"你不在穿梭途中（{CMD_PLANE} 查看星路）。")
+            return
+        doc, msg = await self._plane_sync(doc)
+        if not msg:
+            left = tr["left"]
+            yield event.plain_result(
+                f"星路未尽：{int(left // 60)} 分 {int(left % 60)} 秒后抵达【{tr.get('to')}】。"
+            )
+            return
+        async for r in self._smart(event, msg, "抵达"):
+            yield r
 
     @filter.command(CMD_HEAL, "灵石疗伤")
     async def handle_heal(self, event: AstrMessageEvent):

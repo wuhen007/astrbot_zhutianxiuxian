@@ -1405,6 +1405,120 @@ async def main():
     assert len(addict_mod.history_of(hdoc)) == 1
     print("addiction ok")
 
+    # 16h. 凡间坐标 / 位面旅行
+    from core import plane as plane_mod  # noqa: E402
+    from infra import render as render_mod  # noqa: E402
+
+    pdata = store.table("位面坐标")
+    plane_names = [k for k in pdata if not k.startswith("_")]
+    assert len(plane_names) == 11, plane_names
+    for pn in plane_names:
+        ids = {l["id"] for l in pdata[pn]["locations"]}
+        for loc in pdata[pn]["locations"]:
+            b = loc["bounds"]
+            assert 0 <= b["x1"] < b["x2"] <= 999 and 0 <= b["y1"] < b["y2"] <= 999, (pn, loc["name"])
+            assert not loc.get("parent") or loc["parent"] in ids, (pn, loc["name"], loc.get("parent"))
+
+    fan_sites = plane_mod.sites_of(pdata, "凡间")
+    assert len(fan_sites) == 10, len(fan_sites)
+    leaf = next(x for x in fan_sites if x.get("parent"))
+    lc = plane_mod.center(leaf)
+    chain = plane_mod.chain_at(pdata, "凡间", lc["x"], lc["y"])
+    assert chain and chain[-1]["id"] == leaf["id"] and len(chain) >= 2, chain
+    assert chain[0]["name"] == "天南", chain[0]["name"]
+
+    free = None
+    for gx in range(0, 1000, 25):
+        for gy in range(0, 1000, 25):
+            if not plane_mod.chain_at(pdata, "遮天位面", gx, gy):
+                free = (gx, gy)
+                break
+        if free:
+            break
+    assert free, "遮天位面应存在荒野坐标"
+
+    pl = PlayerDoc(uid="plane", name="星客", realm_index=46, stones=5_000_000)
+    pl.ext["xueqi"] = 5_000_000
+    pst = plane_mod.state_of(pl)
+    assert plane_mod.current(pst) == "凡间" and plane_mod.known_of(pst) == ["凡间"]
+    assert plane_mod.coord_of(pst) is None
+
+    ok, msg = plane_mod.move_to(pl, pdata, lc["x"], lc["y"])
+    assert ok and "初至" in msg and pl.stones == 5_005_000 and pl.exp == plane_mod.SITE_EXP, msg
+    ok, msg2 = plane_mod.move_to(pl, pdata, lc["x"], lc["y"])
+    assert ok and "初至" not in msg2 and pl.stones == 5_005_000, msg2
+    pst["current"] = "遮天位面"
+    ok, _msg = plane_mod.move_to(pl, pdata, free[0], free[1])
+    assert ok and "荒芜" in _msg, _msg
+    pst["current"] = "凡间"
+    ok, _msg = plane_mod.move_to(pl, pdata, 2000, 10)
+    assert not ok, "越界坐标应拒绝"
+
+    q = plane_mod.quote(pl, "仙界")
+    assert q["ok"] and q["distance"] == 1 and q["minutes"] >= 1 and q["exp"] > 0, q
+    low = PlayerDoc(uid="low", name="凡人", realm_index=0)
+    low.ext["xueqi"] = 10 ** 9
+    ok, msg = plane_mod.begin_travel(low, "仙界", pdata, 1_800_000_000)
+    assert not ok and "境界" in msg, msg
+
+    ok, msg = plane_mod.begin_travel(pl, "仙界", pdata, 1_800_000_000)
+    assert not ok and "星空坐标" in msg, msg
+
+    ok, msg = plane_mod.remember(pl, "仙界")
+    assert ok and "仙界" in plane_mod.known_of(pst), msg
+    ok, msg = plane_mod.remember(pl, "仙界")
+    assert not ok, "重复记坐标应拒绝"
+    ok, msg = plane_mod.remember(pl, "不存在的位面")
+    assert not ok
+
+    before = pl.stones
+    ok, msg = plane_mod.buy_clue(pl, "九天十地")
+    assert ok and pl.stones == before - plane_mod.CLUE_COST, msg
+    ok, msg = plane_mod.buy_clue(pl, "九天十地")
+    assert not ok, "已记坐标不应可重复求购"
+
+    now = 1_800_000_000
+    pl.exp = 50_000_000
+    exp_before, xq_before = pl.exp, pl.ext["xueqi"]
+    ok, msg = plane_mod.begin_travel(pl, "仙界", pdata, now)
+    assert ok and pl.state == "穿梭中", msg
+    tr = plane_mod.travel_state(plane_mod.state_of(pl), now)
+    assert tr and not tr["done"] and tr["to"] == "仙界"
+    assert pl.exp == exp_before - q["exp"] and pl.ext["xueqi"] == xq_before - q["xueqi"]
+    d2, msg = plane_mod.settle(pl, pdata, now + q["minutes"] * 60 + 1)
+    assert msg and "抵达" in msg and d2.state == "空闲", msg
+    assert plane_mod.current(plane_mod.state_of(d2)) == "仙界"
+    assert plane_mod.coord_of(plane_mod.state_of(d2), "仙界"), "落位后应有坐标"
+    d3, msg3 = plane_mod.settle(d2, pdata, now + 10 ** 6)
+    assert msg3 is None, "无行程时 settle 应静默"
+
+    class _R:
+        def random(self):
+            return 0.0
+
+        def choice(self, seq):
+            return seq[0]
+
+    ce = PlayerDoc(uid="clue", name="寻路人", realm_index=20)
+    cst = plane_mod.state_of(ce)
+    cst["known"] = [p for p in plane_mod.PLANES if p != "阳间"]
+    ok, msg = plane_mod.explore_clue(ce, 1_800_000_000, _R())
+    assert ok and "阳间" in plane_mod.known_of(cst), msg
+    ok, msg = plane_mod.explore_clue(ce, 1_800_000_100, _R())
+    assert not ok and "今日" in msg, msg
+
+    payload = plane_mod.map_payload(d2, pdata, "仙界", now)
+    assert payload["regions"] and payload["sites"] and payload["dot"], payload
+    assert payload["plane"] == "仙界" and len(payload["coords"]) > 0
+    text_p = plane_mod.plane_text(d2, pdata, [f"境{i}" for i in range(64)], now)
+    assert "诸天星路" in text_p and "仙界" in text_p
+    assert "坐标记忆" in plane_mod.memory_text(d2, pdata, [f"境{i}" for i in range(64)], now)
+    png_p = await render_mod.render_panel("plane", payload, tmp)
+    assert png_p and png_p.exists() and png_p.stat().st_size > 2000
+    html_p = render_mod._jinja().get_template("plane.html").render(**payload)
+    assert "仙界" in html_p and "rg" in html_p
+    print("plane ok")
+
     # 17. 宗门纯函数 + 存取
     from core import sect as sect_mod  # noqa: E402
 
