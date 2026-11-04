@@ -2386,6 +2386,79 @@ async def main():
     assert da6["xueqi"] == 500 * 31 and db6["xueqi"] == 1000 * 46 and db6["modao"] == 1
     print("pvp settle ok")
 
+    # 16y. 渡劫 / 登仙 / 功法熟练度（W2-1）
+    from core import trib as trib_mod  # noqa: E402
+
+    td = PlayerDoc(uid="tdoc", name="劫主", realm_index=40, stones=0)
+    td.ext["linggen"] = {"name": "圣体", "type": "圣体", "eff": 4, "orb": 0.5}
+    td.ext["hp"] = 999_999_999
+    td.ext["hp_max"] = 1_000_000_000
+    td.exp = 25_000_000
+    tstats = type("S", (), {"atk": 7_000_000, "defense": 5_000_000, "hp": 1_000_000_000})()
+    # 门槛：非 40 境拒绝
+    other = PlayerDoc(uid="o40", name="地仙", realm_index=41)
+    assert trib_mod.trib_check(other, store.table("Level/练气境界"), tstats, 999, 1000) is not None
+    # 未开灵根拒绝
+    nol = PlayerDoc(uid="nol", name="无根", realm_index=40)
+    nol.exp = 25_000_000
+    assert trib_mod.trib_check(nol, store.table("Level/练气境界"), tstats, 999, 1000) is not None
+    # 血量不足拒绝
+    td.ext["hp"] = 100
+    m = trib_mod.trib_check(td, store.table("Level/练气境界"), tstats, 100, 1_000_000_000)
+    assert m and "血量" in m, m
+    td.ext["hp"] = 999_999_999
+    # 雷抗与劫数
+    x = trib_mod.thunder_resist(td, tstats)
+    assert x > 0, x
+    rounds = trib_mod.ROOT_ROUNDS.get("圣体")
+    assert rounds == 52
+    # 渡劫：构造必成/必败
+    class _Win(_random.Random):
+        def random(self):
+            return 0.0
+    class _Lose(_random.Random):
+        def random(self):
+            return 0.999
+    ok, msg = trib_mod.trib_run(td, tstats, _Win(1))
+    assert ok and td.ext["power"] == 2, msg
+    # 登仙
+    m = trib_mod.ascend_check(td, store.table("Level/练气境界"))
+    assert m is None, m
+    ok, msg = trib_mod.ascend_run(td, store.table("Level/练气境界"))
+    assert ok and td.realm_index == 41, msg
+    # 渡劫失败路径
+    tf = PlayerDoc(uid="tf", name="败者", realm_index=40, exp=20_000_000)
+    tf.ext["linggen"] = {"name": "伪灵根", "type": "伪灵根", "eff": 1, "orb": 0.02}
+    tf.ext["hp"] = 999_999
+    tf.ext["hp_max"] = 1_000_000
+    ok, msg = trib_mod.trib_run(tf, tstats, _Lose(1))
+    assert not ok and tf.exp == 15_000_000 and tf.ext["hp"] == 1, msg
+    assert tf.ext["spirit_fail_ts"] > 0
+    m = trib_mod.trib_check(tf, store.table("Level/练气境界"), tstats, 999, 1000)
+    assert m and "元神" in m, m   # CD 中
+
+    # 熟练度：感悟分配 / 六档 / 战斗乘区
+    tp = PlayerDoc(uid="tp", name="参悟", realm_index=30)
+    tp.ext["gongfa"] = ["凰劫再生术"]
+    ok, msg = trib_mod.allocate(tp, "未学功法", 10)
+    assert not ok and "尚未参悟" in msg
+    tp.ext["insight"] = 200
+    ok, msg = trib_mod.allocate(tp, "凰劫再生术", 120)
+    assert ok and trib_mod.prof_of(tp)["凰劫再生术"] == 120, msg
+    st = trib_mod.stage_of(120)
+    assert st[0] == "略有所成" and abs(st[1] - 1.03) < 1e-9, st
+    tp.ext["insight"] = 5000
+    ok, msg = trib_mod.allocate(tp, "凰劫再生术", 10 ** 9)
+    assert ok and trib_mod.prof_of(tp)["凰劫再生术"] == 1000, msg   # 超额分配钳上限
+    assert tp.ext["insight"] == 4120, tp.ext["insight"]
+    st = trib_mod.stage_of(1000)
+    assert st[0] == "出神入化" and abs(st[2] - 1.15) < 1e-9
+    assert trib_mod.best_stage(tp)[:2] == ("出神入化", 1.15)
+    assert "参悟" in trib_mod.prof_text(tp)
+    n = trib_mod.add_insight(tp, 2)
+    assert n == 4122, n
+    print("trib & prof ok")
+
     # 17. 宗门纯函数 + 存取
     from core import sect as sect_mod  # noqa: E402
 

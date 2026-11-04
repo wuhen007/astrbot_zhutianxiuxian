@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, boss, calamity, catalog, cultivate, dibing, equipment, items, linggen, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, boss, calamity, catalog, cultivate, dibing, equipment, items, linggen, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -43,6 +43,10 @@ CMD_BODY_BREAK = "#炼体突破"
 CMD_BODY_MY = "#我的炼体"
 CMD_ROB = "#打劫"
 CMD_BIWU = "#比武"
+CMD_TRIB = "#渡劫"
+CMD_ASCEND = "#登仙"
+CMD_PROF = "#功法熟练度"
+CMD_PROF_ALLOC = "#分配功法感悟"
 CMD_BAG = "#我的纳戒"
 CMD_BAG_ALIAS = "#纳戒"
 CMD_SHOP = "#商店"
@@ -1013,6 +1017,10 @@ class ZhutianPlugin(Star):
                 (f"{CMD_SPAR} @道友", "切磋（60 秒冷却；功法/复活技/灵根法球/岁云同境/高境镇杀/帝骑助战）"),
                 (f"{CMD_ROB} @道友", "打劫（30 分 CD；胜抢 1/5 灵石+魔道值，败反赔 1/4；隐身水可强行开战）"),
                 (f"{CMD_BIWU} @道友", "比武（6 小时双向 CD；血量须 80%+；双方得血气灵石）"),
+                (CMD_TRIB, "渡劫（无妄真劫境，血量 90%+，双重真劫）"),
+                (CMD_ASCEND, "登仙（渡劫成功后，无妄真劫境 → 地仙）"),
+                (CMD_PROF, "功法参悟（熟练度/档位/感悟值）"),
+                (f"{CMD_PROF_ALLOC} 功法名*数量", "分配感悟 → 熟练度（战斗每场 +2 感悟）"),
                 (CMD_BOSS, "世界 Boss 状态与贡献榜"),
                 (CMD_BOSS_FIGHT, "讨伐妖王（气血>10%，按贡献分奖池）"),
                 (CMD_HEAL, "花灵石疗伤回满"),
@@ -1594,6 +1602,17 @@ class ZhutianPlugin(Star):
                            base_rows=_base_rows(doc, table_a), skill_tables=_skill_tables())
         fb = build_fighter(foe, name_b, sb.atk, sb.defense, sb.hp, sb.bao, lookup,
                            base_rows=_base_rows(foe, table_b), skill_tables=_skill_tables())
+        # 功法熟练度档位（W2-1）：combat 乘开场三维、trigger 乘技能触发率
+        for f_, d_ in ((fa, doc), (fb, foe)):
+            stg = trib.best_stage(d_)
+            if stg[2] > 1.0:
+                f_.atk = max(1, int(f_.atk * stg[2]))
+                f_.defense = max(1, int(f_.defense * stg[2]))
+                f_.hp_max = max(1, int(f_.hp_max * stg[2]))
+                f_.hp = min(f_.hp_max, max(1, int(f_.hp * stg[2])))
+            if stg[1] > 1.0 and isinstance(f_.tags.get("atk_skills"), list):
+                for sk in f_.tags["atk_skills"]:
+                    sk["pr"] = min(0.95, float(sk.get("pr", 0) or 0) * stg[1])
         opening_log: list[str] = []
         # 1) 岁云同境裁决（先于镇杀）
         opening_log += opening.suiyun_verdict(fa, fb, table_a, body_table)
@@ -1726,6 +1745,8 @@ class ZhutianPlugin(Star):
         d2.ext["hp"] = max(0, int(fb.hp))
         self._apply_delta(d1, da)
         self._apply_delta(d2, db)
+        trib.add_insight(d1)     # 功法感悟：战斗每场 +2
+        trib.add_insight(d2)
         async with self.db.transaction():
             await self.db.save_player(d1.model_dump())
             await self.db.save_player(d2.model_dump())
@@ -1816,6 +1837,82 @@ class ZhutianPlugin(Star):
         text = "\n".join(pre_log + shown + ["", text])
         async for r in self._smart(event, text, "比武"):
             yield r
+
+    # ---- W2-1：渡劫 / 登仙 / 功法熟练度 ----
+
+    @filter.command(CMD_TRIB, "渡劫")
+    async def handle_trib(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        import random as _random
+        table = self.content.table(doc.realm_table)
+        st = self._stats(doc)
+        hp_cur, hp_max = self._hp_pair(doc)
+        msg = trib.trib_check(doc, table, st, hp_cur, hp_max)
+        if msg:
+            yield event.plain_result(msg)
+            return
+        ok, text = trib.trib_run(doc, st, _random.Random(f"{doc.uid}:trib:{int(time.time())}"))
+        await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, text, "渡劫"):
+            yield r
+
+    @filter.command(CMD_ASCEND, "登仙")
+    async def handle_ascend(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        table = self.content.table(doc.realm_table)
+        msg = trib.ascend_check(doc, table)
+        if msg:
+            yield event.plain_result(msg)
+            return
+        ok, text = trib.ascend_run(doc, table)
+        if not ok:
+            yield event.plain_result(text)
+            return
+        await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, text, "登仙"):
+            yield r
+
+    @filter.command(CMD_PROF, "功法熟练度", "功法参悟")
+    async def handle_prof(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, trib.prof_text(doc), "功法参悟"):
+            yield r
+
+    @filter.command(CMD_PROF_ALLOC, "分配功法感悟")
+    async def handle_prof_alloc(self, event: AstrMessageEvent, target: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        raw = (target or "").strip()
+        if "*" not in raw:
+            yield event.plain_result(f"格式：{CMD_PROF_ALLOC} 功法名*数量（{CMD_PROF} 查看）")
+            return
+        name, _, qtxt = raw.partition("*")
+        if not qtxt.strip().isdigit():
+            yield event.plain_result("数量须为正整数。")
+            return
+        ok, msg = trib.allocate(doc, name.strip(), int(qtxt))
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
 
     # ---- 世界 Boss / 疗伤 ----
 
