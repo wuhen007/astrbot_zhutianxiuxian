@@ -376,6 +376,7 @@ class ZhutianPlugin(Star):
         super().__init__(context)
         self.config = config
         self.db = DataBase(StarTools.get_data_dir("zhutian") / "zhutian.db")
+        self._last_cmd_ts: dict[str, float] = {}   # 同人指令去抖：防连发时整档互相覆盖（双倍签到/丢奖励）
         self.panel_dir = StarTools.get_data_dir("zhutian") / "panels"
         self.render_on = bool(config.get("RENDER_ENABLE", True))
         # shortcut: 数据表暂从插件目录读取（随代码分发），表多体积大后改放 StarTools 数据目录
@@ -526,6 +527,11 @@ class ZhutianPlugin(Star):
         return PlayerDoc(**raw) if raw else None
 
     async def _require_player(self, event: AstrMessageEvent) -> tuple[PlayerDoc | None, str | None]:
+        uid = event.get_sender_id()
+        now = time.time()
+        if now - self._last_cmd_ts.get(uid, 0.0) < 0.5:
+            return None, "修炼节奏太快，稍缓再发。"
+        self._last_cmd_ts[uid] = now
         doc = await self._find_player(event)
         if not doc:
             return None, f"道友尚未踏入仙途，请发送「{CMD_START}」。"
@@ -2469,7 +2475,7 @@ class ZhutianPlugin(Star):
         cur = await self.db.get_dark_boss()
         if not cur or (not cur["alive"] and time.time() - cur["killed_at"] < 86400):
             if cur and not cur["alive"]:
-                nxt = time.strftime("%H:%M", time.localtime(cur["killed_at"] + 86400))
+                nxt = time.strftime("%H:%M", time.gmtime(cur["killed_at"] + 86400 + 8 * 3600))
                 yield event.plain_result(f"黑暗动乱刚被平定，至尊恢复元气中，下次开启约 {nxt}。")
             else:
                 yield event.plain_result("黑暗动乱还未到来！")
@@ -8590,7 +8596,7 @@ class ZhutianPlugin(Star):
                 f"灵石不足：疗伤需 {cost}，道友只有 {doc.stones}。"
             )
             return
-        d = doc.model_copy(update={"stones": doc.stones - cost})
+        d = doc.model_copy(deep=True, update={"stones": doc.stones - cost})
         d.ext["hp"] = hp_max
         await self.db.save_player(d.model_dump())
         yield event.plain_result(
@@ -8608,7 +8614,7 @@ class ZhutianPlugin(Star):
 
     async def _settle_explore(self, doc: PlayerDoc, sess: secret.Session, reason: str) -> str:
         """发放探索收益并清会话（事务：灵石 + 物品 + 状态复位）。"""
-        d = doc.model_copy()
+        d = doc.model_copy(deep=True)
         d.stones += sess.stones
         d.state = "空闲"
         d.state_start = 0.0
@@ -8700,7 +8706,7 @@ class ZhutianPlugin(Star):
         if hp_cur <= hp_max * 0.3:
             yield event.plain_result("气血太虚，先疗伤再进秘境。")
             return
-        d = doc.model_copy()
+        d = doc.model_copy(deep=True)
         d.state = "秘境中"
         sess = secret.Session(place=name)
         d.ext["explore"] = {"place": sess.place, "floor": 0, "stones": 0, "items": {}, "log": []}
@@ -8772,7 +8778,7 @@ class ZhutianPlugin(Star):
         )
         if used_arrays:
             flavor = "【阵法·" + "、".join(used_arrays) + "】阵纹复苏，笼罩战场！\n" + flavor
-        d = doc.model_copy()
+        d = doc.model_copy(deep=True)
         d.ext["hp"] = me.hp
         d.ext["story"] = s
         d.ext["explore"] = {
@@ -8862,7 +8868,7 @@ class ZhutianPlugin(Star):
         if await self.db.get_sect(name):
             yield event.plain_result(f"「{name}」之名已被占，请另起宗号。")
             return
-        d = doc.model_copy(update={"stones": doc.stones - sect.CREATE_COST})
+        d = doc.model_copy(deep=True, update={"stones": doc.stones - sect.CREATE_COST})
         d.ext["sect"] = name
         async with self.db.transaction():
             await self.db.create_sect(name, doc.uid, time.time())
@@ -8893,7 +8899,7 @@ class ZhutianPlugin(Star):
         if len(members) >= limit:
             yield event.plain_result(f"【{name}】人满（{len(members)}/{limit}），升级宗门可扩员。")
             return
-        d = doc.model_copy()
+        d = doc.model_copy(deep=True)
         d.ext["sect"] = name
         await self.db.save_player(d.model_dump())
         yield event.plain_result(f"道友已入【{name}】门墙（{len(members) + 1}/{limit}）。")
@@ -8914,7 +8920,7 @@ class ZhutianPlugin(Star):
         if target and target["master_uid"] == doc.uid:
             yield event.plain_result("宗主不可轻退宗门（传位功能后续开放）。")
             return
-        d = doc.model_copy()
+        d = doc.model_copy(deep=True)
         d.ext.pop("sect", None)
         await self.db.save_player(d.model_dump())
         yield event.plain_result(f"已退出【{name}】，从此山高水远。")
@@ -8950,7 +8956,7 @@ class ZhutianPlugin(Star):
             return
         target = await self.db.get_sect(name)
         if not target:
-            d = doc.model_copy()
+            d = doc.model_copy(deep=True)
             d.ext.pop("sect", None)
             await self.db.save_player(d.model_dump())
             yield event.plain_result("所属宗门已不复存在，名籍已清。")
@@ -8988,7 +8994,7 @@ class ZhutianPlugin(Star):
         if not target:
             yield event.plain_result("宗门数据异常，请稍后再试。")
             return
-        d = doc.model_copy(update={"stones": doc.stones - amount})
+        d = doc.model_copy(deep=True, update={"stones": doc.stones - amount})
         d.ext["sect_contrib"] = int(d.ext.get("sect_contrib", 0)) + amount
         async with self.db.transaction():
             await self.db.save_player(d.model_dump())
@@ -9105,7 +9111,7 @@ class ZhutianPlugin(Star):
         import random as _random
         rate = equipment.enhance_rate(level)
         ok = _random.Random(f"{doc.uid}:{slot}:{level}:{time.time()}").random() < rate
-        d = doc.model_copy(update={"stones": doc.stones - cost})
+        d = doc.model_copy(deep=True, update={"stones": doc.stones - cost})
         if ok:
             enh[slot] = level + 1
             d.ext["enh"] = enh
@@ -9149,7 +9155,7 @@ class ZhutianPlugin(Star):
                 f"宗门基金不足发俸（需 {amount}，现 {target['fund']}），快去「{CMD_SECT_DONATE} 数量」做贡献。"
             )
             return
-        d = doc.model_copy(update={"stones": doc.stones + amount})
+        d = doc.model_copy(deep=True, update={"stones": doc.stones + amount})
         d.ext["salary_ts"] = now
         async with self.db.transaction():
             await self.db.save_player(d.model_dump())
@@ -9193,8 +9199,8 @@ class ZhutianPlugin(Star):
             yield event.plain_result("对方尚未踏入仙途，无法转账。")
             return
         foe = PlayerDoc(**raw)
-        d1 = doc.model_copy(update={"stones": doc.stones - total})
-        d2 = foe.model_copy(update={"stones": foe.stones + amount})
+        d1 = doc.model_copy(deep=True, update={"stones": doc.stones - total})
+        d2 = foe.model_copy(deep=True, update={"stones": foe.stones + amount})
         async with self.db.transaction():
             await self.db.save_player(d1.model_dump())
             await self.db.save_player(d2.model_dump())
@@ -9271,7 +9277,7 @@ class ZhutianPlugin(Star):
             yield event.plain_result(f"灵石不足：需 {total}（{lot['price']}×{lot['qty']}），道友有 {doc.stones}。")
             return
         tax = int(total * 0.05)
-        d1 = doc.model_copy(update={"stones": doc.stones - total})
+        d1 = doc.model_copy(deep=True, update={"stones": doc.stones - total})
         async with self.db.transaction():
             await self.db.save_player(d1.model_dump())
             await self.db.add_items(doc.uid, {lot["item"]: lot["qty"]})
@@ -10134,7 +10140,7 @@ class ZhutianPlugin(Star):
         if doc.stones < cost:
             yield event.plain_result(f"认主需以 {cost} 灵石温养兵魂，道友灵石不足。")
             return
-        d = doc.model_copy(update={"stones": doc.stones - cost})
+        d = doc.model_copy(deep=True, update={"stones": doc.stones - cost})
         imperial = list(d.ext.get("imperial") or [])
         imperial.append(item_name)
         d.ext["imperial"] = imperial
@@ -10186,7 +10192,7 @@ class ZhutianPlugin(Star):
             yield event.plain_result("气血太虚，先疗伤再进秘境。")
             return
         factor = round(2.0 + 0.3 * target["level"], 2)
-        d = doc.model_copy()
+        d = doc.model_copy(deep=True)
         d.state = "秘境中"
         d.ext["explore"] = {
             "place": f"{name}·宗门秘境", "floor": 0, "stones": 0,
@@ -10356,11 +10362,11 @@ class ZhutianPlugin(Star):
             rng,
         )
         # 比试为友好切磋积分制：无战损，只计分
-        d1 = doc.model_copy()
+        d1 = doc.model_copy(deep=True)
         d1.ext["duel_ts"] = now
         pts_a = int(d1.ext.get("duel_points", 0))
         win_a, total_a = int(d1.ext.get("duel_win", 0)), int(d1.ext.get("duel_total", 0))
-        d2 = foe.model_copy()
+        d2 = foe.model_copy(deep=True)
         total_b = int(d2.ext.get("duel_total", 0)) + 1
         gain = 3 if winner == 0 else (1 if winner is None else 0)
         d1.ext["duel_points"] = pts_a + gain
@@ -10513,7 +10519,7 @@ class ZhutianPlugin(Star):
         if doc.stones < cost:
             yield event.plain_result(f"参悟需静室灵石 {cost}，道友不足。")
             return
-        d = doc.model_copy(update={"stones": doc.stones - cost})
+        d = doc.model_copy(deep=True, update={"stones": doc.stones - cost})
         learned = list(learned) + [name]
         d.ext["gongfa"] = learned
         async with self.db.transaction():
@@ -10609,7 +10615,7 @@ class ZhutianPlugin(Star):
         my_roll = my_power * (0.9 + 0.2 * rng.random())
         foe_roll = foe_power * (0.9 + 0.2 * rng.random())
         won = my_roll >= foe_roll
-        d1 = doc.model_copy()
+        d1 = doc.model_copy(deep=True)
         d1.ext["sectwar_ts"] = now
         await self.db.save_player(d1.model_dump())
         async with self.db.transaction():
@@ -10698,7 +10704,7 @@ class ZhutianPlugin(Star):
                 f"宗门仓库空虚（基金 {sdoc['fund']} < 出货成本 {restock}），快「{CMD_SECT_DONATE}」补货。"
             )
             return
-        d = doc.model_copy()
+        d = doc.model_copy(deep=True)
         d.ext["sect_contrib"] = contrib - cost
         async with self.db.transaction():
             await self.db.save_player(d.model_dump())
@@ -10740,7 +10746,7 @@ class ZhutianPlugin(Star):
         if doc.stones < cost:
             yield event.plain_result(f"领养需以 {cost} 灵石立契约，道友不足。")
             return
-        d = doc.model_copy(update={"stones": doc.stones - cost})
+        d = doc.model_copy(deep=True, update={"stones": doc.stones - cost})
         d.ext["pet"] = {"name": pet_name, "level": max(1, int(info.get("等级", 1) or 1))}
         async with self.db.transaction():
             await self.db.save_player(d.model_dump())
@@ -10821,7 +10827,7 @@ class ZhutianPlugin(Star):
         if gain_lv < 1:
             yield event.plain_result("灵石不足升级（每级 1000）。")
             return
-        d = doc.model_copy(update={"stones": doc.stones - spent})
+        d = doc.model_copy(deep=True, update={"stones": doc.stones - spent})
         d.ext["pet"] = {"name": my_pet["name"], "level": lv + gain_lv}
         await self.db.save_player(d.model_dump())
         st = self._stats(d)
@@ -10841,7 +10847,7 @@ class ZhutianPlugin(Star):
         if not doc.ext.get("pet"):
             yield event.plain_result("道友本就没有仙宠。")
             return
-        d = doc.model_copy()
+        d = doc.model_copy(deep=True)
         name = d.ext.pop("pet")["name"]
         await self.db.save_player(d.model_dump())
         yield event.plain_result(f"已放生「{name}」，愿它归山快活。（仙宠本体不返还，领养需重新获得）")
@@ -10892,14 +10898,14 @@ class ZhutianPlugin(Star):
         winner, log = pet.duel(my_pb, foe_pb, rng)
 
         # 成长结算：胜 +3 / 平 +1 / 负 0；每 9 成长升 1 级
-        d1 = doc.model_copy()
+        d1 = doc.model_copy(deep=True)
         d1.ext["petduel_ts"] = now
         my_exp_gain = pet.GAIN_WIN if winner == 0 else (pet.GAIN_DRAW if winner is None else 0)
         my_pet, my_up = pet.gain_exp(mine, my_exp_gain, self.item_index.get)
         d1.ext["pet"] = my_pet
         d1.ext["pet_wins"] = int(d1.ext.get("pet_wins", 0)) + (1 if winner == 0 else 0)
         foe_pet, foe_up = pet.gain_exp(theirs, pet.GAIN_WIN if winner == 1 else (pet.GAIN_DRAW if winner is None else 0), self.item_index.get)
-        d2 = foe.model_copy()
+        d2 = foe.model_copy(deep=True)
         d2.ext["pet"] = foe_pet
         d2.ext["pet_wins"] = int(d2.ext.get("pet_wins", 0)) + (1 if winner == 1 else 0)
         async with self.db.transaction():
@@ -11005,7 +11011,7 @@ class ZhutianPlugin(Star):
             return
         import random as _random
         talent = pet.roll_talent(_random.Random(f"talent:{doc.uid}:{nxt_info['name']}:{time.time()}"))
-        d = doc.model_copy(update={"stones": doc.stones - cost})
+        d = doc.model_copy(deep=True, update={"stones": doc.stones - cost})
         d.ext["pet"] = {
             "name": str(nxt_info["name"]), "level": int(mine.get("level", 1)),
             "exp": int(mine.get("exp", 0)), "talent": talent["name"],

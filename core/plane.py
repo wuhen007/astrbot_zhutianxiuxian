@@ -11,6 +11,7 @@ shortcut: 未做维度壁垒（上苍之上/永恒未知之地等无方图位面
 """
 
 from __future__ import annotations
+from .clock import day_key
 
 import copy
 import time
@@ -302,7 +303,7 @@ def buy_clue(doc: Any, plane: str) -> tuple[bool, str]:
 
 def explore_clue(doc: Any, now: float, rng: Any) -> tuple[bool, str]:
     st = state_of(doc)
-    day = time.strftime("%Y-%m-%d", time.localtime(now))
+    day = day_key(now)
     if str(st.get("clue_day") or "") == day:
         return False, "今日的星象已被推演过，明日再来。"
     unknown = [p for p in PLANES if p not in known_of(st)]
@@ -375,7 +376,7 @@ def memory_text(doc: Any, data: Mapping, realm_names: Sequence[str], now: float)
         else:
             lines.append(f"· {p}｜坐标未知｜{_gate_label(GATES.get(p, 0), realm_names)}")
     lines.append(f"总计：{len(known)}/{len(PLANES)} 位面｜地点探索 {total_found}/{total_sites}")
-    day = time.strftime("%Y-%m-%d", time.localtime(now))
+    day = day_key(now)
     lines.append(f"今日线索：{'已推演' if str(st.get('clue_day') or '') == day else '未推演（#探索位面线索）'}")
     lines.append(f"#记坐标 位面（星图×1 或灵石 {STAR_MAP_ALT_COST:,}）｜#求购位面线索 位面（{CLUE_COST:,} 灵石）")
     return "\n".join(lines)

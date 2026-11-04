@@ -11,6 +11,7 @@
 """
 
 from __future__ import annotations
+from .clock import day_key
 
 import copy
 import random
@@ -100,7 +101,7 @@ def relation_of(favor: float, who: str = "ruthless") -> str:
 
 
 def _date_key(ts: float) -> str:
-    return time.strftime("%Y-%m-%d", time.localtime(ts))
+    return day_key(ts)
 
 
 def talk(n: dict, who: str, now: float) -> tuple[bool, str, dict]:

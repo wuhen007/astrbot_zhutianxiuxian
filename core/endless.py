@@ -16,6 +16,7 @@
 """
 
 from __future__ import annotations
+from .clock import day_key
 
 import copy
 import datetime
@@ -100,7 +101,7 @@ def world_of(content: Mapping, world_id: str) -> dict:
 
 
 def time_key(ts: float) -> str:
-    return time.strftime("%Y-%m-%d", time.localtime(ts))
+    return day_key(ts)
 
 
 def tier_of(tier: int) -> dict:
@@ -108,7 +109,7 @@ def tier_of(tier: int) -> dict:
 
 
 def celestial_of(now: float) -> dict:
-    day = int(time.strftime("%Y%m%d", time.localtime(now)))
+    day = int(day_key(now).replace("-", ""))
     return PHENOMENA[day % len(PHENOMENA)]
 
 
@@ -1276,7 +1277,7 @@ def titles_text(st: Mapping) -> str:
 
 
 def is_weekend(now: float) -> bool:
-    return time.localtime(now).tm_wday >= 5
+    return time.gmtime(now + 8 * 3600).tm_wday >= 5
 
 
 def week_key(now: float) -> str:

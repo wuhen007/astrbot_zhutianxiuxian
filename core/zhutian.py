@@ -6,6 +6,7 @@
 """
 
 from __future__ import annotations
+from .clock import day_key
 
 import copy
 import random
@@ -117,7 +118,7 @@ def _now() -> float:
 
 
 def _date_key(ts: float) -> str:
-    return time.strftime("%Y-%m-%d", time.localtime(ts))
+    return day_key(ts)
 
 
 def system_of(doc: Mapping) -> dict:

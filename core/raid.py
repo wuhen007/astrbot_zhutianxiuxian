@@ -13,6 +13,7 @@
 """
 
 from __future__ import annotations
+from .clock import day_key
 
 import random
 import time
@@ -185,7 +186,7 @@ def can_hit(team: Mapping, member: Mapping, now: float) -> tuple[bool, str]:
 def time_key(ts: float) -> str:
     import time
 
-    return time.strftime("%Y-%m-%d", time.localtime(ts))
+    return day_key(ts)
 
 
 def hits_today(member: Mapping, now: float) -> int:

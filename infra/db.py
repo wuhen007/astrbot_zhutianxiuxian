@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import json
 import time
 from contextlib import asynccontextmanager
@@ -10,18 +12,34 @@ from typing import Any, AsyncIterator, Optional
 
 import aiosqlite
 
+from core.clock import day_key as _shanghai_date_key
+
 LATEST_DB_VERSION = 15
 
 
-def _shanghai_date_key(ts: float) -> str:
-    """上海时区日期键（YYYY-MM-DD），每日任务以它判定"今天"。"""
-    return time.strftime("%Y-%m-%d", time.gmtime(ts + 8 * 3600))
+def _serialized(write_fn):
+    """写方法串行化守卫：独立调用持写锁；事务内调用（外层已持锁）直接放行。
+
+    共享单连接下没有它，并发命令的写入会互相搭车：乙的提交会把甲
+    写一半的事务提前落地，或甲的 BEGIN 报「事务已存在」。
+    """
+    @functools.wraps(write_fn)
+    async def wrapper(self, *args, **kwargs):
+        assert self.conn is not None
+        if self.conn.in_transaction:
+            return await write_fn(self, *args, **kwargs)
+        async with self.wlock:
+            if self.conn.in_transaction:   # 上次异常遗留的孤儿事务，清掉再写
+                await self.conn.rollback()
+            return await write_fn(self, *args, **kwargs)
+    return wrapper
 
 
 class DataBase:
     def __init__(self, db_path: Path):
         self.db_path = Path(db_path)
         self.conn: Optional[aiosqlite.Connection] = None
+        self.wlock = asyncio.Lock()   # 全部写路径共用一把锁：命令并发时串行落库
 
     async def connect(self) -> None:
         if self.conn is not None:
@@ -40,16 +58,19 @@ class DataBase:
 
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[aiosqlite.Connection]:
-        """多语句事务；异常自动回滚。"""
+        """多语句事务；异常自动回滚。持写锁执行，期间其它写命令排队。"""
         assert self.conn is not None
-        await self.conn.execute("BEGIN")
-        try:
-            yield self.conn
-        except Exception:
-            await self.conn.rollback()
-            raise
-        else:
-            await self.conn.commit()
+        async with self.wlock:
+            if self.conn.in_transaction:   # 上次异常遗留的孤儿事务，清掉再开
+                await self.conn.rollback()
+            await self.conn.execute("BEGIN")
+            try:
+                yield self.conn
+            except Exception:
+                await self.conn.rollback()
+                raise
+            else:
+                await self.conn.commit()
 
     async def _migrate(self) -> None:
         assert self.conn is not None
@@ -96,6 +117,7 @@ class DataBase:
         ) as cur:
             return {row[0]: row[1] for row in await cur.fetchall()}
 
+    @_serialized
     async def add_items(self, uid: str, items: dict[str, int]) -> None:
         assert self.conn is not None
         owned = not self.conn.in_transaction
@@ -110,6 +132,7 @@ class DataBase:
         if owned:
             await self.conn.commit()
 
+    @_serialized
     async def remove_item(self, uid: str, item: str, qty: int) -> bool:
         """数量不足返回 False（调用方负责回滚或提示）。"""
         assert self.conn is not None
@@ -137,6 +160,7 @@ class DataBase:
             row = await cur.fetchone()
             return json.loads(row[0]) if row else None
 
+    @_serialized
     async def save_player(self, doc: dict[str, Any]) -> None:
         assert self.conn is not None
         # sqlite3 会在 DML 时隐式开启事务：execute 前无事务 = 本方法拥有它，负责提交；
@@ -178,6 +202,7 @@ class DataBase:
                     "renwu", "date", "gained", "spent")
             return dict(zip(keys, row))
 
+    @_serialized
     async def upsert_daily_task(self, rec: dict[str, Any]) -> None:
         assert self.conn is not None
         owned = not self.conn.in_transaction
@@ -210,6 +235,7 @@ class DataBase:
             (gained, spent, uid, _shanghai_date_key(time.time())),
         )
 
+    @_serialized
     async def add_daily_secret(self, uid: str) -> bool:
         """秘境探索次数 +1（任务 3 进行中才计数）。返回是否计入。"""
         assert self.conn is not None
@@ -241,6 +267,7 @@ class DataBase:
                 "alive": bool(row[6]), "killed_at": row[7],
             }
 
+    @_serialized
     async def init_dark_boss(self, round_no: int, health: int, reward: int,
                              atk: int, defense: int) -> None:
         assert self.conn is not None
@@ -256,6 +283,7 @@ class DataBase:
         if owned:
             await self.conn.commit()
 
+    @_serialized
     async def damage_dark_boss(self, round_no: int, uid: str, name: str, dmg: int) -> int:
         """对黑暗 Boss 扣血并记账。返回剩余血量（≤0 = 已被击杀）。"""
         assert self.conn is not None
@@ -301,6 +329,7 @@ class DataBase:
         except Exception:
             return {}
 
+    @_serialized
     async def save_market(self, doc: dict[str, Any]) -> None:
         assert self.conn is not None
         owned = not self.conn.in_transaction
@@ -322,6 +351,7 @@ class DataBase:
         except Exception:
             return {}
 
+    @_serialized
     async def save_rift(self, doc: dict[str, Any]) -> None:
         assert self.conn is not None
         owned = not self.conn.in_transaction
@@ -345,6 +375,7 @@ class DataBase:
         except Exception:
             return {}
 
+    @_serialized
     async def save_calamity(self, doc: dict[str, Any]) -> None:
         assert self.conn is not None
         owned = not self.conn.in_transaction
@@ -368,6 +399,7 @@ class DataBase:
         except Exception:
             return {}
 
+    @_serialized
     async def save_lingjie(self, doc: dict[str, Any]) -> None:
         assert self.conn is not None
         owned = not self.conn.in_transaction
@@ -391,6 +423,7 @@ class DataBase:
         except Exception:
             return {}
 
+    @_serialized
     async def save_ancient(self, doc: dict[str, Any]) -> None:
         assert self.conn is not None
         owned = not self.conn.in_transaction
@@ -414,6 +447,7 @@ class DataBase:
         except Exception:
             return {}
 
+    @_serialized
     async def save_other_shore(self, doc: dict[str, Any]) -> None:
         assert self.conn is not None
         owned = not self.conn.in_transaction
@@ -441,6 +475,7 @@ class DataBase:
         d["settled"] = bool(d["settled"])
         return d
 
+    @_serialized
     async def create_raid(self, code: str, boss: str, leader_uid: str,
                           leader_name: str, now: float) -> None:
         assert self.conn is not None
@@ -509,6 +544,7 @@ class DataBase:
                 return m
         return None
 
+    @_serialized
     async def join_raid(self, code: str, uid: str, name: str, now: float) -> bool:
         assert self.conn is not None
         owned = not self.conn.in_transaction
@@ -521,6 +557,7 @@ class DataBase:
             await self.conn.commit()
         return ok
 
+    @_serialized
     async def start_raid(self, code: str, stats: dict[str, int]) -> bool:
         assert self.conn is not None
         owned = not self.conn.in_transaction
@@ -535,6 +572,7 @@ class DataBase:
             await self.conn.commit()
         return ok
 
+    @_serialized
     async def damage_raid(self, code: str, uid: str, dmg: int, day: str, now: float) -> int:
         """扣 Boss 血 + 记成员伤害/次数，原子完成。返回剩余血量（≤0 = 击杀）。"""
         assert self.conn is not None
@@ -564,6 +602,7 @@ class DataBase:
             await self.conn.commit()
         return left
 
+    @_serialized
     async def close_raid(self, code: str, status: str, now: float) -> None:
         assert self.conn is not None
         owned = not self.conn.in_transaction
@@ -575,6 +614,7 @@ class DataBase:
         if owned:
             await self.conn.commit()
 
+    @_serialized
     async def mark_raid_settled(self, code: str) -> None:
         assert self.conn is not None
         owned = not self.conn.in_transaction
@@ -619,6 +659,7 @@ class DataBase:
                 "reward": row[3], "alive": bool(row[4]), "killed_at": row[5],
             }
 
+    @_serialized
     async def init_boss(self, round_no: int, health: int, reward: int) -> None:
         """创建/重置第 round_no 轮 Boss（单行 UPSERT）。"""
         assert self.conn is not None
@@ -633,6 +674,7 @@ class DataBase:
         if owned:
             await self.conn.commit()
 
+    @_serialized
     async def damage_boss(self, round_no: int, uid: str, name: str, dmg: int) -> int:
         """对 Boss 扣血并记账。返回 Boss 剩余血量（≤0 = 已被击杀）。"""
         assert self.conn is not None
@@ -682,6 +724,7 @@ class DataBase:
                 "fund": row[3], "created_at": row[4], "score": row[5],
             }
 
+    @_serialized
     async def create_sect(self, name: str, master_uid: str, now: float) -> None:
         assert self.conn is not None
         owned = not self.conn.in_transaction
@@ -692,6 +735,7 @@ class DataBase:
         if owned:
             await self.conn.commit()
 
+    @_serialized
     async def update_sect(self, name: str, level: int, fund: int, master_uid: str | None = None) -> None:
         """宗门更新；master_uid 传 None 表示不变。"""
         assert self.conn is not None
@@ -708,6 +752,7 @@ class DataBase:
         if owned:
             await self.conn.commit()
 
+    @_serialized
     async def delete_sect(self, name: str) -> None:
         assert self.conn is not None
         owned = not self.conn.in_transaction
@@ -727,6 +772,7 @@ class DataBase:
                 for r in await cur.fetchall()
             ]
 
+    @_serialized
     async def add_sect_score(self, name: str, delta: int) -> None:
         assert self.conn is not None
         owned = not self.conn.in_transaction
@@ -743,6 +789,7 @@ class DataBase:
 
     # ---- 拍卖行（寄售制，物品托管） ----
 
+    @_serialized
     async def list_auction(
         self, seller_uid: str, seller_name: str, item: str, qty: int, price: int
     ) -> int:
@@ -786,6 +833,7 @@ class DataBase:
             ]
         return rows, pages
 
+    @_serialized
     async def delete_auction(self, lot_id: int) -> bool:
         assert self.conn is not None
         owned = not self.conn.in_transaction

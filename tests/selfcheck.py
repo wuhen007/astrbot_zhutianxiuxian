@@ -73,6 +73,18 @@ async def main():
     assert await db.get_player("tx") is None
     print("transaction rollback ok")
 
+    # 5.5 并发写串行化：共享连接上两个事务必须排队，写入全部落库
+    import asyncio as _aio
+
+    async def _tx_bump():
+        async with db.transaction():
+            await db.add_items("lock_uid", {"试炼石": 1})
+            await _aio.sleep(0.01)   # 制造重叠窗口：无锁时第二个 BEGIN 会报错
+
+    await _aio.gather(_tx_bump(), _tx_bump())
+    assert (await db.get_inventory("lock_uid")).get("试炼石") == 2
+    print("concurrent tx serialization ok")
+
     # 6. 签到：自然日 CD + 连续递增压值（对齐原版 daily_gift）
     now = 1_800_000_000.0
     ok, msg, d = cultivate.sign_in(loaded, 100, 500, now, _random.Random(1))

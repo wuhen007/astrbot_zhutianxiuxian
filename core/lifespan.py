@@ -12,6 +12,7 @@
 """
 
 from __future__ import annotations
+from .clock import day_key
 
 import time
 from typing import Any
@@ -68,7 +69,7 @@ def decay_amount(doc: PlayerDoc) -> int:
 
 def daily_decay(doc: PlayerDoc, now: float) -> tuple[int, bool]:
     """签到时调用：自然日一次流逝。返回 (本次流逝, 是否触发轮回)。"""
-    day = time.strftime("%Y-%m-%d", time.localtime(now))
+    day = day_key(now)
     if doc.ext.get("shouyuan_day") == day:
         return 0, False
     doc.ext["shouyuan_day"] = day

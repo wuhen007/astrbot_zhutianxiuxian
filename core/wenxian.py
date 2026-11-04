@@ -9,6 +9,7 @@
 """
 
 from __future__ import annotations
+from .clock import day_key
 
 import copy
 import math
@@ -40,11 +41,11 @@ BONUS_REWARDS = {
 
 
 def _date_key(ts: float) -> str:
-    return time.strftime("%Y-%m-%d", time.localtime(ts))
+    return day_key(ts)
 
 
 def _week_key(ts: float) -> str:
-    t = time.localtime(ts)
+    t = time.gmtime(ts + 8 * 3600)
     monday_offset = (t.tm_wday) % 7  # tm_wday: 周一=0
     monday = ts - monday_offset * 86400
     return _date_key(monday)
