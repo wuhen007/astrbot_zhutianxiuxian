@@ -195,9 +195,10 @@ def ascend_check(doc: PlayerDoc, table: list[dict]) -> str | None:
     return None
 
 
-def ascend_run(doc: PlayerDoc, table: list[dict]) -> tuple[bool, str]:
-    """登仙：无妄真劫境 → 地仙，消耗当前境界 exp。"""
+def ascend_run(doc: PlayerDoc, table: list[dict], discount: float = 0.0) -> tuple[bool, str]:
+    """登仙：无妄真劫境 → 地仙，消耗当前境界 exp（命格·渡劫修为减少可折减）。"""
     need = int(table[min(TRIB_REALM, len(table) - 1)].get("exp", 0) or 0)
+    need = max(1, int(need * (1.0 - min(0.9, max(0.0, float(discount or 0))))))
     if doc.exp < need:
         return False, f"登仙需修为 {need:,}（当前 {doc.exp:,}）。"
     frm = table[TRIB_REALM].get("level", "无妄真劫境")

@@ -2500,6 +2500,40 @@ async def main():
     assert "寿元" in life_mod.text(ls)
     print("lifespan ok")
 
+    # 17a. 命格（W2-3）：抽取/补抽/改命/四消费点
+    from core import mingge as mg_mod  # noqa: E402
+
+    table_m = store.table("item/命格词条")
+    assert len(table_m) == 75, len(table_m)
+    rng_m = _random.Random(7)
+    drawn = mg_mod.roll(store, rng_m)
+    assert drawn and drawn.get("name") and "effects" in drawn, drawn
+    # 100 次抽取稀有度分布合理（1 档应占多数）
+    counts = {1: 0, 2: 0, 3: 0}
+    for _ in range(200):
+        r = int(mg_mod.roll(store, _random.Random(_))["rarity"])
+        counts[r] = counts.get(r, 0) + 1
+    assert counts[1] > counts[2] > counts[3], counts
+
+    md = PlayerDoc(uid="mg", name="命主", realm_index=20, stones=200_000)
+    got = mg_mod.ensure(md, store, _random.Random(3))
+    assert got and md.ext["mingge"]["name"] == got["name"]
+    assert mg_mod.ensure(md, store, _random.Random(4))["name"] == got["name"]  # 幂等
+    # 改命：余额不足拒绝；足额重抽
+    md.stones = 100
+    ok, msg = mg_mod.reroll(md, store, _random.Random(5))
+    assert not ok and "灵石" in msg, msg
+    md.stones = 200_000
+    ok, msg = mg_mod.reroll(md, store, _random.Random(5))
+    assert ok and md.stones == 100_000 and md.ext["mingge"] is not None, msg
+    # 效果取值
+    md.ext["mingge"] = {"name": "测试命", "effects": {"攻击加成": 0.2, "签到奖励倍率": 1.5}}
+    assert abs(mg_mod.bonus(md, "攻击加成") - 0.2) < 1e-9
+    assert abs(mg_mod.multiplier(md, "签到奖励倍率") - 1.5) < 1e-9
+    assert mg_mod.multiplier(md, "未配置项") == 1.0
+    assert "测试命" in mg_mod.text(md)
+    print("mingge ok")
+
     # 17. 宗门纯函数 + 存取
     from core import sect as sect_mod  # noqa: E402
 

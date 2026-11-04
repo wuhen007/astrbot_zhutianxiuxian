@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, boss, calamity, catalog, cultivate, dibing, equipment, items, lifespan, linggen, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, boss, calamity, catalog, cultivate, dibing, equipment, items, lifespan, linggen, mingge, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -48,6 +48,8 @@ CMD_ASCEND = "#登仙"
 CMD_PROF = "#功法熟练度"
 CMD_PROF_ALLOC = "#分配功法感悟"
 CMD_SHOUYUAN = "#寿元"
+CMD_MINGGE = "#我的命格"
+CMD_MINGGE_REROLL = "#改命"
 CMD_BAG = "#我的纳戒"
 CMD_BAG_ALIAS = "#纳戒"
 CMD_SHOP = "#商店"
@@ -555,11 +557,14 @@ class ZhutianPlugin(Star):
             yield event.plain_result("道友已踏入仙途，无需重复此举。")
             return
         doc = create_player(uid, event.get_sender_name() or "", self.content.table("Level/练气境界"))
+        import random as _random
+        mg = mingge.ensure(doc, self.content, _random.Random(f"{uid}:mingge"))
         await self.db.save_player(doc.model_dump())
         entry = realm_entry(doc, self.content.table("Level/练气境界"))
+        fate = f"\n命格判定：【{mg.get('name')}】——{mg.get('desc', '')}" if mg else ""
         yield event.plain_result(
             f"恭喜道友 {doc.name or uid} 踏入仙途！\n"
-            f"起始境界：【{entry.get('level', '凡人')}】\n"
+            f"起始境界：【{entry.get('level', '凡人')}】{fate}\n"
             f"发送「{CMD_STATUS}」查看状态。"
         )
 
@@ -1023,6 +1028,8 @@ class ZhutianPlugin(Star):
                 (CMD_PROF, "功法参悟（熟练度/档位/感悟值）"),
                 (f"{CMD_PROF_ALLOC} 功法名*数量", "分配感悟 → 熟练度（战斗每场 +2 感悟）"),
                 (CMD_SHOUYUAN, "寿元（每日签到流逝，耗尽轮回转世）"),
+                (CMD_MINGGE, "命格（出生判定词条，战斗/突破/签到/渡劫生效）"),
+                (CMD_MINGGE_REROLL, "改命（10 万灵石重演天机，可洗负面）"),
                 (CMD_BOSS, "世界 Boss 状态与贡献榜"),
                 (CMD_BOSS_FIGHT, "讨伐妖王（气血>10%，按贡献分奖池）"),
                 (CMD_HEAL, "花灵石疗伤回满"),
@@ -1424,9 +1431,10 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         import random as _random
+        mg_rate = mingge.bonus(doc, "境界突破成功率")     # 命格·破障通玄（W2-3）
         ok, msg, d = cultivate.breakthrough(
             doc, self.content.table(doc.realm_table),
-            float(self._val("BREAKTHROUGH_SUCCESS_RATE", 1.0)),
+            min(0.99, float(self._val("BREAKTHROUGH_SUCCESS_RATE", 1.0)) + mg_rate),
             float(self._val("BREAKTHROUGH_FAIL_PENALTY", 0.3)),
             _random.Random(f"{doc.uid}:{doc.realm_index}:{int(time.time())}"),
         )
@@ -1620,6 +1628,19 @@ class ZhutianPlugin(Star):
             if stg[1] > 1.0 and isinstance(f_.tags.get("atk_skills"), list):
                 for sk in f_.tags["atk_skills"]:
                     sk["pr"] = min(0.95, float(sk.get("pr", 0) or 0) * stg[1])
+        # 命格加成（W2-3）：攻击/防御/生命加成 + 暴击加成
+        for f_, d_ in ((fa, doc), (fb, foe)):
+            atk_b = mingge.bonus(d_, "攻击加成")
+            def_b = mingge.bonus(d_, "防御加成")
+            hp_b = mingge.bonus(d_, "生命加成")
+            if atk_b:
+                f_.atk = max(1, int(f_.atk * (1 + atk_b)))
+            if def_b:
+                f_.defense = max(1, int(f_.defense * (1 + def_b)))
+            if hp_b:
+                f_.hp_max = max(1, int(f_.hp_max * (1 + hp_b)))
+                f_.hp = min(f_.hp_max, max(1, int(f_.hp * (1 + hp_b))))
+            f_.bao = min(1.0, f_.bao + mingge.bonus(d_, "暴击加成"))
         opening_log: list[str] = []
         # 1) 岁云同境裁决（先于镇杀）
         opening_log += opening.suiyun_verdict(fa, fb, table_a, body_table)
@@ -1884,7 +1905,7 @@ class ZhutianPlugin(Star):
         if msg:
             yield event.plain_result(msg)
             return
-        ok, text = trib.ascend_run(doc, table)
+        ok, text = trib.ascend_run(doc, table, discount=mingge.bonus(doc, "渡劫修为减少"))
         if not ok:
             yield event.plain_result(text)
             return
@@ -1922,6 +1943,34 @@ class ZhutianPlugin(Star):
             yield event.plain_result("数量须为正整数。")
             return
         ok, msg = trib.allocate(doc, name.strip(), int(qtxt))
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_MINGGE, "我的命格")
+    async def handle_mingge(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        import random as _random
+        mingge.ensure(doc, self.content, _random.Random(f"{doc.uid}:mingge:view"))
+        await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, mingge.text(doc), "命格"):
+            yield r
+
+    @filter.command(CMD_MINGGE_REROLL, "改命")
+    async def handle_mingge_reroll(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        import random as _random
+        ok, msg = mingge.reroll(doc, self.content, _random.Random(f"{doc.uid}:reroll:{int(time.time())}"))
         if ok:
             await self.db.save_player(doc.model_dump())
         yield event.plain_result(msg)
