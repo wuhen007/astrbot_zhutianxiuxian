@@ -986,7 +986,7 @@ async def _v14_other_shore(conn: aiosqlite.Connection) -> None:
 
 
 async def _v15_market(conn: aiosqlite.Connection) -> None:
-    """灵市：全服共享股市状态（单例 JSON，确定性 PRNG 行情）。"""
+    """万界灵市：全服共享市场状态（单例 JSON，确定性 PRNG 行情）。"""
     await conn.execute(
         "CREATE TABLE IF NOT EXISTS market_state ("
         " id INTEGER PRIMARY KEY CHECK (id = 1),"

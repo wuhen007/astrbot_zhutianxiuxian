@@ -55,8 +55,8 @@ CMD_RIVER_INFO = "#时间长河"
 CMD_LINGSHI = "#灵市"
 CMD_LS_BUY = "#买入"
 CMD_LS_SELL = "#卖出"
-CMD_LS_MY = "#我的股票"
-CMD_LS_TREND = "#股票走势"
+CMD_LS_MY = "#我的灵票"
+CMD_LS_TREND = "#灵票走势"
 CMD_LS_TIP = "#打听"
 CMD_LS_CHAT = "#交谈"
 CMD_LS_LOAN = "#借款"
@@ -1046,9 +1046,9 @@ class ZhutianPlugin(Star):
                 (CMD_RIVER_INFO, "岁月沉淀与传道进度"),
             ]},
             {"title": "灵市", "lines": [
-                (CMD_LINGSHI, "全服共享修仙股市行情（8 只股票，10 分钟一 tick）"),
-                (f"{CMD_LS_BUY} 名称*股数", "买入（30bps 手续费，30 秒 CD）"),
-                (f"{CMD_LS_SELL} 名称*股数", "卖出（*-1 或省略数量清仓）"),
+                (CMD_LINGSHI, "全服共享万界灵市行情（8 张灵票，10 分钟一 tick）"),
+                (f"{CMD_LS_BUY} 名称*张数", "买入（30bps 手续费，30 秒 CD）"),
+                (f"{CMD_LS_SELL} 名称*张数", "卖出（*-1 或省略数量清仓）"),
                 (CMD_LS_MY, "持仓/浮盈/已实现盈亏/借款"),
                 (f"{CMD_LS_TREND} 名称", "近 16 tick 走势与商会周期"),
                 (CMD_LS_TIP, "花 1000 灵石向消息贩打听倾向"),
@@ -2086,7 +2086,7 @@ class ZhutianPlugin(Star):
         async for r in self._smart(event, lifespan.text(doc), "寿元"):
             yield r
 
-    # ---- W5-1：灵市（全服共享修仙股市） ----
+    # ---- W5-1：万界灵市（全服共享行情） ----
 
     async def _market(self) -> dict:
         """加载全服市场并懒推进行情。"""
@@ -2119,7 +2119,7 @@ class ZhutianPlugin(Star):
         g = await self._market()
         stock = market.find_stock(g, name)
         if not stock:
-            yield event.plain_result(f"灵市没有「{name}」这只票（#灵市 看行情）。")
+            yield event.plain_result(f"灵市没有「{name}」这家商会（#灵市 看行情）。")
             return
         qty = int(qtxt) if qtxt.strip().lstrip("-").isdigit() else (-1 if side == "sell" else 0)
         now = time.time()
@@ -2137,7 +2137,7 @@ class ZhutianPlugin(Star):
         if not self._allowed(event):
             return
         if not (target or "").strip():
-            yield event.plain_result("格式：#买入 名称*股数（如 #买入 丹鼎阁*100）")
+            yield event.plain_result("格式：#买入 名称*张数（如 #买入 丹鼎阁*100）")
             return
         async for r in self._market_trade(event, "buy", target):
             yield r
@@ -2147,12 +2147,12 @@ class ZhutianPlugin(Star):
         if not self._allowed(event):
             return
         if not (target or "").strip():
-            yield event.plain_result("格式：#卖出 名称*股数（#卖出 名称 或 #卖出 名称*-1 清仓）")
+            yield event.plain_result("格式：#卖出 名称*张数（#卖出 名称 或 #卖出 名称*-1 清仓）")
             return
         async for r in self._market_trade(event, "sell", target):
             yield r
 
-    @filter.command(CMD_LS_MY, "我的股票")
+    @filter.command(CMD_LS_MY, "我的灵票")
     async def handle_ls_my(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
@@ -2161,10 +2161,10 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         g = await self._market()
-        async for r in self._smart(event, market.account_text(g, doc), "我的股票"):
+        async for r in self._smart(event, market.account_text(g, doc), "我的灵票"):
             yield r
 
-    @filter.command(CMD_LS_TREND, "股票走势")
+    @filter.command(CMD_LS_TREND, "灵票走势")
     async def handle_ls_trend(self, event: AstrMessageEvent, name: str = ""):
         if not self._allowed(event):
             return

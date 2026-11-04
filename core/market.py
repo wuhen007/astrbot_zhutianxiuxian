@@ -1,9 +1,12 @@
-"""灵市·修仙股市（W5-1，对齐原版 model/lingshiMarket.js 直译）。
+"""万界灵市（W5-1，对齐原版 model/lingshiMarket.js 直译）。
+
+措辞约定：对外文案一律规避股市字眼——标的称「灵票」、量词用「张」、
+股价称「市价」；仅代码注释保留原版术语对照。
 
 机制：
 - 全服共享市场：确定性 xorshift PRNG（state.rng），10 分钟一个 slot，
   任意指令触发 `advance` 懒推进（最多回放 1008 tick，交易时段 = 北京时间 8 点后）；
-- 8 只股票（低/中/高风险，涨跌停 500~1500bps，波动率 65~210），事件冲击
+- 8 张灵票（低/中/高风险，涨跌停 500~1500bps，波动率 65~210），事件冲击
   （24%/tick，±70~250bps）+ 8 位 NPC 交易流（value/broker/operator/momentum/
   retail/contrarian 六种风格，operator 墨九有 pump/distribute 计划）+
   商会周期（boom/slump/crisis）→ 每 tick 价格步进钳涨跌停；
@@ -13,7 +16,7 @@
 - NPC 交互轻量：#打听（1000 灵石买倾向线索）、#交谈（语录+线索）；
   查账/追问/债务追讨 shortcut（社交深度省略，docstring 标注）。
 
-数值标度：股票初始价 10000 → 1 万灵石/股 = 原版字面价（灵石本身已缩放），
+数值标度：灵票初始价 10000 → 1 万灵石/张 = 原版字面价（灵石本身已缩放），
 买入上限原版 10 亿持仓成本 → 100 万灵石（按《数值缩放对照表》）。
 """
 
@@ -71,7 +74,7 @@ EVENTS = [
 CHAT_LINES = {
     "value": ["低处纳货，高处予人——这是老朽四百年的功课。", "价格终究会回到价值身边，急什么。"],
     "broker": ["嘿嘿，消息嘛……收了钱也只保证一半是真的。", "听说某家商号最近账目不太干净，信不信由你。"],
-    "operator": ["独乐乐不如众乐乐，道友不妨与在下同持一股？", "人气所至，价格所向——懂的都懂。"],
+    "operator": ["独乐乐不如众乐乐，道友不妨与在下同持一张？", "人气所至，价格所向——懂的都懂。"],
     "momentum": ["强势的板块就要追！撤退也要快！", "这波行情还没走完，我再加一点。"],
     "retail": ["涨了涨了！全押全押！", "怎么又跌了……我先撤，呜呜。"],
     "contrarian": ["跌下去的都是黄金坑，越跌我越买。", "别人恐惧我贪婪，仅此而已。"],
@@ -128,7 +131,7 @@ def create_market(now: float, seed: int | None = None) -> dict:
             realized=0, fees=0, plan=None,
         ))
     state = {"version": 1, "slot": slot, "rng": rng.s, "stocks": stocks, "npcs": npcs, "news": []}
-    add_news(state, "万界灵市开张。初始每股一万灵石；消息与邀约皆含交易对手的立场。")
+    add_news(state, "万界灵市开张。初始每张一万灵石；消息与邀约皆含交易对手的立场。")
     return state
 
 
@@ -319,7 +322,7 @@ def buy(state: dict, doc: PlayerDoc, stock: dict, shares: int, now: float) -> tu
         return False, f"【{stock['name']}】已摘牌，无法交易。"
     shares = int(shares)
     if shares <= 0 or shares > 100_000:
-        return False, "买入股数须在 1~100000 之间。"
+        return False, "买入张数须在 1~100000 之间。"
     acc = account_of(doc)
     if now - float(acc.get("last_trade") or 0) < TRADE_CD:
         return False, f"交易过于频繁，{TRADE_CD} 秒冷却。"
@@ -327,7 +330,7 @@ def buy(state: dict, doc: PlayerDoc, stock: dict, shares: int, now: float) -> tu
     cost = shares * price
     fee = _fee(cost)
     if doc.stones < cost + fee:
-        return False, f"灵石不足：需 {cost + fee:,}（股价 {price:,}×{shares} + 手续费 {fee:,}）。"
+        return False, f"灵石不足：需 {cost + fee:,}（市价 {price:,}×{shares} 张 + 手续费 {fee:,}）。"
     invested = sum(h["shares"] * find_stock(state, sid)["price"] for sid, h in acc["holdings"].items())
     if invested + cost > MAX_HOLDING_COST:
         return False, f"持仓市值上限 {MAX_HOLDING_COST:,} 灵石，当前已达 {invested:,}。"
@@ -338,7 +341,7 @@ def buy(state: dict, doc: PlayerDoc, stock: dict, shares: int, now: float) -> tu
     acc["invested"] += cost
     acc["fees"] += fee
     acc["last_trade"] = now
-    return True, (f"买入【{stock['name']}】{shares:,} 股 @ {price:,}，花费 {cost + fee:,} 灵石（含手续费 {fee:,}）。\n"
+    return True, (f"买入【{stock['name']}】{shares:,} 张 @ {price:,}，花费 {cost + fee:,} 灵石（含手续费 {fee:,}）。\n"
                   f"现价涨跌：{stock['changeBps']:+.0f}bps")
 
 
@@ -351,7 +354,7 @@ def sell(state: dict, doc: PlayerDoc, stock: dict, shares: int, now: float) -> t
         return False, f"你没有【{stock['name']}】持仓。"
     shares = min(int(shares), hold["shares"]) if int(shares) > 0 else hold["shares"]
     if shares <= 0:
-        return False, "卖出股数须为正（填 -1 清仓）。"
+        return False, "卖出张数须为正（填 -1 清仓）。"
     if now - float(acc.get("last_trade") or 0) < TRADE_CD:
         return False, f"交易过于频繁，{TRADE_CD} 秒冷却。"
     price = int(stock["price"])
@@ -367,7 +370,7 @@ def sell(state: dict, doc: PlayerDoc, stock: dict, shares: int, now: float) -> t
     acc["last_trade"] = now
     if hold["shares"] == 0:
         acc["holdings"].pop(stock["id"], None)
-    return True, (f"卖出【{stock['name']}】{shares:,} 股 @ {price:,}，回款 {gross - fee:,}（手续费 {fee:,}）。\n"
+    return True, (f"卖出【{stock['name']}】{shares:,} 张 @ {price:,}，回款 {gross - fee:,}（手续费 {fee:,}）。\n"
                   f"本笔盈亏：{profit:+,} 灵石｜累计已实现：{acc['realized']:+,}")
 
 
@@ -424,7 +427,7 @@ def text(state: dict, doc: PlayerDoc | None = None) -> str:
         acc = account_of(doc)
         if acc.get("loan"):
             lines.append("⚠ 你有未结清借款（#还款）。")
-    lines.append("交易：#买入 名称*股数｜#卖出 名称*股数（-1 清仓）｜#我的股票｜#股票走势 名称")
+    lines.append("交易：#买入 名称*张数｜#卖出 名称*张数（-1 清仓）｜#我的灵票｜#灵票走势 名称")
     lines.append("情报：#打听（1000 灵石）｜#交谈 人物名｜#借款 数量｜#还款｜#灵市收益榜")
     return "\n".join(lines)
 
@@ -439,7 +442,7 @@ def account_text(state: dict, doc: PlayerDoc) -> str:
             continue
         value = h["shares"] * stock["price"]
         total_value += value
-        lines.append(f"· {stock['name']}：{h['shares']:,} 股｜成本 {h['cost']:,}｜"
+        lines.append(f"· {stock['name']}：{h['shares']:,} 张｜成本 {h['cost']:,}｜"
                      f"市值 {value:,}｜浮盈 {value - h['cost']:+,}")
     if not acc["holdings"]:
         lines.append("暂无持仓。")
@@ -453,7 +456,7 @@ def account_text(state: dict, doc: PlayerDoc) -> str:
 def trend_text(state: dict, value: str) -> str:
     stock = find_stock(state, value)
     if not stock:
-        return f"灵市没有「{value}」这只票。可选：{'、'.join(s['name'] for s in state['stocks'])}"
+        return f"灵市没有「{value}」这家商会。可选：{'、'.join(s['name'] for s in state['stocks'])}"
     his = stock["history"][-16:]
     spark = " ".join(str(p["price"]) for p in his)
     lines = [f"--- {stock['name']} 走势 ---",

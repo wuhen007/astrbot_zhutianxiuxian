@@ -2657,7 +2657,7 @@ async def main():
         lo, hi = market_mod._limits(st_)
         assert lo <= st_["price"] <= hi, (st_["name"], st_["price"], lo, hi)
     # 买入/卖出
-    md3 = PlayerDoc(uid="mk", name="股神", realm_index=30, stones=5_000_000)
+    md3 = PlayerDoc(uid="mk", name="灵市大亨", realm_index=30, stones=5_000_000)
     g = market_mod.create_market(t0, seed=99)
     st0 = g["stocks"][0]
     ok, msg = market_mod.buy(g, md3, st0, 100, t0)
