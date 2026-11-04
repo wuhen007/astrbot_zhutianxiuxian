@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, boss, calamity, catalog, cultivate, dibing, equipment, items, linggen, addict, endless, lingjie, motou, npc, occupation, plane, pet, quest, raid, rift, secret, sect, shenjie, story_npc, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, boss, calamity, catalog, cultivate, dibing, equipment, items, linggen, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -41,6 +41,8 @@ CMD_OPEN = "#出关"
 CMD_BREAK = "#突破"
 CMD_BODY_BREAK = "#炼体突破"
 CMD_BODY_MY = "#我的炼体"
+CMD_ROB = "#打劫"
+CMD_BIWU = "#比武"
 CMD_BAG = "#我的纳戒"
 CMD_BAG_ALIAS = "#纳戒"
 CMD_SHOP = "#商店"
@@ -1009,6 +1011,8 @@ class ZhutianPlugin(Star):
             ]},
             {"title": "战斗秘境", "lines": [
                 (f"{CMD_SPAR} @道友", "切磋（60 秒冷却；功法/复活技/灵根法球/岁云同境/高境镇杀/帝骑助战）"),
+                (f"{CMD_ROB} @道友", "打劫（30 分 CD；胜抢 1/5 灵石+魔道值，败反赔 1/4；隐身水可强行开战）"),
+                (f"{CMD_BIWU} @道友", "比武（6 小时双向 CD；血量须 80%+；双方得血气灵石）"),
                 (CMD_BOSS, "世界 Boss 状态与贡献榜"),
                 (CMD_BOSS_FIGHT, "讨伐妖王（气血>10%，按贡献分奖池）"),
                 (CMD_HEAL, "花灵石疗伤回满"),
@@ -1558,6 +1562,57 @@ class ZhutianPlugin(Star):
         return None
 
     @filter.command(CMD_SPAR, "切磋")
+    async def _pvp_battle(self, doc: PlayerDoc, foe: PlayerDoc, now: float,
+                          name_a: str, name_b: str):
+        """PvP 公共战斗（W1-6 抽取）：装配 → 开场三钩 → 引擎。
+
+        返回 (winner, log_lines, fa, fb, sa, sb)；caller 负责 CD/门槛与结算。
+        """
+        import random as _random
+        from .core.combat.loadout import build_fighter
+        from .core.combat import opening, run_1v1
+        rng = _random.Random(f"{doc.uid}:{foe.uid}:{now}")
+        lookup = self.item_index.get
+        body_table = self.content.table("Level/炼体境界") or []
+        table_a = self.content.table(doc.realm_table)
+        table_b = self.content.table(foe.realm_table)
+
+        def _base_rows(p: PlayerDoc, qi_rows: list[dict]) -> tuple[dict, dict]:
+            return (qi_rows[min(int(p.realm_index), len(qi_rows) - 1)],
+                    body_table[min(int(p.physique_index), len(body_table) - 1)])
+
+        def _skill_tables():
+            return {
+                "atk": self.content.table("item/技能组/攻击技能") or [],
+                "def": self.content.table("item/技能组/防御技能") or [],
+                "heal": self.content.table("item/技能组/治疗技能") or [],
+                "boost": self.content.table("item/技能组/灵根增幅技能") or [],
+            }
+
+        sa, sb = self._stats(doc), self._stats(foe)
+        fa = build_fighter(doc, name_a, sa.atk, sa.defense, sa.hp, sa.bao, lookup,
+                           base_rows=_base_rows(doc, table_a), skill_tables=_skill_tables())
+        fb = build_fighter(foe, name_b, sb.atk, sb.defense, sb.hp, sb.bao, lookup,
+                           base_rows=_base_rows(foe, table_b), skill_tables=_skill_tables())
+        opening_log: list[str] = []
+        # 1) 岁云同境裁决（先于镇杀）
+        opening_log += opening.suiyun_verdict(fa, fb, table_a, body_table)
+        # 2) 高境镇杀
+        executed = opening.high_realm_exec(fa, fb)
+        if executed:
+            return executed[0], opening_log + list(executed[1]), fa, fb, sa, sb
+        # 3) 帝骑助战
+        for atk_f, def_f, atk_doc in ((fa, fb, doc), (fb, fa, foe)):
+            deck = (world_deep.decade_of(atk_doc.ext.get("zhutian") or {}) or {}).get("deck")
+            msg = opening.decade_assist(atk_f, def_f, deck)
+            if msg:
+                opening_log.append(msg)
+                if def_f.hp <= 0:
+                    winner = 0 if atk_f is fa else 1
+                    return winner, opening_log + [f"{def_f.name} 开场即溃，胜负已分。"], fa, fb, sa, sb
+        res = run_1v1(fa, fb, rng)
+        return res.winner, opening_log + list(res.log), fa, fb, sa, sb
+
     async def handle_spar(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
@@ -1609,45 +1664,7 @@ class ZhutianPlugin(Star):
                 "boost": self.content.table("item/技能组/灵根增幅技能") or [],
             }
 
-        fa = build_fighter(doc, name_a, sa.atk, sa.defense, sa.hp, sa.bao, lookup,
-                           base_rows=_base_rows(doc, table_a),
-                           skill_tables=_skill_tables())
-        fb = build_fighter(foe, name_b, sb.atk, sb.defense, sb.hp, sb.bao, lookup,
-                           base_rows=_base_rows(foe, table_b),
-                           skill_tables=_skill_tables())
-        opening_log: list[str] = []
-        # 1) 岁云同境裁决：压高境对手到岁云持有者档位（原版先于镇杀，压后同级不触发天堑）
-        opening_log += opening.suiyun_verdict(fa, fb, table_a, body_table)
-        # 2) 高境镇杀：先于行动条/技能/复活
-        executed = opening.high_realm_exec(fa, fb)
-        if executed:
-            winner = executed[0]
-            log = opening_log + list(executed[1])
-            result = f"切磋结果：{name_a if winner == 0 else name_b} 胜！"
-            doc.ext["spar_ts"] = now
-            await self.db.save_player(doc.model_dump())
-            text = "\n".join(log + ["", result])
-            async for r in self._smart(event, text, "切磋"):
-                yield r
-            return
-        # 3) 帝骑助战：decade 三卡齐编 → 开场合击
-        for atk_f, def_f, atk_doc in ((fa, fb, doc), (fb, fa, foe)):
-            deck = (world_deep.decade_of(atk_doc.ext.get("zhutian") or {}) or {}).get("deck")
-            msg = opening.decade_assist(atk_f, def_f, deck)
-            if msg:
-                opening_log.append(msg)
-                if def_f.hp <= 0:
-                    winner = 0 if atk_f is fa else 1
-                    log = opening_log + [f"{def_f.name} 开场即溃，胜负已分。"]
-                    result = f"切磋结果：{name_a if winner == 0 else name_b} 胜！"
-                    doc.ext["spar_ts"] = now
-                    await self.db.save_player(doc.model_dump())
-                    text = "\n".join(log + ["", result])
-                    async for r in self._smart(event, text, "切磋"):
-                        yield r
-                    return
-        res = run_1v1(fa, fb, rng)
-        winner, log = res.winner, opening_log + list(res.log)
+        winner, log, fa, fb, sa, sb = await self._pvp_battle(doc, foe, now, name_a, name_b)
         # 面板头部展示开场乘区后的实际数值
         sa = equipment.Stats(atk=fa.atk, defense=fa.defense, hp=fa.hp_max, bao=sa.bao,
                              set_lines=sa.set_lines)
@@ -1678,6 +1695,127 @@ class ZhutianPlugin(Star):
             f"  VS  【{name_b}】攻 {sb.atk} · 防 {sb.defense} · 血 {sb.hp}\n"
             + "\n".join(shown) + "\n" + result
         )
+
+    # ---- W1-6：打劫 / 比武 ----
+
+    async def _pvp_target(self, event: AstrMessageEvent) -> tuple[PlayerDoc | None, str | None]:
+        """解析 @ 目标并取存档。"""
+        target_uid = self._at_target(event)
+        if not target_uid:
+            return None, f"请 @ 一位道友再动手。"
+        raw = await self.db.get_player(target_uid)
+        if not raw:
+            return None, "对方尚未踏入仙途，不可对凡人出手。"
+        return PlayerDoc(**raw), None
+
+    def _apply_delta(self, d: PlayerDoc, delta: dict) -> None:
+        if delta.get("stones"):
+            d.stones = max(0, int(d.stones) + int(delta["stones"]))
+        if delta.get("xueqi"):
+            d.ext["xueqi"] = max(0.0, float(d.ext.get("xueqi", 0) or 0) + float(delta["xueqi"]))
+        if delta.get("modao"):
+            mo = d.ext.setdefault("motou", {})
+            mo["modao"] = int(mo.get("modao", 0) or 0) + int(delta["modao"])
+
+    async def _finish_pvp(self, event, doc: PlayerDoc, foe: PlayerDoc, da: dict, db: dict,
+                          fa, fb, title: str, pre_log: list[str]):
+        """PvP 收尾：血量回写、增量落库、出图战报。"""
+        d1 = doc.model_copy(deep=True)
+        d2 = foe.model_copy(deep=True)
+        d1.ext["hp"] = max(0, int(fa.hp))
+        d2.ext["hp"] = max(0, int(fb.hp))
+        self._apply_delta(d1, da)
+        self._apply_delta(d2, db)
+        async with self.db.transaction():
+            await self.db.save_player(d1.model_dump())
+            await self.db.save_player(d2.model_dump())
+        return d1, d2
+
+    @filter.command(CMD_ROB, "打劫")
+    async def handle_rob(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        foe, terr = await self._pvp_target(event)
+        if terr:
+            yield event.plain_result(terr)
+            return
+        if foe.uid == doc.uid:
+            yield event.plain_result("咋的，自己弄自己啊？")
+            return
+        now = time.time()
+        b_busy = bool(foe.state) and foe.state != "空闲"
+        inv_a = await self.db.get_inventory(doc.uid)
+        msg = pvp.rob_check(doc, foe, now, b_busy=b_busy)
+        if msg == "__NEED_STEALTH__":
+            if int(inv_a.get("隐身水", 0) or 0) <= 0:
+                yield event.plain_result(
+                    f"{foe.name} 正在「{foe.state}」中，需要道具【隐身水】才能强行开战。"
+                )
+                return
+            await self.db.remove_item(doc.uid, "隐身水", 1)
+            pre_log = [f"{doc.name} 使用【隐身水】悄然接近正在「{foe.state}」的 {foe.name}，但被发现。"]
+        elif msg:
+            yield event.plain_result(msg)
+            return
+        else:
+            pre_log = [f"{doc.name} 向 {foe.name} 发起了打劫。"]
+        winner, log, fa, fb, _sa, _sb = await self._pvp_battle(doc, foe, now,
+                                                               str(doc.name or "劫匪"),
+                                                               str(foe.name or "苦主"))
+        inv_b = await self.db.get_inventory(foe.uid)
+        text, da, db = pvp.rob_settle(doc, foe, winner if winner is not None else 1,
+                                      b_has_dummy=int(inv_b.get("替身人偶", 0) or 0) > 0)
+        if db.pop("dummy", None):
+            await self.db.remove_item(foe.uid, "替身人偶", 1)
+        d1, d2 = await self._finish_pvp(event, doc, foe, da, db, fa, fb, "打劫", pre_log)
+        d1.ext["rob_ts"] = now
+        await self.db.save_player(d1.model_dump())
+        shown = log[:8] + [f"…（共 {len(log)} 条）"] if len(log) > 10 else log
+        text = "\n".join(pre_log + shown + ["", text])
+        async for r in self._smart(event, text, "打劫"):
+            yield r
+
+    @filter.command(CMD_BIWU, "比武")
+    async def handle_biwu(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        foe, terr = await self._pvp_target(event)
+        if terr:
+            yield event.plain_result(terr)
+            return
+        if foe.uid == doc.uid:
+            yield event.plain_result("咋的，自娱自乐？")
+            return
+        now = time.time()
+        msg = pvp.biwu_check(doc, foe, now)
+        if msg:
+            yield event.plain_result(msg)
+            return
+        pre_log = [f"{doc.name} 向 {foe.name} 发起了比武！"]
+        winner, log, fa, fb, _sa, _sb = await self._pvp_battle(doc, foe, now,
+                                                               str(doc.name or "甲"),
+                                                               str(foe.name or "乙"))
+        if winner is None:
+            winner = 1     # 平局按守方小胜结算（原版无平局分支）
+        text, da, db = pvp.biwu_settle(doc, foe, winner)
+        d1, d2 = await self._finish_pvp(event, doc, foe, da, db, fa, fb, "比武", pre_log)
+        d1.ext["biwu_ts"] = now
+        d2.ext["biwu_ts"] = now
+        async with self.db.transaction():
+            await self.db.save_player(d1.model_dump())
+            await self.db.save_player(d2.model_dump())
+        shown = log[:8] + [f"…（共 {len(log)} 条）"] if len(log) > 10 else log
+        text = "\n".join(pre_log + shown + ["", text])
+        async for r in self._smart(event, text, "比武"):
+            yield r
 
     # ---- 世界 Boss / 疗伤 ----
 

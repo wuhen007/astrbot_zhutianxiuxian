@@ -2318,6 +2318,74 @@ async def main():
     assert hp_h[0] == 58000 and any("生机磅礴" in x for x in log_h), (hp_h, log_h)
     print("skill pool ok")
 
+    # 16x. 打劫 / 比武结算（W1-6）
+    from core import pvp as pvp_mod  # noqa: E402
+
+    ra = PlayerDoc(uid="ra", name="劫匪", realm_index=45, stones=100_000)
+    ra.ext["xueqi"] = 5_000_000
+    rb = PlayerDoc(uid="rb", name="苦主", realm_index=30, stones=200_000)
+    rb.ext["xueqi"] = 5_000_000
+    rb.ext["hp"] = 1_000_000
+    rb.ext["hp_max"] = 1_000_000
+    # 比武门槛：血量须 > 上限/1.2
+    rb2 = PlayerDoc(uid="rb2", name="伤员", stones=1)
+    rb2.ext["hp"] = 100
+    rb2.ext["hp_max"] = 1000
+    ra2 = PlayerDoc(uid="ra2", name="甲", stones=1)
+    ra2.ext["hp"] = 1000
+    ra2.ext["hp_max"] = 1000
+    assert pvp_mod.biwu_check(ra2, rb2, 1_800_000_000) is not None, "伤员应被拒"
+    assert "比武冷却" not in (pvp_mod.biwu_check(ra2, rb2, 1_800_000_000) or "")
+    # 双向 CD：A 刚比过
+    ra2.ext["biwu_ts"] = 1_800_000_000 - 60
+    m = pvp_mod.biwu_check(ra2, rb2, 1_800_000_000)
+    assert m and "冷却" in m, m
+    del ra2.ext["biwu_ts"]
+    rb2.ext["hp"] = rb2.ext["hp_max"]   # 满血后可通过
+    assert pvp_mod.biwu_check(ra2, rb2, 1_800_000_000) is None
+
+    # 打劫门槛：穷鬼/重伤拒绝 + CD
+    poor = PlayerDoc(uid="poor", name="穷人", stones=100)
+    poor.ext["hp"] = 999_999
+    poor.ext["hp_max"] = 1_000_000
+    m = pvp_mod.rob_check(ra2, poor, 1_800_000_000)
+    assert m and "穷" in m, m
+    hurt = PlayerDoc(uid="hurt", name="伤员", stones=999_999)
+    hurt.ext["hp"] = 10_000
+    hurt.ext["hp_max"] = 1_000_000
+    m = pvp_mod.rob_check(ra2, hurt, 1_800_000_000)
+    assert m and "重伤" in m, m
+    ok_target = PlayerDoc(uid="ok", name="肥羊", stones=500_000)
+    ok_target.ext["hp"] = 999_999
+    ok_target.ext["hp_max"] = 1_000_000
+    assert pvp_mod.rob_check(ra2, ok_target, 1_800_000_000) is None
+    ra2.ext["rob_ts"] = 1_800_000_000 - 60
+    m = pvp_mod.rob_check(ra2, ok_target, 1_800_000_000)
+    assert m and "CD" in m, m
+
+    # 打劫结算：A 胜抢 1/5 + 血气 + 魔道
+    text, da, db_ = pvp_mod.rob_settle(ra, rb, 0)
+    assert da["stones"] == 40_000 and db_["stones"] == -40_000, (da, db_)
+    assert da["xueqi"] == 100 * 46 and da["modao"] == 4, da
+    # 替身人偶：免疫
+    text2, da2, db2 = pvp_mod.rob_settle(ra, rb, 0, b_has_dummy=True)
+    assert "替身人偶" in text2 and db2.get("dummy") == -1 and not da2
+    # A 败反被劫 1/4
+    text3, da3, db3 = pvp_mod.rob_settle(ra, rb, 1)
+    assert da3["stones"] == -25_000 and db3["stones"] == 25_000 and db3["xueqi"] == 100 * 31, (da3, db3)
+    # A 败且穷：不赔灵石
+    broke = PlayerDoc(uid="br", name="穷匪", stones=100)
+    text4, da4, _ = pvp_mod.rob_settle(broke, rb, 1)
+    assert not da4.get("stones") and "落荒而逃" in text4, (da4, text4)
+
+    # 比武结算：胜 1000×败境 / 败 500×胜境 / 双方 10×胜境
+    t5, da5, db5 = pvp_mod.biwu_settle(ra, rb, 0)
+    assert da5["xueqi"] == 1000 * 31 and db5["xueqi"] == 500 * 46, (da5, db5)
+    assert da5["stones"] == 10 * 46 == db5["stones"] and da5["modao"] == 1
+    t6, da6, db6 = pvp_mod.biwu_settle(ra, rb, 1)
+    assert da6["xueqi"] == 500 * 31 and db6["xueqi"] == 1000 * 46 and db6["modao"] == 1
+    print("pvp settle ok")
+
     # 17. 宗门纯函数 + 存取
     from core import sect as sect_mod  # noqa: E402
 
