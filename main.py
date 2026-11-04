@@ -1588,7 +1588,6 @@ class ZhutianPlugin(Star):
                 return m.group(1)
         return None
 
-    @filter.command(CMD_SPAR, "切磋")
     async def _pvp_battle(self, doc: PlayerDoc, foe: PlayerDoc, now: float,
                           name_a: str, name_b: str):
         """PvP 公共战斗（W1-6 抽取）：装配 → 开场三钩 → 引擎。
@@ -1664,6 +1663,7 @@ class ZhutianPlugin(Star):
         res = run_1v1(fa, fb, rng)
         return res.winner, opening_log + list(res.log), fa, fb, sa, sb
 
+    @filter.command(CMD_SPAR, "切磋")
     async def handle_spar(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
