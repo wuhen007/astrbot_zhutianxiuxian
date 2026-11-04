@@ -1601,10 +1601,20 @@ class ZhutianPlugin(Star):
             return (qi_rows[min(int(p.realm_index), len(qi_rows) - 1)],
                     body_table[min(int(p.physique_index), len(body_table) - 1)])
 
+        def _skill_tables():
+            return {
+                "atk": self.content.table("item/技能组/攻击技能") or [],
+                "def": self.content.table("item/技能组/防御技能") or [],
+                "heal": self.content.table("item/技能组/治疗技能") or [],
+                "boost": self.content.table("item/技能组/灵根增幅技能") or [],
+            }
+
         fa = build_fighter(doc, name_a, sa.atk, sa.defense, sa.hp, sa.bao, lookup,
-                           base_rows=_base_rows(doc, table_a))
+                           base_rows=_base_rows(doc, table_a),
+                           skill_tables=_skill_tables())
         fb = build_fighter(foe, name_b, sb.atk, sb.defense, sb.hp, sb.bao, lookup,
-                           base_rows=_base_rows(foe, table_b))
+                           base_rows=_base_rows(foe, table_b),
+                           skill_tables=_skill_tables())
         opening_log: list[str] = []
         # 1) 岁云同境裁决：压高境对手到岁云持有者档位（原版先于镇杀，压后同级不触发天堑）
         opening_log += opening.suiyun_verdict(fa, fb, table_a, body_table)

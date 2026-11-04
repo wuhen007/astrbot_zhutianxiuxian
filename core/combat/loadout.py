@@ -40,15 +40,63 @@ def apply_start_bonuses(f: Fighter, battle_skills: list[dict]) -> Fighter:
     return f
 
 
+def equip_skill_pool(f: Fighter, doc: Any, tables: Mapping[str, Any] | None) -> None:
+    """技能池装配（W1-5）：灵根自带 + 已学功法同名条目。
+
+    - tables：{"atk": 攻击技能, "def": 防御技能, "heal": 治疗技能, "boost": 灵根增幅技能}
+    - 命中规则：条目 name == 灵根名（class=灵根 自带）或 ∈ ext["gongfa"]（已学功法）
+    - 增幅表与攻击表同名：beilv 取大、控制并集（原版两表对同一灵根重复定义）
+    - 池挂 tags：atk_skills / def_skills / heal_skills；次数记账由 engine._uses 管
+    """
+    if not tables:
+        return
+    lg_name = str(f.tags.get("linggen_name") or "")
+    learned = set(getattr(doc, "ext", {}).get("gongfa") or [])
+    if not lg_name and not learned:
+        return
+    want = ({lg_name} if lg_name else set()) | learned
+
+    atk_by_name: dict[str, dict] = {}
+    for e in tables.get("atk") or []:
+        if isinstance(e, Mapping) and e.get("name") in want:
+            atk_by_name[str(e["name"])] = dict(e)
+    for e in tables.get("boost") or []:
+        if not (isinstance(e, Mapping) and e.get("name") in want):
+            continue
+        cur = atk_by_name.get(str(e["name"]))
+        merged = dict(e)
+        if cur:
+            if float(cur.get("beilv") or 0) >= float(e.get("beilv") or 0):
+                merged = dict(cur)
+            for key in ("控制",):
+                if int(cur.get(key) or 0) > int(merged.get(key) or 0):
+                    merged[key] = cur[key]
+        atk_by_name[str(e["name"])] = merged
+    if atk_by_name:
+        f.tags["atk_skills"] = list(atk_by_name.values())
+
+    def_pool = [dict(e) for e in (tables.get("def") or [])
+                if isinstance(e, Mapping) and e.get("name") in want]
+    if def_pool:
+        f.tags["def_skills"] = def_pool
+
+    heal_pool = [dict(e) for e in (tables.get("heal") or [])
+                 if isinstance(e, Mapping) and e.get("name") in want]
+    if heal_pool:
+        f.tags["heal_skills"] = heal_pool
+
+
 def build_fighter(
     doc: Any, name: str, atk: int, defense: int, hp: int, bao: float,
     item_lookup: Mapping[str, Any],
     base_rows: tuple[dict, dict] | None = None,
+    skill_tables: Mapping[str, Any] | None = None,
 ) -> Fighter:
     """从玩家文档构建带功法与灵根法球的战斗单位。
 
     base_rows：(练气境界行, 炼体境界行)——开场系统（opening.py）做同境裁决时
     按表值差压缩对手；不传则跳过身份挂载。
+    skill_tables：四张技能表（equip_skill_pool 装配灵根自带 + 已学功法技能）。
     """
     from .. import linggen
     from .. import authority as authority_mod
@@ -80,4 +128,5 @@ def build_fighter(
             "used": False,
         }
         f.tags["battle_skills"] = [str(s.get("name")) for s in battle_skills]
+    equip_skill_pool(f, doc, skill_tables)
     return f

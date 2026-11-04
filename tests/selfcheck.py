@@ -2261,6 +2261,63 @@ async def main():
     assert fv2.hp == 0
     print("opening ok")
 
+    # 16w. 技能池（W1-5）：装配 / 攻击倍率与控制 / 防御减免与格挡 / 治疗 / cnt 限次
+    from core.combat import engine as cengine  # noqa: E402
+    from core.combat import loadout as loadout_mod  # noqa: E402
+
+    tables = {
+        "atk": [{"name": "太阳之体", "class": "灵根", "pr": 1, "cnt": -1, "beilv": 2.0,
+                 "msg1": "大日灼空！", "msg2": "被灼伤", "控制": 0},
+                {"name": "九幽魔体", "pr": 1, "cnt": -1, "beilv": 1e17, "msg1": "魔", "控制": 0},
+                {"name": "九重魔功", "pr": 1, "cnt": 1, "beilv": 1.5, "msg1": "魔功灌注", "控制": 1}],
+        "def": [{"name": "太阴之体", "pr": 1, "cnt": -1, "beilv": 0.9, "msg1": "月华蔽体"},
+                {"name": "混沌体", "pr": 1, "cnt": 2, "beilv": 0, "msg1": "混沌反弹", "反弹伤害": 0.5}],
+        "heal": [{"name": "生生不息", "pr": 1, "cnt": -1, "回复比例": 0.08, "msg1": "生机磅礴"}],
+        "boost": [{"name": "太阳之体", "beilv": 1.2, "控制": 0}],
+    }
+    gd = PlayerDoc(uid="sk", name="技客", realm_index=30)
+    gd.ext["linggen"] = {"name": "太阳之体", "type": "血统", "eff": 1.2, "orb": 0.05}
+    gd.ext["gongfa"] = ["九重魔功", "生生不息"]   # 学了攻击+治疗功法
+    fs = loadout_mod.build_fighter(gd, "技客", 10000, 5000, 100000, 0.0, lookup2, skill_tables=tables)
+    names_a = [x["name"] for x in fs.tags["atk_skills"]]
+    assert names_a == ["太阳之体", "九重魔功"], names_a   # 增幅 1.2 < 攻击 2.0 被并掉
+    assert fs.tags["atk_skills"][0]["beilv"] == 2.0 and fs.tags["heal_skills"][0]["name"] == "生生不息"
+    # 攻击技能：beilv 乘区（异常数据钳 50）
+    foe_s = Fighter("靶子", 1, 1, 10 ** 9, 0.0)
+    dmg2, ex = cengine.roll_attack_skills(fs, foe_s, 1000, _random.Random(1))
+    # 两条 pr=1 技能逐条独立判定 → 1000×2.0×1.5 = 3000（对齐原版遍历判定）
+    assert dmg2 == 3000 and any("大日灼空" in x for x in ex) \
+        and any("魔功灌注" in x for x in ex), (dmg2, ex)
+    fd2 = loadout_mod.build_fighter(gd, "技客", 10000, 5000, 100000, 0.0, lookup2, skill_tables=tables)
+    fd2.tags["atk_skills"] = [{"name": "九幽魔体", "pr": 1, "cnt": -1, "beilv": 1e17, "msg1": "魔", "控制": 0}]
+    dmg3, _ = cengine.roll_attack_skills(fd2, foe_s, 1000, _random.Random(1))
+    assert dmg3 == 50000, dmg3   # 1e17 钳到 50 倍
+    # 控制定身 + cnt 限次
+    fc = loadout_mod.build_fighter(gd, "技客", 10000, 5000, 100000, 0.0, lookup2, skill_tables=tables)
+    fc.tags["atk_skills"] = [{"name": "九重魔功", "pr": 1, "cnt": 1, "beilv": 1.5, "msg1": "m", "控制": 1}]
+    fv_c = Fighter("受控", 1, 1, 999999, 0.0)
+    _, ex_c = cengine.roll_attack_skills(fc, fv_c, 1000, _random.Random(2))
+    assert fv_c.effects["stun_turns"] == 1 and any("被定身" in x for x in ex_c)
+    cengine.roll_attack_skills(fc, fv_c, 1000, _random.Random(2))
+    assert fc.tags["skill_uses"]["九重魔功"] == 0   # cnt=1 用尽
+    # 防御：减免与完全格挡
+    fdf = Fighter("守方", 1, 1, 100000, 0.0)
+    fdf.tags["def_skills"] = tables["def"]
+    d1, exd = cengine.roll_defense_skills(fdf, 1000, _random.Random(3))
+    # 逐条独立判定：太阴 ×0.9 后混沌格挡 → 终值 0；cnt=2 的混沌体记账一次
+    assert d1 == 0 and any("受伤 ×0.9" in x for x in exd) and any("完全格挡" in x for x in exd), (d1, exd)
+    d2, exd2 = cengine.roll_defense_skills(fdf, 1000, _random.Random(3))
+    assert d2 == 0 and fdf.tags["skill_uses"]["混沌体"] == 0, (d2, exd2)   # 第二次后用尽
+    assert abs(fdf.effects["reflect"] - 0.5) < 1e-9   # 混沌体反弹写槽
+    # 治疗：出手前回血
+    fh = Fighter("伤者", 1, 1, 100000, 100000, 0.0)
+    fh.tags["heal_skills"] = tables["heal"]
+    hp_h = [50000, 999999]
+    log_h: list[str] = []
+    cengine.try_heal_skills(fh, hp_h, 0, _random.Random(4), log_h)
+    assert hp_h[0] == 58000 and any("生机磅礴" in x for x in log_h), (hp_h, log_h)
+    print("skill pool ok")
+
     # 17. 宗门纯函数 + 存取
     from core import sect as sect_mod  # noqa: E402
 
