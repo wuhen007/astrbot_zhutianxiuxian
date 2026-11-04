@@ -147,6 +147,7 @@ def explore(
     buff: Any = None,
     protect: Any = None,
     me_fighter: Any = None,
+    treasure_bonus: float = 0.0,
 ) -> tuple[Session, Unit, str, bool]:
     """寻宝一次。返回 (更新后的会话, 战斗后的我, 文本, 是否被打出局)。
 
@@ -176,7 +177,7 @@ def explore(
         tail = "\n".join(skill_lines + [log[-1]]) if skill_lines and log else (log[-1] if log else "")
         if winner == 0:
             stones = int((1500 + 800 * session.floor) * depth * pf)
-            session.stones += stones
+            session.stones += max(1, int(stones * (1.0 + float(treasure_bonus or 0))))
             session.boss_kills += 1
             drops = []
             for _ in range(2):
@@ -211,7 +212,7 @@ def explore(
         tail = "\n".join(skill_lines + [log[-1]]) if skill_lines and log else (log[-1] if log else "")
         if winner == 0:
             stones = int((300 + 200 * session.floor) * depth * pf * stone_scale * (3 if kind == "elite" else 1))
-            session.stones += stones
+            session.stones += max(1, int(stones * (1.0 + float(treasure_bonus or 0))))
             drop = roll_drop(item_pool, rng, session.floor, elite=(kind == "elite"))
             got = ""
             if drop:
@@ -233,7 +234,7 @@ def explore(
 
     if kind == "chest":
         stones = int((500 + 300 * session.floor) * depth * pf * stone_scale)
-        session.stones += stones
+        session.stones += max(1, int(stones * (1.0 + float(treasure_bonus or 0))))
         session.log.append(f"第{session.floor}层：发现古旧宝箱，开出 {stones} 灵石")
         return session, me, "古旧宝箱中灵光一闪。", False
 

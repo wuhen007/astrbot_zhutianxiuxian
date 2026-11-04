@@ -66,7 +66,8 @@ QUALITY_TIERS = ("凡品", "极品", "仙品")
 
 
 def craft_pills(
-    recipe: Mapping, alchemy_lv: int, rng: random.Random, qty: int = 1
+    recipe: Mapping, alchemy_lv: int, rng: random.Random, qty: int = 1,
+    quality_bonus: float = 0.0,
 ) -> tuple[dict[str, int], int]:
     """原版炼丹语义（必成 + 品质分档）。返回 (产物分桶, 新经验)。
 
@@ -81,7 +82,8 @@ def craft_pills(
     exp_gain = int(recipe.get("exp", [0, 0])[0]) * ok_n
     if name in SPECIAL_DIRECT:
         return {"": ok_n}, exp_gain
-    fanpin = max(0.0, min(0.95, 0.1 + max(0, alchemy_lv) * 3 / 100))
+    # quality_bonus（命格·炼丹品质，W4-2）：抬升非凡品门槛 → 凡品更少
+    fanpin = max(0.0, min(0.95, 0.1 + max(0, alchemy_lv) * 3 / 100 + max(0.0, float(quality_bonus or 0))))
     counts: dict[str, int] = {}
     for _ in range(ok_n):
         r1, r2 = rng.random(), rng.random()
@@ -96,14 +98,15 @@ def craft_pills(
 
 
 def craft(
-    recipe: Mapping, alchemy_exp: int, rng: random.Random, qty: int = 1
+    recipe: Mapping, alchemy_exp: int, rng: random.Random, qty: int = 1,
+    success_bonus: float = 0.0,
 ) -> tuple[bool, int, str]:
     """炼制 qty 次。返回 (全部成功?, 新累计经验, 文本)。
 
     逐次掷骰；材料扣减由调用方在事务中完成（这里只算结果与经验）。
     """
     lv = level_of(alchemy_exp)
-    rate = success_rate(recipe, lv)
+    rate = min(1.0, success_rate(recipe, lv) + max(0.0, float(success_bonus or 0)))
     ok_n = sum(1 for _ in range(max(1, qty)) if rng.random() < rate)
     fail_n = qty - ok_n
     exp_gain = int(recipe.get("exp", [0, 0])[0]) * ok_n + int(recipe.get("exp", [0, 0])[1]) * fail_n

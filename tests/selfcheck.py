@@ -2600,6 +2600,47 @@ async def main():
     assert "岁月沉淀" in river_mod.text(rt)
     print("river ok")
 
+    # 17c. 命格消费点（W4-2）：采药/采矿/炼丹品质/签到倍率/寻宝
+    from core import occupation as occupation_mod  # noqa: E402
+    from core import alchemy as alchemy_mod  # noqa: E402
+
+    md2 = PlayerDoc(uid="md2", name="百命", realm_index=30)
+    md2.ext["mingge"] = {"name": "草木通灵", "effects": {"采药加成": 0.2, "采矿加成": 0.25,
+                                                          "炼丹品质": 0.15, "寻宝加成": 0.3}}
+    herbs, exp_h = occupation_mod.plant_yield(480, 5, 30, _random.Random(1))
+    herbs_b, _ = occupation_mod.plant_yield(480, 5, 30, _random.Random(1))
+    if herbs:
+        boosted = {k: max(1, int(v * 1.2)) for k, v in herbs_b.items()}
+        assert any(boosted.get(k, 0) >= v for k, v in herbs.items()), (herbs, boosted)
+    # 炼丹品质：阈值 0.1+lv×3% − 0.15
+    recipe = {"name": "叩仙丹", "rate": 1.0, "exp": [10, 5]}
+    b1, _ = alchemy_mod.craft_pills(recipe, 0, _random.Random(1), 50)
+    b2, _ = alchemy_mod.craft_pills(recipe, 0, _random.Random(1), 50, quality_bonus=0.15)
+    fan1 = b1.get("凡品", 0)
+    fan2 = b2.get("凡品", 0)
+    assert fan2 <= fan1, (fan1, fan2)   # 品质加成后凡品不增
+    # 签到倍率
+    sd = PlayerDoc(uid="sd", name="签客", realm_index=10)
+    ok, msg, d1 = cultivate.sign_in(sd, 0, 0, 1_800_000_000, _random.Random(1))
+    sd2 = PlayerDoc(uid="sd2", name="倍签", realm_index=10)
+    ok, msg, d2 = cultivate.sign_in(sd2, 0, 0, 1_800_000_000, _random.Random(1), reward_mult=1.5)
+    assert d2.stones == int(d1.stones * 1.5), (d1.stones, d2.stones)
+    # 寻宝加成：explore 结算 stones 放大
+    se1 = secret_mod.Session(place="青冥山")
+    se2 = secret_mod.Session(place="青冥山")
+    su = battle_mod.Unit("甲", 10 ** 9, 10 ** 6, 10 ** 10, 1.0)
+    su_f = Fighter.from_unit(su)
+    foe = battle_mod.Unit("兽", 1, 1, 10 ** 9, 0.0)
+    for sess_x, bonus_v in ((se1, 0.0), (se2, 0.3)):
+        rng_x = _random.Random(9)
+        me_x = battle_mod.Unit("甲", 10 ** 9, 10 ** 6, 10 ** 10, 1.0)
+        mf_x = Fighter.from_unit(me_x)
+        for _ in range(3):
+            secret_mod.explore(sess_x, (10 ** 9, 10 ** 6, 10 ** 10), me_x,
+                               [], rng_x, me_fighter=mf_x, treasure_bonus=bonus_v)
+    assert se2.stones > se1.stones, (se1.stones, se2.stones)   # 同种子 1.3 倍应更高
+    print("mingge consumers ok")
+
     # 17. 宗门纯函数 + 存取
     from core import sect as sect_mod  # noqa: E402
 

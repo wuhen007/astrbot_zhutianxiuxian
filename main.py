@@ -1154,6 +1154,7 @@ class ZhutianPlugin(Star):
         ok, msg, d = cultivate.sign_in(
             doc, int(self._val("SIGN_REWARD_MIN", 100)), int(self._val("SIGN_REWARD_MAX", 500)),
             time.time(), _random.Random(f"{doc.uid}:{int(time.time() // 86400)}"),
+            reward_mult=mingge.multiplier(doc, "签到奖励倍率"),     # 命格（W4-2）
         )
         if ok:
             lost, dead = lifespan.daily_decay(d, time.time())   # 寿元流逝（W2-2）
@@ -8578,6 +8579,7 @@ class ZhutianPlugin(Star):
 
         sess, me, flavor, fled = secret.explore(
             sess, base, me, self.drop_pool, rng, sect_mode=bool(sess.sect_name), me_fighter=me_fighter,
+            treasure_bonus=mingge.bonus(doc, "寻宝加成"),
             buff=_buff, protect=_protect,
         )
         if used_arrays:
@@ -9193,7 +9195,10 @@ class ZhutianPlugin(Star):
             consume[str(m["name"])] = consume.get(str(m["name"]), 0) + int(m["amount"]) * qty
         import random as _random
         rng = _random.Random(f"{doc.uid}:{pill_name}:{qty}:{time.time()}")
-        buckets, new_exp = alchemy.craft_pills(recipe, occ_lv, rng, qty)  # 品质阈值用职业等级（原版 dengjixiuzheng）
+        buckets, new_exp = alchemy.craft_pills(
+            recipe, occ_lv, rng, qty,
+            quality_bonus=mingge.bonus(doc, "炼丹品质"),   # 命格（W4-2）：凡品更少
+        )  # 品质阈值用职业等级（原版 dengjixiuzheng）
         d = doc.model_copy(deep=True)
         d.ext["alchemy_exp"] = new_exp
         gain: dict[str, int] = {}
@@ -9693,6 +9698,9 @@ class ZhutianPlugin(Star):
         lv, _ = self._ensure_occ(doc)
         import random as _random
         herbs, exp = occupation.plant_yield(minutes, lv, realm_id, _random.Random(f"{doc.uid}:plant:{time.time()}"))
+        herb_b = mingge.bonus(doc, "采药加成")     # 命格·草木通灵（W4-2）
+        if herb_b > 0:
+            herbs = {k: max(1, int(v * (1.0 + herb_b))) for k, v in herbs.items()}
         nlv, nexp = occupation.add_exp(lv, self._ensure_occ(doc)[1], exp, self.occ_exp_table)
         d.ext["occupation_level"] = nlv
         d.ext["occupation_exp"] = nexp
@@ -9743,6 +9751,9 @@ class ZhutianPlugin(Star):
         lv, exp_now = self._ensure_occ(doc)
         import random as _random
         mats, exp = occupation.mine_yield_full(minutes, lv, self.occ_exp_table, _random.Random(f"{doc.uid}:mine:{time.time()}"))
+        mine_b = mingge.bonus(doc, "采矿加成")     # 命格·地脉亲和（W4-2）
+        if mine_b > 0:
+            mats = {k: max(1, int(v * (1.0 + mine_b))) for k, v in mats.items()}
         nlv, nexp = occupation.add_exp(lv, exp_now, exp, self.occ_exp_table)
         d.ext["occupation_level"] = nlv
         d.ext["occupation_exp"] = nexp
@@ -10067,7 +10078,9 @@ class ZhutianPlugin(Star):
         rng = _random.Random(f"{doc.uid}:{item_name}:{time.time()}")
         # 对齐原版 lianqi：成功率 = 图纸 rate × (1 + 职业等级加成)，≥24 级 0.8 封顶
         is_forger = doc.ext.get("occupation") == "炼器师"
-        suc = occupation.forge_rate(float(recipe.get("rate", 1) or 1), occ_lv if is_forger else 0, self.occ_exp_table)
+        suc = min(0.99, occupation.forge_rate(
+            float(recipe.get("rate", 1) or 1), occ_lv if is_forger else 0, self.occ_exp_table
+        ) + mingge.bonus(doc, "炼器成功率"))     # 命格（W4-2）
         mats_txt = "、".join(f"{m['name']}×{m['amount']}" for m in recipe["materials"])
         d = doc.model_copy(deep=True)
         d.ext["forge_exp"] = forge_exp

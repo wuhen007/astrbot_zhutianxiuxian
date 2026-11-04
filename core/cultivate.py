@@ -19,6 +19,7 @@ def sign_in(
     reward_max: int = 0,
     now: float | None = None,
     rng: random.Random | None = None,
+    reward_mult: float = 1.0,
 ) -> tuple[bool, str, PlayerDoc]:
     """每日签到（对齐原版 daily_gift：自然日判定 + 连续签到递增压值）。
 
@@ -39,7 +40,7 @@ def sign_in(
     streak = int(d.ext.get("sign_streak", 0) or 0) + 1 if last == yesterday else 1
     realm = max(0, d.realm_index) + 1
     xiuwei = streak * 1000 * realm * realm
-    stones = streak * 300 * realm
+    stones = max(1, int(streak * 300 * realm * max(0.1, float(reward_mult or 1.0))))
     d.ext["sign_streak"] = streak
     d.ext["last_sign_date"] = today
     d.exp += xiuwei
