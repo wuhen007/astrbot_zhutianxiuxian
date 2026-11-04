@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, boss, calamity, catalog, cultivate, dibing, equipment, items, lifespan, linggen, mingge, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, boss, calamity, catalog, cultivate, dibing, equipment, items, lifespan, linggen, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -50,6 +50,8 @@ CMD_PROF_ALLOC = "#分配功法感悟"
 CMD_SHOUYUAN = "#寿元"
 CMD_MINGGE = "#我的命格"
 CMD_MINGGE_REROLL = "#改命"
+CMD_RIVER = "#遨游时间长河"
+CMD_RIVER_INFO = "#时间长河"
 CMD_BAG = "#我的纳戒"
 CMD_BAG_ALIAS = "#纳戒"
 CMD_SHOP = "#商店"
@@ -1030,6 +1032,8 @@ class ZhutianPlugin(Star):
                 (CMD_SHOUYUAN, "寿元（每日签到流逝，耗尽轮回转世）"),
                 (CMD_MINGGE, "命格（出生判定词条，战斗/突破/签到/渡劫生效）"),
                 (CMD_MINGGE_REROLL, "改命（10 万灵石重演天机，可洗负面）"),
+                (CMD_RIVER, "遨游时间长河（45 重+，30 分 CD：三帝法身/悟道/拾遗/传道）"),
+                (CMD_RIVER_INFO, "岁月沉淀与传道进度"),
                 (CMD_BOSS, "世界 Boss 状态与贡献榜"),
                 (CMD_BOSS_FIGHT, "讨伐妖王（气血>10%，按贡献分奖池）"),
                 (CMD_HEAL, "花灵石疗伤回满"),
@@ -1946,6 +1950,79 @@ class ZhutianPlugin(Star):
         if ok:
             await self.db.save_player(doc.model_dump())
         yield event.plain_result(msg)
+
+    # ---- W3-1：时间长河（单人遨游轻量版） ----
+
+    @filter.command(CMD_RIVER, "遨游时间长河")
+    async def handle_river(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        now = time.time()
+        msg = river.check(doc, now)
+        if msg:
+            yield event.plain_result(msg)
+            return
+        import random as _random
+        from .core.combat.loadout import build_fighter
+        from .core.combat import run_1v1
+        rng = _random.Random(f"{doc.uid}:river:{now}")
+        st = self._stats(doc)
+        hp_cur, hp_max = self._hp_pair(doc)
+        lookup = self.item_index.get
+        body_table = self.content.table("Level/炼体境界") or []
+        qi_rows = self.content.table(doc.realm_table)
+
+        def build(name: str, mult: float):
+            if name == "__me__":
+                f = build_fighter(doc, doc.name or "道友", st.atk, st.defense, hp_cur, st.bao,
+                                  lookup, skill_tables={
+                                      "atk": self.content.table("item/技能组/攻击技能") or [],
+                                      "def": self.content.table("item/技能组/防御技能") or [],
+                                      "heal": self.content.table("item/技能组/治疗技能") or [],
+                                      "boost": self.content.table("item/技能组/灵根增幅技能") or [],
+                                  })
+                stg = trib.best_stage(doc)
+                if stg[2] > 1.0:
+                    f.atk = max(1, int(f.atk * stg[2]))
+                    f.defense = max(1, int(f.defense * stg[2]))
+                    f.hp_max = max(1, int(f.hp_max * stg[2]))
+                    f.hp = min(f.hp_max, max(1, int(f.hp * stg[2])))
+                for sk in f.tags.get("atk_skills") or []:
+                    sk["pr"] = min(0.95, float(sk.get("pr", 0) or 0) * stg[1])
+                atk_b = mingge.bonus(doc, "攻击加成")
+                if atk_b:
+                    f.atk = max(1, int(f.atk * (1 + atk_b)))
+                f.bao = min(1.0, f.bao + mingge.bonus(doc, "暴击加成"))
+                return f
+            row_q = qi_rows[min(int(doc.realm_index), len(qi_rows) - 1)]
+            row_b = body_table[min(int(doc.physique_index), len(body_table) - 1)]
+            return build_fighter(
+                doc, name,
+                max(1, int((int(row_q["基础攻击"]) + int(row_b["基础攻击"])) * mult)),
+                max(1, int((int(row_q["基础防御"]) + int(row_b["基础防御"])) * mult)),
+                max(1, int((int(row_q["基础血量"]) + int(row_b["基础血量"])) * mult)),
+                0.15, lookup,
+            )
+
+        text, gains = river.roam(doc, st, build, run_1v1, rng, now)
+        await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, text, "时间长河"):
+            yield r
+
+    @filter.command(CMD_RIVER_INFO, "时间长河")
+    async def handle_river_info(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, river.text(doc), "时间长河"):
+            yield r
 
     @filter.command(CMD_MINGGE, "我的命格")
     async def handle_mingge(self, event: AstrMessageEvent):

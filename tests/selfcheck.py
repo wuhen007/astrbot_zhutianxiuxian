@@ -2534,6 +2534,72 @@ async def main():
     assert "测试命" in mg_mod.text(md)
     print("mingge ok")
 
+    # 17b. 时间长河（W3-1）：门槛/CD/四事件/结晶/传道
+    from core import river as river_mod  # noqa: E402
+
+    rd = PlayerDoc(uid="rd", name="渡客", realm_index=44, stones=0)
+    assert river_mod.check(rd, 1_800_000_000) is not None, "44 重应被拒"
+    rd.realm_index = 46
+    assert river_mod.check(rd, 1_800_000_000) is None
+    rd.ext["river"] = {"last": 1_800_000_000 - 60}
+    m = river_mod.check(rd, 1_800_000_000)
+    assert m and "分" in m, m
+    rd.ext["river"] = {}
+
+    class _F:
+        def __init__(s, name, mult):
+            s.name = name
+            s.hp = 1_000_000 if name == "__me__" else int(900_000 * mult)
+            s.hp_max = s.hp
+            s.atk = 100 if name == "__me__" else int(200 * mult)
+            s.defense = 100 if name == "__me__" else int(200 * mult)
+            s.bao = 0.1
+            s.effects = {}
+            s.tags = {}
+
+    class _Res:
+        def __init__(s, w):
+            s.winner = w
+            s.a_hp = 900_000
+            s.log = []
+
+    calls = {"n": 0}
+
+    def _run(fa, fb, rng):
+        calls["n"] += 1
+        return _Res(0 if fb.atk <= 500 else 1)   # 弱敌我赢、强敌我输
+
+    outcomes = set()
+    for seed in range(40):
+        rr = PlayerDoc(uid=f"r{seed}", name="渡客", realm_index=46, stones=0)
+        rr.exp = 50_000_000
+        rng = _random.Random(seed)
+        text_r, gains = river_mod.roam(rr, None, _F, _run, rng, 1_800_000_000)
+        outcomes.add(("遇敌" if "三帝法身" in text_r else
+                      "悟道" if "静观" in text_r else
+                      "拾遗" if "遗物" in text_r else "传道"))
+        assert rr.ext["river"]["crystal"] >= 0
+        assert rr.ext["river"]["last"] == 1_800_000_000
+    assert outcomes == {"遇敌", "悟道", "拾遗", "传道"}, outcomes
+    # 传道：有功法时涨熟练度
+    rt = PlayerDoc(uid="rt", name="剑客", realm_index=46)
+    rt.ext["gongfa"] = ["凰劫再生术"]
+    rt.ext["river"] = {"teachings": 0}
+    for seed in range(60):
+        rt.ext["river"]["last"] = 0
+        rng = _random.Random(1000 + seed)
+        roll_v = rng.random()
+        rng2 = _random.Random(1000 + seed)
+        rng2.random()  # 重放第一掷
+        if roll_v >= 0.88:
+            text_r, gains = river_mod.roam(rt, None, _F, _run, rng2, 1_800_000_000 + seed)
+            if gains.get("prof"):
+                assert trib_mod.prof_of(rt).get("凰劫再生术", 0) > 0
+                break
+    assert river_mod.CRYSTAL_HUANG == 15 and river_mod.TEACHING_MAX == 30
+    assert "岁月沉淀" in river_mod.text(rt)
+    print("river ok")
+
     # 17. 宗门纯函数 + 存取
     from core import sect as sect_mod  # noqa: E402
 
