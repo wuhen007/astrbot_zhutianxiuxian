@@ -12,9 +12,16 @@ from typing import Any, AsyncIterator, Optional
 
 import aiosqlite
 
-from core.clock import day_key as _shanghai_date_key
-
 LATEST_DB_VERSION = 15
+
+
+def _shanghai_date_key(ts: float) -> str:
+    """每日任务日期键：北京时间（UTC+8），与 core/clock.day_key 同一口径。
+
+    不直接导入 core.clock：本模块会被 AstrBot 以包子模块、被 selfcheck 以
+    顶层模块两种方式加载，跨包导入在后者会炸。
+    """
+    return time.strftime("%Y-%m-%d", time.gmtime(ts + 8 * 3600))
 
 
 def _serialized(write_fn):
