@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, boss, calamity, catalog, cultivate, dibing, equipment, items, linggen, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, boss, calamity, catalog, cultivate, dibing, equipment, items, lifespan, linggen, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -47,6 +47,7 @@ CMD_TRIB = "#渡劫"
 CMD_ASCEND = "#登仙"
 CMD_PROF = "#功法熟练度"
 CMD_PROF_ALLOC = "#分配功法感悟"
+CMD_SHOUYUAN = "#寿元"
 CMD_BAG = "#我的纳戒"
 CMD_BAG_ALIAS = "#纳戒"
 CMD_SHOP = "#商店"
@@ -1021,6 +1022,7 @@ class ZhutianPlugin(Star):
                 (CMD_ASCEND, "登仙（渡劫成功后，无妄真劫境 → 地仙）"),
                 (CMD_PROF, "功法参悟（熟练度/档位/感悟值）"),
                 (f"{CMD_PROF_ALLOC} 功法名*数量", "分配感悟 → 熟练度（战斗每场 +2 感悟）"),
+                (CMD_SHOUYUAN, "寿元（每日签到流逝，耗尽轮回转世）"),
                 (CMD_BOSS, "世界 Boss 状态与贡献榜"),
                 (CMD_BOSS_FIGHT, "讨伐妖王（气血>10%，按贡献分奖池）"),
                 (CMD_HEAL, "花灵石疗伤回满"),
@@ -1143,6 +1145,11 @@ class ZhutianPlugin(Star):
             time.time(), _random.Random(f"{doc.uid}:{int(time.time() // 86400)}"),
         )
         if ok:
+            lost, dead = lifespan.daily_decay(d, time.time())   # 寿元流逝（W2-2）
+            if dead:
+                msg = lifespan.rebirth(d)
+            elif lost:
+                msg += f"\n岁月无声，寿元 -{lost}（剩余 {int(d.ext['shouyuan']):,}）"
             async with self.db.transaction():
                 await self.db.save_player(d.model_dump())
                 await self.db.add_items(doc.uid, {"秘境之匙": 1})  # 对齐原版 Sign.ticket=1/天
@@ -1857,6 +1864,9 @@ class ZhutianPlugin(Star):
             yield event.plain_result(msg)
             return
         ok, text = trib.trib_run(doc, st, _random.Random(f"{doc.uid}:trib:{int(time.time())}"))
+        if ok:
+            lifespan.grant(doc, lifespan.TRIB_BONUS)
+            text += f"\n※ 天劫洗身，寿元 +{lifespan.TRIB_BONUS}（现 {int(doc.ext['shouyuan']):,}）"
         await self.db.save_player(doc.model_dump())
         async for r in self._smart(event, text, "渡劫"):
             yield r
@@ -1878,6 +1888,8 @@ class ZhutianPlugin(Star):
         if not ok:
             yield event.plain_result(text)
             return
+        lifespan.grant(doc, lifespan.ASCEND_BONUS)
+        text += f"\n※ 仙寿绵长，寿元 +{lifespan.ASCEND_BONUS}（现 {int(doc.ext['shouyuan']):,}）"
         await self.db.save_player(doc.model_dump())
         async for r in self._smart(event, text, "登仙"):
             yield r
@@ -1913,6 +1925,17 @@ class ZhutianPlugin(Star):
         if ok:
             await self.db.save_player(doc.model_dump())
         yield event.plain_result(msg)
+
+    @filter.command(CMD_SHOUYUAN, "寿元")
+    async def handle_shouyuan(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, lifespan.text(doc), "寿元"):
+            yield r
 
     # ---- 世界 Boss / 疗伤 ----
 

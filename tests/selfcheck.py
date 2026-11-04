@@ -2459,6 +2459,47 @@ async def main():
     assert n == 4122, n
     print("trib & prof ok")
 
+    # 16z. 寿元 / 轮回（W2-2）
+    from core import lifespan as life_mod  # noqa: E402
+
+    ls = PlayerDoc(uid="ls", name="凡修", realm_index=20, stones=10_000)
+    # 惰性初始化 (realm+1)×500
+    assert life_mod.shouyuan_of(ls) == 21 * 500
+    # 未登仙流逝 10；同日不重复
+    lost, dead = life_mod.daily_decay(ls, 1_800_000_000)
+    assert lost == 10 and not dead and life_mod.shouyuan_of(ls) == 21 * 500 - 10
+    lost2, _ = life_mod.daily_decay(ls, 1_800_000_100)
+    assert lost2 == 0, "同日不应重复流逝"
+    # 体质减免：圣体 ×0.7
+    st_body = PlayerDoc(uid="stb", name="圣体", realm_index=20)
+    st_body.ext["linggen"] = {"name": "圣体", "type": "圣体"}
+    st_body.ext["shouyuan_day"] = ""
+    lost3, _ = life_mod.daily_decay(st_body, 1_800_000_000)
+    assert lost3 == 7, lost3
+    # 登仙后 100 / ≥50 境折半
+    im = PlayerDoc(uid="im", name="地仙", realm_index=41)
+    lost4, _ = life_mod.daily_decay(im, 1_800_000_000)
+    assert lost4 == 100, lost4
+    hi = PlayerDoc(uid="hi", name="仙帝", realm_index=55)
+    lost5, _ = life_mod.daily_decay(hi, 1_800_000_000)
+    assert lost5 == 50, lost5
+    # 归零轮回：境界归 1、灵石折半、轮回 +1、寿元重置
+    old_stones = ls.stones
+    dead_doc = PlayerDoc(uid="dd", name="寿尽", realm_index=30, stones=8_000)
+    dead_doc.ext["shouyuan"] = 5
+    dead_doc.exp = 999_999
+    lost6, dead = life_mod.daily_decay(dead_doc, 1_800_000_000)
+    assert dead, "寿元耗尽应触发轮回"
+    msg_r = life_mod.rebirth(dead_doc)
+    assert dead_doc.realm_index == 0 and dead_doc.stones == 4_000, msg_r
+    assert dead_doc.ext["rebirths"] == 1 and life_mod.shouyuan_of(dead_doc) == 500
+    assert "第 1 世" in msg_r
+    # grant：渡劫/登仙加寿
+    life_mod.grant(dead_doc, life_mod.TRIB_BONUS)
+    assert life_mod.shouyuan_of(dead_doc) == 500 + life_mod.TRIB_BONUS
+    assert "寿元" in life_mod.text(ls)
+    print("lifespan ok")
+
     # 17. 宗门纯函数 + 存取
     from core import sect as sect_mod  # noqa: E402
 

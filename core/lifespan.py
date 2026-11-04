@@ -1,0 +1,120 @@
+"""寿元 / 轮回（W2-2，对齐原版 apps/User/shouyuan.js + shouyuantask.js）。
+
+原版语义：
+- 寿元初始化 = 境界 id × 500（一键同步）；
+- 流逝：定时任务每 3 小时（困难难度）——本移植无定时器，改为**每日签到时结算一次**；
+  量级：未登仙（realm<41）固定 10 / 登仙后 100 / realm≥50 折半（原版 100/1000/500 同比 ÷100）；
+  体质减免直译：圆环之理 ×0.1、圣体道胎/大成圣体/混沌体 ×0.5、小成圣体/大道体 ×0.6、
+  圣体 ×0.7、神体/转生/魔头 ×0.8。
+- 寿元 ≤0 → 轮回往生（原版 24h 救援窗口+执掌者，shortcut 未复刻）：境界归 1、修为血气清零、
+  灵石折半、轮回次数 +1、寿元重置 500。
+- 增补：渡劫成功 +5000、登仙 +10000（原版 Add_寿元 通道，无对应物品表）。
+"""
+
+from __future__ import annotations
+
+import time
+from typing import Any
+
+from .player import PlayerDoc
+
+BASE_PER_REALM = 500
+DECAY_MORTAL = 10        # 未登仙每日
+DECAY_IMMORTAL = 100     # 登仙后每日
+ASCEND_DISCOUNT_REALM = 50
+DECAY_DISCOUNT = 0.5
+
+TYPE_DISCOUNT = {
+    "圆环之理": 0.1,
+    "圣体道胎": 0.5, "大成圣体": 0.5, "混沌体": 0.5,
+    "小成圣体": 0.6, "大道体": 0.6,
+    "圣体": 0.7,
+    "神体": 0.8, "转生": 0.8, "魔头": 0.8, "魔女": 0.8,
+    "魔法少女": 0.8, "魔卡少女": 0.8,
+}
+REBIRTH_LIFESPAN = 500
+TRIB_BONUS = 5000
+ASCEND_BONUS = 10000
+
+
+def shouyuan_of(doc: PlayerDoc) -> int:
+    """当前寿元；旧档惰性初始化为 (realm_index+1)×500。"""
+    v = doc.ext.get("shouyuan")
+    if v is None:
+        v = (int(doc.realm_index) + 1) * BASE_PER_REALM
+        doc.ext["shouyuan"] = v
+    return int(v)
+
+
+def _type_of(doc: PlayerDoc) -> str:
+    lg = doc.ext.get("linggen")
+    return str(lg.get("type") or "") if isinstance(lg, dict) else ""
+
+
+def decay_amount(doc: PlayerDoc) -> int:
+    """本日流逝量（体质减免直译）。"""
+    realm = int(doc.realm_index)
+    if realm < 41:
+        base = DECAY_MORTAL
+    elif realm >= ASCEND_DISCOUNT_REALM:
+        base = int(DECAY_IMMORTAL * DECAY_DISCOUNT)
+    else:
+        base = DECAY_IMMORTAL
+    disc = TYPE_DISCOUNT.get(_type_of(doc))
+    if disc is not None:
+        base = max(1, int(base * disc))
+    return base
+
+
+def daily_decay(doc: PlayerDoc, now: float) -> tuple[int, bool]:
+    """签到时调用：自然日一次流逝。返回 (本次流逝, 是否触发轮回)。"""
+    day = time.strftime("%Y-%m-%d", time.localtime(now))
+    if doc.ext.get("shouyuan_day") == day:
+        return 0, False
+    doc.ext["shouyuan_day"] = day
+    cur = shouyuan_of(doc)
+    left = max(0, cur - decay_amount(doc))
+    doc.ext["shouyuan"] = left
+    return cur - left, left <= 0
+
+
+def rebirth(doc: PlayerDoc) -> str:
+    """寿元耗尽转世：境界/修为/血气归零，灵石折半，轮回 +1。"""
+    count = int(doc.ext.get("rebirths", 0) or 0) + 1
+    doc.ext["rebirths"] = count
+    doc.realm_index = 0
+    doc.physique_index = 0
+    doc.exp = 0
+    doc.stones = int(doc.stones) // 2
+    doc.ext["hp"] = 0
+    doc.ext["xueqi"] = 0.0
+    doc.ext["shouyuan"] = REBIRTH_LIFESPAN
+    doc.ext.pop("shouyuan_day", None)
+    doc.ext.pop("power", None)
+    doc.state = "空闲"
+    return (f"【轮回往生】寿元已尽，真灵入轮回路——第 {count} 世开启。\n"
+            f"境界与修为尽归尘土，灵石折半随身，寿元重续 {REBIRTH_LIFESPAN}。\n"
+            f"前尘记忆不灭，道友重头再来。")
+
+
+def grant(doc: PlayerDoc, amount: int) -> int:
+    """增寿（渡劫/登仙等）。返回新值。"""
+    cur = shouyuan_of(doc)
+    doc.ext["shouyuan"] = cur + max(0, int(amount))
+    return doc.ext["shouyuan"]
+
+
+def text(doc: PlayerDoc) -> str:
+    cur = shouyuan_of(doc)
+    t = _type_of(doc)
+    disc = TYPE_DISCOUNT.get(t)
+    lines = [
+        "--- 寿元 ---",
+        f"寿元：{cur:,} 年（第 {int(doc.ext.get('rebirths', 0) or 0) + 1} 世）",
+        f"每日流逝：{decay_amount(doc)} 年（签到时结算）",
+    ]
+    if disc is not None:
+        lines.append(f"体质「{t}」岁月侵蚀 ×{disc:g}")
+    if cur <= 100:
+        lines.append("⚠ 寿元将尽，大限将至……")
+    return "\n".join(lines)

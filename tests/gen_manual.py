@@ -39,7 +39,7 @@ def main() -> int:
                     "handle_enter", "handle_search", "handle_flee",
                     "handle_addict", "handle_addict_claim", "handle_addict_clear",
                     "handle_rob", "handle_biwu", "handle_trib", "handle_ascend",
-                    "handle_prof", "handle_prof_alloc")),
+                    "handle_prof", "handle_prof_alloc", "handle_shouyuan")),
         ("黑暗动乱·神魄", ("handle_dark_open", "handle_dark_close", "handle_dark_status",
                        "handle_dark_fight", "handle_dark_rank", "handle_shenpo", "handle_shenpo_all")),
         ("宗门", ("handle_sect_create", "handle_sect_join", "handle_sect_quit", "handle_sect_mine",
