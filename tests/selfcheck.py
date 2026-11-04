@@ -2213,6 +2213,54 @@ async def main():
     assert any("困住" in x for x in res2.log)
     print("orb & arrays ok")
 
+    # 16v. 开场阶段（W1-4）：高境镇杀 / 岁云同境裁决 / 帝骑助战
+    from core.combat import opening as opening_mod  # noqa: E402
+
+    # 镇杀：auth21 ≥20 且不等
+    f_hi = Fighter("仙帝", 99999, 99999, 999999, 0.0)
+    f_hi.tags["auth21"] = 21
+    f_lo = Fighter("凡人", 100, 100, 1000, 0.0)
+    f_lo.tags["auth21"] = 15
+    exec_res = opening_mod.high_realm_exec(f_lo, f_hi)
+    assert exec_res and exec_res[0] == 1 and f_lo.hp == 0
+    assert "境界天堑" in exec_res[1][0]
+    # 同档 / 低档不触发
+    f_hi2 = Fighter("甲", 1, 1, 10, 0.0); f_hi2.tags["auth21"] = 19
+    assert opening_mod.high_realm_exec(f_hi2, f_lo) is None
+    assert opening_mod.high_realm_exec(f_hi, Fighter("乙", 1, 1, 10, 0.0,
+                                                    tags={"auth21": 21})) is None
+
+    # 岁云裁决：压高轨基础表值
+    fh = Fighter("岁云客", 5000, 3000, 50000, 0.0)
+    fh.tags.update({"linggen_name": "岁云化身", "auth_of": 20, "realm_index": 20, "physique_index": 10})
+    fo2 = Fighter("高境客", 60000, 30000, 800000, 0.0)
+    fo2.tags.update({"auth_of": 46, "realm_index": 46, "physique_index": 5})
+    old_atk, old_def, old_hp = fo2.atk, fo2.defense, fo2.hp
+    vmsgs = opening_mod.suiyun_verdict(fh, fo2, store.table("Level/练气境界"), body_table)
+    assert len(vmsgs) == 1 and "同境裁决" in vmsgs[0], vmsgs
+    # 压缩量 = 练气表 46 行 - 20 行（对手高轨为练气）
+    exp_atk = old_atk - (store.table("Level/练气境界")[46]["基础攻击"] - store.table("Level/练气境界")[20]["基础攻击"])
+    assert fo2.atk == max(1, exp_atk), (fo2.atk, exp_atk)
+    assert fo2.hp_max < old_hp and fo2.hp <= fo2.hp_max
+    # 无岁云灵根不触发
+    fh2 = Fighter("素人", 1, 1, 10, 0.0); fh2.tags["linggen_name"] = "金灵根"
+    assert opening_mod.suiyun_verdict(fh2, fo2, store.table("Level/练气境界"), body_table) == []
+    # 对手权柄不高不触发
+    fo3 = Fighter("低境", 1, 1, 10, 0.0); fo3.tags["auth_of"] = 10
+    assert opening_mod.suiyun_verdict(fh, fo3, store.table("Level/练气境界"), body_table) == []
+
+    # 帝骑助战：三卡合击 = trunc(攻×0.6×2)；不足三卡不触发
+    fd = Fighter("帝骑", 10000, 1000, 50000, 0.0)
+    fv = Fighter("对手", 1000, 1000, 50000, 0.0)
+    assert opening_mod.decade_assist(fd, fv, ["空我", "龙骑"]) is None
+    msg_d = opening_mod.decade_assist(fd, fv, ["空我", "龙骑", "Faiz"])
+    assert msg_d and "合击" in msg_d and fv.hp == 50000 - 12000, (msg_d, fv.hp)
+    # 一击致溃
+    fv2 = Fighter("脆皮", 1, 1, 100, 0.0)
+    opening_mod.decade_assist(fd, fv2, ["空我", "龙骑", "Faiz"])
+    assert fv2.hp == 0
+    print("opening ok")
+
     # 17. 宗门纯函数 + 存取
     from core import sect as sect_mod  # noqa: E402
 

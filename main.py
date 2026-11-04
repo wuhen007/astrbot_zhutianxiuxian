@@ -1008,7 +1008,7 @@ class ZhutianPlugin(Star):
                 (f"{CMD_GEM_UNSET} 部位 序号", "拆除宝石"),
             ]},
             {"title": "战斗秘境", "lines": [
-                (f"{CMD_SPAR} @道友", "切磋（60 秒冷却，功法加成/复活技生效）"),
+                (f"{CMD_SPAR} @道友", "切磋（60 秒冷却；功法/复活技/灵根法球/岁云同境/高境镇杀/帝骑助战）"),
                 (CMD_BOSS, "世界 Boss 状态与贡献榜"),
                 (CMD_BOSS_FIGHT, "讨伐妖王（气血>10%，按贡献分奖池）"),
                 (CMD_HEAL, "花灵石疗伤回满"),
@@ -1592,13 +1592,52 @@ class ZhutianPlugin(Star):
 
         import random as _random
         from .core.combat.loadout import build_fighter
-        from .core.combat import run_1v1
+        from .core.combat import opening, run_1v1
         rng = _random.Random(f"{doc.uid}:{foe.uid}:{now}")
         lookup = self.item_index.get
-        fa = build_fighter(doc, name_a, sa.atk, sa.defense, sa.hp, sa.bao, lookup)
-        fb = build_fighter(foe, name_b, sb.atk, sb.defense, sb.hp, sb.bao, lookup)
+        body_table = self.content.table("Level/炼体境界") or []
+
+        def _base_rows(p: PlayerDoc, qi_rows: list[dict]) -> tuple[dict, dict]:
+            return (qi_rows[min(int(p.realm_index), len(qi_rows) - 1)],
+                    body_table[min(int(p.physique_index), len(body_table) - 1)])
+
+        fa = build_fighter(doc, name_a, sa.atk, sa.defense, sa.hp, sa.bao, lookup,
+                           base_rows=_base_rows(doc, table_a))
+        fb = build_fighter(foe, name_b, sb.atk, sb.defense, sb.hp, sb.bao, lookup,
+                           base_rows=_base_rows(foe, table_b))
+        opening_log: list[str] = []
+        # 1) 岁云同境裁决：压高境对手到岁云持有者档位（原版先于镇杀，压后同级不触发天堑）
+        opening_log += opening.suiyun_verdict(fa, fb, table_a, body_table)
+        # 2) 高境镇杀：先于行动条/技能/复活
+        executed = opening.high_realm_exec(fa, fb)
+        if executed:
+            winner = executed[0]
+            log = opening_log + list(executed[1])
+            result = f"切磋结果：{name_a if winner == 0 else name_b} 胜！"
+            doc.ext["spar_ts"] = now
+            await self.db.save_player(doc.model_dump())
+            text = "\n".join(log + ["", result])
+            async for r in self._smart(event, text, "切磋"):
+                yield r
+            return
+        # 3) 帝骑助战：decade 三卡齐编 → 开场合击
+        for atk_f, def_f, atk_doc in ((fa, fb, doc), (fb, fa, foe)):
+            deck = (world_deep.decade_of(atk_doc.ext.get("zhutian") or {}) or {}).get("deck")
+            msg = opening.decade_assist(atk_f, def_f, deck)
+            if msg:
+                opening_log.append(msg)
+                if def_f.hp <= 0:
+                    winner = 0 if atk_f is fa else 1
+                    log = opening_log + [f"{def_f.name} 开场即溃，胜负已分。"]
+                    result = f"切磋结果：{name_a if winner == 0 else name_b} 胜！"
+                    doc.ext["spar_ts"] = now
+                    await self.db.save_player(doc.model_dump())
+                    text = "\n".join(log + ["", result])
+                    async for r in self._smart(event, text, "切磋"):
+                        yield r
+                    return
         res = run_1v1(fa, fb, rng)
-        winner, log = res.winner, res.log
+        winner, log = res.winner, opening_log + list(res.log)
         # 面板头部展示开场乘区后的实际数值
         sa = equipment.Stats(atk=fa.atk, defense=fa.defense, hp=fa.hp_max, bao=sa.bao,
                              set_lines=sa.set_lines)

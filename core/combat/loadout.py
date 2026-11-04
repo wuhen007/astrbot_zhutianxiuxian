@@ -43,23 +43,39 @@ def apply_start_bonuses(f: Fighter, battle_skills: list[dict]) -> Fighter:
 def build_fighter(
     doc: Any, name: str, atk: int, defense: int, hp: int, bao: float,
     item_lookup: Mapping[str, Any],
+    base_rows: tuple[dict, dict] | None = None,
 ) -> Fighter:
-    """从玩家文档构建带功法与灵根法球的战斗单位。"""
+    """从玩家文档构建带功法与灵根法球的战斗单位。
+
+    base_rows：(练气境界行, 炼体境界行)——开场系统（opening.py）做同境裁决时
+    按表值差压缩对手；不传则跳过身份挂载。
+    """
     from .. import linggen
+    from .. import authority as authority_mod
 
     f = Fighter(name=name, atk=int(atk), defense=int(defense), hp=int(hp),
                 hp_max=int(hp), bao=float(bao or 0.0))
-    orb = linggen.orb_of(getattr(doc, "ext", {}).get("linggen"))
+    lg = getattr(doc, "ext", {}).get("linggen")
+    orb = linggen.orb_of(lg)
     if orb > 0:
         f.effects["orb"] = orb
+    # 身份挂载：开场镇杀 / 岁云裁决 / 帝骑助战 依据
+    f.tags["auth_of"] = authority_mod.authority_of(doc)
+    f.tags["auth21"] = authority_mod.authority_21(doc)
+    f.tags["realm_index"] = int(getattr(doc, "realm_index", 0) or 0)
+    f.tags["physique_index"] = int(getattr(doc, "physique_index", 0) or 0)
+    f.tags["linggen_name"] = str(lg.get("name") or "") if isinstance(lg, Mapping) else ""
+    if base_rows:
+        f.tags["base_rows"] = base_rows
     battle_skills = learned_battle_skills(doc, item_lookup)
     if battle_skills:
         f = apply_start_bonuses(f, battle_skills)
         revive = battle_skills[0]      # 一场一次；多本取第一本（原版同为单次复活）
+        raw_pr = revive.get("pr")
         f.effects["revive"] = {
             "name": str(revive.get("name") or "复活技"),
             "ratio": min(1.0, max(0.05, float(revive.get("恢复比例", 0.7) or 0.7))),
-            "pr": min(1.0, max(0.0, float(revive.get("pr", 1) or 1))),
+            "pr": 1.0 if raw_pr is None else min(1.0, max(0.0, float(raw_pr))),
             "msg": str(revive.get("msg2") or ""),
             "used": False,
         }
