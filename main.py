@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, boss, calamity, catalog, cultivate, dibing, equipment, items, lifespan, linggen, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, boss, calamity, catalog, cultivate, dibing, equipment, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -52,6 +52,16 @@ CMD_MINGGE = "#我的命格"
 CMD_MINGGE_REROLL = "#改命"
 CMD_RIVER = "#遨游时间长河"
 CMD_RIVER_INFO = "#时间长河"
+CMD_LINGSHI = "#灵市"
+CMD_LS_BUY = "#买入"
+CMD_LS_SELL = "#卖出"
+CMD_LS_MY = "#我的股票"
+CMD_LS_TREND = "#股票走势"
+CMD_LS_TIP = "#打听"
+CMD_LS_CHAT = "#交谈"
+CMD_LS_LOAN = "#借款"
+CMD_LS_REPAY = "#还款"
+CMD_LS_RANK = "#灵市收益榜"
 CMD_BAG = "#我的纳戒"
 CMD_BAG_ALIAS = "#纳戒"
 CMD_SHOP = "#商店"
@@ -1034,6 +1044,18 @@ class ZhutianPlugin(Star):
                 (CMD_MINGGE_REROLL, "改命（10 万灵石重演天机，可洗负面）"),
                 (CMD_RIVER, "遨游时间长河（45 重+，30 分 CD：三帝法身/悟道/拾遗/传道）"),
                 (CMD_RIVER_INFO, "岁月沉淀与传道进度"),
+            ]},
+            {"title": "灵市", "lines": [
+                (CMD_LINGSHI, "全服共享修仙股市行情（8 只股票，10 分钟一 tick）"),
+                (f"{CMD_LS_BUY} 名称*股数", "买入（30bps 手续费，30 秒 CD）"),
+                (f"{CMD_LS_SELL} 名称*股数", "卖出（*-1 或省略数量清仓）"),
+                (CMD_LS_MY, "持仓/浮盈/已实现盈亏/借款"),
+                (f"{CMD_LS_TREND} 名称", "近 16 tick 走势与商会周期"),
+                (CMD_LS_TIP, "花 1000 灵石向消息贩打听倾向"),
+                (f"{CMD_LS_CHAT} 人物名", "与 8 位灵市人物交谈（各怀心思）"),
+                (f"{CMD_LS_LOAN} 数量", "向钱万三借款（日息 10bps，7 天期，逾期 1.5 倍）"),
+                (CMD_LS_REPAY, "还款结清"),
+                (CMD_LS_RANK, "全服收益榜"),
                 (CMD_BOSS, "世界 Boss 状态与贡献榜"),
                 (CMD_BOSS_FIGHT, "讨伐妖王（气血>10%，按贡献分奖池）"),
                 (CMD_HEAL, "花灵石疗伤回满"),
@@ -2063,6 +2085,172 @@ class ZhutianPlugin(Star):
             return
         async for r in self._smart(event, lifespan.text(doc), "寿元"):
             yield r
+
+    # ---- W5-1：灵市（全服共享修仙股市） ----
+
+    async def _market(self) -> dict:
+        """加载全服市场并懒推进行情。"""
+        g = await self.db.get_market()
+        if not g:
+            g = market.create_market(time.time())
+        market.advance(g, time.time())
+        await self.db.save_market(g)
+        return g
+
+    @filter.command(CMD_LINGSHI, "灵市")
+    async def handle_lingshi(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        g = await self._market()
+        async for r in self._smart(event, market.text(g, doc), "灵市"):
+            yield r
+
+    async def _market_trade(self, event, side: str, target: str):
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        raw = (target or "").strip()
+        name, _, qtxt = raw.partition("*")
+        g = await self._market()
+        stock = market.find_stock(g, name)
+        if not stock:
+            yield event.plain_result(f"灵市没有「{name}」这只票（#灵市 看行情）。")
+            return
+        qty = int(qtxt) if qtxt.strip().lstrip("-").isdigit() else (-1 if side == "sell" else 0)
+        now = time.time()
+        if side == "buy":
+            ok, msg = market.buy(g, doc, stock, qty, now)
+        else:
+            ok, msg = market.sell(g, doc, stock, qty, now)
+        if ok:
+            await self.db.save_player(doc.model_dump())
+            await self.db.save_market(g)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_LS_BUY, "买入")
+    async def handle_ls_buy(self, event: AstrMessageEvent, target: str = ""):
+        if not self._allowed(event):
+            return
+        if not (target or "").strip():
+            yield event.plain_result("格式：#买入 名称*股数（如 #买入 丹鼎阁*100）")
+            return
+        async for r in self._market_trade(event, "buy", target):
+            yield r
+
+    @filter.command(CMD_LS_SELL, "卖出")
+    async def handle_ls_sell(self, event: AstrMessageEvent, target: str = ""):
+        if not self._allowed(event):
+            return
+        if not (target or "").strip():
+            yield event.plain_result("格式：#卖出 名称*股数（#卖出 名称 或 #卖出 名称*-1 清仓）")
+            return
+        async for r in self._market_trade(event, "sell", target):
+            yield r
+
+    @filter.command(CMD_LS_MY, "我的股票")
+    async def handle_ls_my(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        g = await self._market()
+        async for r in self._smart(event, market.account_text(g, doc), "我的股票"):
+            yield r
+
+    @filter.command(CMD_LS_TREND, "股票走势")
+    async def handle_ls_trend(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        g = await self._market()
+        yield event.plain_result(market.trend_text(g, (name or "").strip()))
+
+    @filter.command(CMD_LS_TIP, "打听")
+    async def handle_ls_tip(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        g = await self._market()
+        ok, msg = market.tip(g, doc)
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_LS_CHAT, "交谈")
+    async def handle_ls_chat(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        g = await self._market()
+        yield event.plain_result(market.chat(g, (name or "").strip()))
+
+    @filter.command(CMD_LS_LOAN, "借款")
+    async def handle_ls_loan(self, event: AstrMessageEvent, amount: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if not (amount or "").strip().isdigit():
+            yield event.plain_result(f"格式：#借款 数量（{market.LOAN_MIN:,}~{market.LOAN_MAX:,}）")
+            return
+        g = await self._market()
+        ok, msg = market.take_loan(g, doc, int(amount), time.time())
+        if ok:
+            await self.db.save_player(doc.model_dump())
+            await self.db.save_market(g)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_LS_REPAY, "还款")
+    async def handle_ls_repay(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        g = await self._market()
+        ok, msg = market.repay(g, doc)
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_LS_RANK, "灵市收益榜")
+    async def handle_ls_rank(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        g = await self._market()
+        rows = []
+        for uid in await self.db.all_player_uids():
+            raw = await self.db.get_player(uid)
+            if not raw:
+                continue
+            from .core.player import PlayerDoc as _PD
+            d = _PD(**raw)
+            acc = market.account_of(d)
+            if not acc["holdings"] and not acc["realized"]:
+                continue
+            value = sum(h["shares"] * (market.find_stock(g, sid)["price"]
+                                       if market.find_stock(g, sid) else 0)
+                        for sid, h in acc["holdings"].items())
+            rows.append((d.name or uid[:8], acc["realized"], value))
+        rows.sort(key=lambda x: x[1] + x[2], reverse=True)
+        if not rows:
+            yield event.plain_result("灵市还没有商人开户。#买入 即可上榜。")
+            return
+        lines = ["--- 灵市收益榜 ---"]
+        for i, (name, realized, value) in enumerate(rows[:10], 1):
+            lines.append(f"{i}. {name}：已实现 {realized:+,}｜持仓市值 {value:,}")
+        yield event.plain_result("\n".join(lines))
 
     # ---- 世界 Boss / 疗伤 ----
 
@@ -9050,7 +9238,7 @@ class ZhutianPlugin(Star):
         )
 
     @filter.command(CMD_MARKET, "拍卖行一览")
-    async def handle_market(self, event: AstrMessageEvent, page: str = "1"):
+    async def handle_auction_page(self, event: AstrMessageEvent, page: str = "1"):
         if not self._allowed(event):
             return
         rows, pages = await self.db.auction_page(int(page or 1))

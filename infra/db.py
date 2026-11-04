@@ -10,7 +10,7 @@ from typing import Any, AsyncIterator, Optional
 
 import aiosqlite
 
-LATEST_DB_VERSION = 14
+LATEST_DB_VERSION = 15
 
 
 def _shanghai_date_key(ts: float) -> str:
@@ -72,6 +72,7 @@ class DataBase:
                 await _v8_dark_boss(self.conn)
                 await _v9_raid(self.conn)
                 await _v10_rift(self.conn)
+                await _v15_market(self.conn)
                 await _v11_calamity(self.conn)
                 await _v12_lingjie(self.conn)
                 await _v13_ancient(self.conn)
@@ -80,7 +81,7 @@ class DataBase:
             return
 
         # 后续版本在此登记：MIGRATIONS[n] = upgrade_fn
-        MIGRATIONS = {2: _v2_inventory, 3: _v3_world_boss, 4: _v4_sects, 5: _v5_auction, 6: _v6_sect_score, 7: _v7_daily_tasks, 8: _v8_dark_boss, 9: _v9_raid, 10: _v10_rift, 11: _v11_calamity, 12: _v12_lingjie, 13: _v13_ancient, 14: _v14_other_shore}
+        MIGRATIONS = {2: _v2_inventory, 3: _v3_world_boss, 4: _v4_sects, 5: _v5_auction, 6: _v6_sect_score, 7: _v7_daily_tasks, 8: _v8_dark_boss, 9: _v9_raid, 10: _v10_rift, 11: _v11_calamity, 12: _v12_lingjie, 13: _v13_ancient, 14: _v14_other_shore, 15: _v15_market}
         for version in sorted(v for v in MIGRATIONS if v > current):
             async with self.transaction():
                 await MIGRATIONS[version](self.conn)
@@ -288,6 +289,27 @@ class DataBase:
             return {row[0]: (row[1], row[2]) for row in await cur.fetchall()}
 
     # ---- 裂界副本：全服单例状态（当前裂界 + 锚定度 + 贡献） ----
+
+    async def get_market(self) -> dict[str, Any]:
+        assert self.conn is not None
+        async with self.conn.execute("SELECT doc FROM market_state WHERE id = 1") as cur:
+            row = await cur.fetchone()
+        if not row:
+            return {}
+        try:
+            return json.loads(row[0]) or {}
+        except Exception:
+            return {}
+
+    async def save_market(self, doc: dict[str, Any]) -> None:
+        assert self.conn is not None
+        owned = not self.conn.in_transaction
+        await self.conn.execute(
+            "INSERT OR REPLACE INTO market_state (id, doc) VALUES (1, ?)",
+            (json.dumps(doc, ensure_ascii=False),),
+        )
+        if owned:
+            await self.conn.commit()
 
     async def get_rift(self) -> dict[str, Any]:
         assert self.conn is not None
@@ -961,3 +983,12 @@ async def _v14_other_shore(conn: aiosqlite.Connection) -> None:
     )
 
 
+
+
+async def _v15_market(conn: aiosqlite.Connection) -> None:
+    """灵市：全服共享股市状态（单例 JSON，确定性 PRNG 行情）。"""
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS market_state ("
+        " id INTEGER PRIMARY KEY CHECK (id = 1),"
+        " doc TEXT NOT NULL)"
+    )

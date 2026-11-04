@@ -158,9 +158,9 @@ async def main():
     ok, _, _ = items_mod.sell(inv_doc, junk, 1)
     assert not ok, "出售价 0 不可出售"
 
-    # 10. 迁移版本 = 14
+    # 10. 迁移版本 = 15
     async with db.conn.execute("SELECT version FROM db_info") as cur:
-        assert (await cur.fetchone())[0] == 14
+        assert (await cur.fetchone())[0] == 15
 
     # 11. 装备：穿戴/换位/卸下 + 比例与固定加成聚合
     from core import battle as battle_mod   # noqa: E402
@@ -2640,6 +2640,59 @@ async def main():
                                [], rng_x, me_fighter=mf_x, treasure_bonus=bonus_v)
     assert se2.stones > se1.stones, (se1.stones, se2.stones)   # 同种子 1.3 倍应更高
     print("mingge consumers ok")
+
+    # 17d. 灵市（W5-1）：确定性行情/买卖/借款/走势
+    from core import market as market_mod  # noqa: E402
+
+    t0 = 1_800_000_000.0
+    g1 = market_mod.create_market(t0, seed=12345)
+    g2 = market_mod.create_market(t0, seed=12345)
+    assert g1["stocks"][0]["price"] == 10000
+    market_mod.advance(g1, t0 + 3600)       # 6 tick
+    market_mod.advance(g2, t0 + 3600)
+    assert [s["price"] for s in g1["stocks"]] == [s["price"] for s in g2["stocks"]], "同种子行情应一致"
+    assert any(s["price"] != 10000 for s in g1["stocks"]), "6 tick 后价格应变动"
+    # 涨跌停约束
+    for st_ in g1["stocks"]:
+        lo, hi = market_mod._limits(st_)
+        assert lo <= st_["price"] <= hi, (st_["name"], st_["price"], lo, hi)
+    # 买入/卖出
+    md3 = PlayerDoc(uid="mk", name="股神", realm_index=30, stones=5_000_000)
+    g = market_mod.create_market(t0, seed=99)
+    st0 = g["stocks"][0]
+    ok, msg = market_mod.buy(g, md3, st0, 100, t0)
+    assert ok and md3.stones == 5_000_000 - 1_003_000, msg
+    acc = market_mod.account_of(md3)
+    assert acc["holdings"][st0["id"]]["shares"] == 100
+    # 30 秒 CD
+    ok, msg = market_mod.buy(g, md3, st0, 100, t0 + 5)
+    assert not ok and "冷却" in msg, msg
+    # 卖出清仓
+    ok, msg = market_mod.sell(g, md3, st0, -1, t0 + 60)
+    assert ok and not market_mod.account_of(md3)["holdings"], msg
+    # 借款：额度/资产上限/还款
+    ok, msg = market_mod.take_loan(g, md3, 999, t0)
+    assert not ok and "额度" in msg, msg
+    md3.stones = 100_000
+    ok, msg = market_mod.take_loan(g, md3, 1_000_000, t0)
+    assert not ok and "2 倍" in msg, msg   # 身家 10 万，借 100 万超 2 倍
+    ok, msg = market_mod.take_loan(g, md3, 150_000, t0)
+    assert ok and md3.stones == 250_000, msg
+    ok, msg = market_mod.take_loan(g, md3, 10_000, t0)
+    assert not ok and "未结清" in msg, msg
+    ok, msg = market_mod.repay(g, md3)
+    assert ok and market_mod.account_of(md3)["loan"] is None, msg
+    # 摘牌不可交易
+    st_del = dict(g["stocks"][1], delistedAt=1)
+    ok, msg = market_mod.buy(g, md3, st_del, 10, t0 + 120)
+    assert not ok and "摘牌" in msg, msg
+    # 打听扣费 + 文案
+    before_tip = md3.stones
+    ok, msg = market_mod.tip(g, md3)
+    assert ok and md3.stones == before_tip - market_mod.TIP_COST, msg
+    assert "走势" in market_mod.trend_text(g, "丹鼎阁")
+    assert "持仓" in market_mod.account_text(g, md3)
+    print("market ok")
 
     # 17. 宗门纯函数 + 存取
     from core import sect as sect_mod  # noqa: E402
