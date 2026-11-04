@@ -107,14 +107,19 @@ def roll_drop(
     return rng.choice(pool) if pool else None
 
 
-def _battle_fighters(me: Unit, monster: Unit, buff: Any):
+def _battle_fighters(me: Unit, monster: Unit, buff: Any, me_fighter: Any = None):
     """阵法回调 → Fighter 对（W1-3：阵法乘区/定身走引擎效果槽，不再战前改值）。
 
+    me_fighter：调用方预构建的我方 Fighter（W4-1——技能池/灵根法球/复活技进 PvE）；
+    缺省仍从 Unit 转换（行为与 W1-3 完全一致）。
     返回 (me_f, foe_f, skip_first)；buff 只在真正进入战斗时消耗一次。
     """
     from .combat import Fighter
 
-    me_f, foe_f = Fighter.from_unit(me), Fighter.from_unit(monster)
+    me_f = me_fighter or Fighter.from_unit(me)
+    if me_fighter is not None:
+        me_f.hp = max(0, int(me.hp))   # 探索层以 me.hp 为准，保持同步
+    foe_f = Fighter.from_unit(monster)
     skip: tuple[int, ...] = ()
     if buff:
         b = buff() or {}
@@ -141,6 +146,7 @@ def explore(
     sect_mode: bool = False,
     buff: Any = None,
     protect: Any = None,
+    me_fighter: Any = None,
 ) -> tuple[Session, Unit, str, bool]:
     """寻宝一次。返回 (更新后的会话, 战斗后的我, 文本, 是否被打出局)。
 
@@ -162,11 +168,12 @@ def explore(
             session.place, session.floor - 1, base, rng,
             elite=False, factor_override=pf * 3.0,
         )
-        me_f, foe_f, skip = _battle_fighters(me, monster, buff)
+        me_f, foe_f, skip = _battle_fighters(me, monster, buff, me_fighter)
         res = run_1v1(me_f, foe_f, rng, skip_first=skip)
         winner, log, hp_left = res.winner, res.log, res.a_hp
         me.hp = max(0, hp_left)
-        tail = log[-1] if log else ""
+        skill_lines = [x for x in log if x.startswith("【")]
+        tail = "\n".join(skill_lines + [log[-1]]) if skill_lines and log else (log[-1] if log else "")
         if winner == 0:
             stones = int((1500 + 800 * session.floor) * depth * pf)
             session.stones += stones
@@ -196,11 +203,12 @@ def explore(
             session.place, session.floor - 1, base, rng,
             elite=(kind == "elite"), factor_override=pf,
         )
-        me_f, foe_f, skip = _battle_fighters(me, monster, buff)
+        me_f, foe_f, skip = _battle_fighters(me, monster, buff, me_fighter)
         res = run_1v1(me_f, foe_f, rng, skip_first=skip)
         winner, log, hp_left = res.winner, res.log, res.a_hp
         me.hp = max(0, hp_left)
-        tail = log[-1] if log else ""
+        skill_lines = [x for x in log if x.startswith("【")]
+        tail = "\n".join(skill_lines + [log[-1]]) if skill_lines and log else (log[-1] if log else "")
         if winner == 0:
             stones = int((300 + 200 * session.floor) * depth * pf * stone_scale * (3 if kind == "elite" else 1))
             session.stones += stones

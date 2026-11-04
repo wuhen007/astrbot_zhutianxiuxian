@@ -8553,6 +8553,18 @@ class ZhutianPlugin(Star):
             return mods
 
         me = battle.Unit(doc.name or doc.uid[:8] + "…", st.atk, st.defense, hp_cur, st.bao)
+        # W4-1：秘境 PvE 接技能池/灵根法球/复活技/熟练度/命格（与 PvP 同源装填）
+        from .core.combat.loadout import build_fighter as _build_fighter
+        me_fighter = _build_fighter(
+            doc, me.name, st.atk, st.defense, hp_cur, st.bao, self.item_index.get,
+            skill_tables={
+                "atk": self.content.table("item/技能组/攻击技能") or [],
+                "def": self.content.table("item/技能组/防御技能") or [],
+                "heal": self.content.table("item/技能组/治疗技能") or [],
+                "boost": self.content.table("item/技能组/灵根增幅技能") or [],
+            },
+        )
+        me_fighter.hp = hp_cur   # 战斗从当前气血打起
 
         def _protect(place: str, floor: int, enemy: str):
             got = story_npc.try_protect(s, time.time())
@@ -8565,7 +8577,7 @@ class ZhutianPlugin(Star):
             return None
 
         sess, me, flavor, fled = secret.explore(
-            sess, base, me, self.drop_pool, rng, sect_mode=bool(sess.sect_name),
+            sess, base, me, self.drop_pool, rng, sect_mode=bool(sess.sect_name), me_fighter=me_fighter,
             buff=_buff, protect=_protect,
         )
         if used_arrays:
