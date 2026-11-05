@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -425,6 +425,14 @@ CMD_SG_AWAKE = "#圣体觉醒"
 CMD_BT_AWAKE = "#霸体觉醒"
 CMD_YT_AWAKE = "#妖体觉醒"
 CMD_BLOOD = "#我的血脉"
+# W8-B5：记忆命途
+CMD_MEM_OPEN = "#开启记忆命途"
+CMD_MEM_STATUS = "#我的命途"
+CMD_MEM_SIM = "#命途模拟"
+CMD_MEM_ADV = "#命途行进"
+CMD_MEM_JOURNEY = "#逐火之旅"
+CMD_MEM_TITAN = "#泰坦试炼"
+CMD_MEM_FACTORS = "#记忆因子"
 # W7-4：养成深度（灵根觉醒 / 寿元救援 / 帝兵铭文 / 职业产线 / 道法卡）
 CMD_LG_AWAKEN = "#灵根觉醒"
 CMD_RESCUE = "#轮回救人"
@@ -532,6 +540,12 @@ class ZhutianPlugin(Star):
         # shortcut: 数据表暂从插件目录读取（随代码分发），表多体积大后改放 StarTools 数据目录
         self.content = ContentStore(PLUGIN_DIR / "data")
         logger.info(f"[zhutian] 内容表 {len(self.content.tables)} 张已加载")
+        # W8-B5：记忆命途注册为第三轨（只进门槛与天堑）
+        try:
+            from .core import authority as _auth
+            _auth.register_track(mem_mod.equivalent_level)
+        except Exception:
+            pass
         self.whitelist_groups = [
             str(g) for g in (config.get("ACCESS_CONTROL", {}).get("WHITELIST_GROUPS") or [])
         ]
@@ -10653,6 +10667,127 @@ class ZhutianPlugin(Star):
         async for r in self._awaken_blood(event, "妖体"):
             yield r
 
+    # ---- W8-B5：记忆命途（原版 MemoryPath.js 390 + model/memoryPath.js） ----
+
+    @filter.command(CMD_MEM_OPEN, "开启记忆命途")
+    async def handle_mem_open(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = mem_mod.activate(doc, time.time())
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, msg, "记忆命途"):
+            yield r
+
+    @filter.command(CMD_MEM_STATUS, "我的命途")
+    async def handle_mem_status(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, mem_mod.status_text(doc), "记忆命途"):
+            yield r
+
+    @filter.command(CMD_MEM_FACTORS, "记忆因子")
+    async def handle_mem_factors(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, mem_mod.factors_text(doc), "记忆因子"):
+            yield r
+
+    @filter.command(CMD_MEM_SIM, "命途模拟")
+    async def handle_mem_sim(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = mem_mod.simulate(doc, random.Random(f"{doc.uid}:mem:{time.time_ns()}"))
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, msg, "命途模拟"):
+            yield r
+
+    @filter.command(CMD_MEM_ADV, "命途行进")
+    async def handle_mem_advance(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = mem_mod.advance(doc)
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, msg, "命途行进"):
+            yield r
+
+    @filter.command(CMD_MEM_JOURNEY, alias={"#行者之旅"})
+    async def handle_mem_journey(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = mem_mod.journey(
+            doc, time.time(), random.Random(f"{doc.uid}:journey:{time.time_ns()}"))
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, msg, "逐火之旅"):
+            yield r
+
+    @filter.command(CMD_MEM_TITAN, "泰坦试炼")
+    async def handle_mem_titan(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        now = time.time()
+        ready, why = mem_mod.titan_check(doc, now)
+        if not ready:
+            yield event.plain_result(why)
+            return
+        import random as _random
+        from .core.combat.loadout import build_fighter
+        from .core.combat import run_1v1
+        from .core.combat.engine import Fighter
+        rng = _random.Random(f"{doc.uid}:titan:{now}")
+        st = self._stats(doc)
+        hp_cur, hp_max = self._hp_pair(doc)
+        lookup = self.item_index.get
+        me = build_fighter(doc, doc.name or "道友", st.atk, st.defense, hp_cur, st.bao, lookup)
+        scale = mem_mod.titan_scale(doc)
+        idx = int(mem_mod.state_of(doc).get("titan", 0)) + 1
+        enemy = Fighter(name=f"泰坦记忆·第{idx}试炼",
+                        atk=max(1, int(st.atk * scale)),
+                        defense=max(1, int(st.defense * scale)),
+                        hp=max(1, int(hp_max * scale)), hp_max=max(1, int(hp_max * scale)),
+                        bao=0.1)
+        winner, log, a_hp, _b_hp = run_1v1(me, enemy, rng)
+        won = winner == 0
+        ok, msg = mem_mod.titan_apply(doc, won, now,
+                                      _random.Random(f"{doc.uid}:titanres:{now}"))
+        if ok:
+            doc.ext["hp"] = max(0, int(a_hp))
+            await self.db.save_player(doc.model_dump())
+        tail = "\n".join(log[-4:])
+        async for r in self._smart(event, f"{tail}\n{msg}", "泰坦试炼"):
+            yield r
+
     # ---- W7-4：养成深度（灵根觉醒 / 寿元救援 / 帝兵铭文 / 职业产线 / 道法卡） ----
 
     @filter.command(CMD_LG_AWAKEN, "灵根觉醒")
@@ -11640,10 +11775,14 @@ class ZhutianPlugin(Star):
                     dungeon_note = (f"副本额外：修为 +{exp_g:,}"
                                     + (f"｜寿元 +{shou_g:,}" if shou_g else ""))
         fund_note = ""
+        items_out = dict(sess.items)
+        mem_mult = int(mem_mod.effects(doc)["item_mult"]) if mem_mod.stage_of(doc) > 0 else 1
+        if mem_mult > 1 and items_out:
+            items_out = {k: v * mem_mult for k, v in items_out.items()}
         async with self.db.transaction():
             await self.db.save_player(d.model_dump())
-            if sess.items:
-                await self.db.add_items(doc.uid, sess.items)
+            if items_out:
+                await self.db.add_items(doc.uid, items_out)
             if sess.sect_name and sess.boss_kills:
                 sdoc = await self.db.get_sect(sess.sect_name)
                 if sdoc:
@@ -11654,8 +11793,10 @@ class ZhutianPlugin(Star):
             f"【秘境结算 · {sess.place}】（{reason}，共探 {sess.floor} 层）",
             f"灵石 +{sess.stones}",
         ]
-        if sess.items:
-            lines.append("物品：" + "、".join(f"{n}×{q}" for n, q in sess.items.items()))
+        if items_out:
+            lines.append("物品：" + "、".join(f"{n}×{q}" for n, q in items_out.items()))
+            if mem_mult > 1:
+                lines.append(f"【记忆命途】物品 ×{mem_mult}（每 6 个泰坦 +1 倍）")
         else:
             lines.append("物品：无")
         if dungeon_note:
@@ -11870,6 +12011,7 @@ class ZhutianPlugin(Star):
             return
         d.state = "秘境中"
         grown = bloodline.grind(d)          # W8-B1a：每次成功寻宝打磨一处秘境
+        mem_mod.add_sim(d)                   # W8-B5：真实秘境结算 +2% 模拟值
         if drop_items:
             async with self.db.transaction():
                 await self.db.save_player(d.model_dump())

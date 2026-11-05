@@ -103,6 +103,10 @@ def roam(doc: PlayerDoc, stats: Any, build_fighter_fn: Any, run_1v1: Any, rng: r
         # 悟道：观长河上游岁月（W7-5c：位面青睐 50 点换 +20% 感悟）
         from . import calamity
         exp_g = 600_000 * (int(doc.realm_index) + 1)
+        from . import memory as mem_mod
+        wudao = mem_mod.effects(doc)["wudao"] if mem_mod.stage_of(doc) > 0 else 0.0
+        if wudao:
+            exp_g = int(exp_g * (1 + wudao))     # W8-B5：记忆因子悟道加成
         exp_g, favor_used = calamity.consume_favor_for_wudao(doc, exp_g)
         gains["exp"] = exp_g
         gains["insight"] = 3

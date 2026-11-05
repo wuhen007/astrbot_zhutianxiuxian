@@ -4329,6 +4329,67 @@ async def main():
     assert au33.authority_of(PlayerDoc(uid="w8track2", realm_index=50, ext={})) == 50
     print("W8-B1a bloodline awaken ok")
 
+    # ================= W8-B5 记忆命途 =================
+    from core import memory as mm34
+    d34 = PlayerDoc(uid="w8mem", realm_index=25, stones=10_000_000, ext={})
+    # ① 开启：境界/灵石门槛 + 灵根换为金血之体
+    low34 = PlayerDoc(uid="w8mem0", realm_index=10, stones=10_000_000, ext={})
+    assert not mm34.activate(low34)[0]
+    poor34 = PlayerDoc(uid="w8mem1", realm_index=25, stones=0, ext={})
+    assert not mm34.activate(poor34)[0]
+    ok34, msg34 = mm34.activate(d34)
+    assert ok34 and mm34.stage_of(d34) == 1
+    assert d34.ext["linggen"]["name"] == "金血之体"
+    assert d34.stones == 10_000_000 - mm34.ACTIVATE_COST
+    # ② 模拟值：未开启不累计；开启后 +2/次、上限 100；不足 100 不能抽
+    d34b = PlayerDoc(uid="w8mem2", ext={})
+    assert mm34.add_sim(d34b) == 0
+    for _ in range(60):
+        mm34.add_sim(d34)
+    assert mm34.state_of(d34)["sim"] == 100
+    assert not mm34.advance(d34)[0]                     # 只有 0 因子
+    ok34, msg34 = mm34.simulate(d34, _random.Random(3))
+    assert ok34 and mm34.state_of(d34)["sim"] == 0
+    assert len(mm34.state_of(d34)["factors"]) == 1
+    # ③ 阶段容量：金血之体 3 个因子封顶
+    for _ in range(2):
+        mm34.add_sim(d34, 100)
+        assert mm34.simulate(d34, _random.Random(4))[0]
+    assert len(mm34.state_of(d34)["factors"]) == 3
+    mm34.add_sim(d34, 100)
+    assert not mm34.simulate(d34, _random.Random(5))[0]  # 达上限
+    # ④ 生命本源：一二阶每因子 +10；三阶起只算泰坦 +20
+    assert mm34.life_max(mm34.state_of(d34), 1) == 50 + 30
+    st34 = {"factors": {"门径": 1, "理性": 2, "死亡": 3}}
+    assert mm34.life_max(st34, 3) == 300 + 20           # 只有 1 个泰坦
+    # ⑤ 物品倍率：二阶起 2 倍，每 6 泰坦 +1，上限 4
+    assert mm34.item_mult({"factors": {}}, 1) == 1
+    assert mm34.item_mult({"factors": {}}, 2) == 2
+    assert mm34.item_mult({"factors": {f"f{i}": 3 for i in range(6)}}, 3) == 3
+    assert mm34.item_mult({"factors": {f"f{i}": 3 for i in range(12)}}, 3) == 4
+    # ⑥ 行进：因子/境界/逐火/泰坦四道门槛
+    ok34, msg34 = mm34.advance(d34)                     # 3 因子 + 25 境 → 逐火行者
+    assert ok34 and d34.ext["linggen"]["name"] == "逐火行者"
+    st34 = mm34.state_of(d34)
+    st34["factors"] = {f: 1 for f in mm34.FACTORS[:6]}
+    mm34.set_state(d34, st34)
+    assert not mm34.advance(d34)[0]                     # 差逐火 12 次
+    # ⑦ 逐火：6 小时 CD、12 次封顶、黄金→强化
+    d34.ext["memory"]["last_journey"] = 0.0
+    t34 = 1_000_000.0
+    ok34, msg34 = mm34.journey(d34, t34, _random.Random(6))
+    assert ok34 and mm34.state_of(d34)["journey"] == 1
+    assert not mm34.journey(d34, t34 + 3600, _random.Random(7))[0]      # CD 6h
+    assert mm34.journey(d34, t34 + 6 * 3600 + 1, _random.Random(8))[0]
+    # ⑧ 等效境界只进门槛：三阶 = 40
+    assert mm34.equivalent_level(d34) == 10             # 逐火行者
+    st34 = mm34.state_of(d34)
+    st34["factors"] = {f: 1 for f in mm34.FACTORS[:9]}
+    mm34.set_state(d34, st34)
+    d34.ext["linggen"]["name"] = "半神之体"
+    assert mm34.equivalent_level(d34) == 25
+    print("W8-B5 memory path ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 
