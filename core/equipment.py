@@ -117,12 +117,15 @@ def aggregate(
         bao += float(prow.get("基础暴击", 0) or 0)
 
     enhance = enhance or {}
+    tainted_slots = set((doc.ext.get("tainted") or {}).keys()) if isinstance(doc.ext.get("tainted"), dict) else set()
     flat = {"atk": 0.0, "def": 0.0, "hp": 0.0}
     ratio = {"atk": 0.0, "def": 0.0, "hp": 0.0}
     for slot, name in (doc.ext.get("equipment") or {}).items():
         item = item_lookup(name)
         if not item:
             continue
+        # 天骄污损（W7-3）：比例属性 -20%，击杀来源天骄或 #修复污损 复原
+        taint_mult = 0.8 if str(slot) in tainted_slots else 1.0
         mult = 1.0 + ENHANCE_BONUS_PER_LEVEL * min(
             max(int(enhance.get(slot, 0) or 0), 0), ENHANCE_MAX
         )
@@ -131,11 +134,11 @@ def aggregate(
         for key, acc in (("atk", "atk"), ("def", "def"), ("HP", "hp")):
             f, r = _split(item.get(key))
             flat[acc] += f * mult
-            ratio[acc] += r * mult
+            ratio[acc] += r * mult * taint_mult
         f, r = _split(item.get("全属性"))
         for acc in flat:
             flat[acc] += f * mult
-            ratio[acc] += r * mult
+            ratio[acc] += r * mult * taint_mult
         try:
             bao += float(item.get("bao") or 0)
         except (TypeError, ValueError):

@@ -12,7 +12,7 @@ from typing import Any, AsyncIterator, Optional
 
 import aiosqlite
 
-LATEST_DB_VERSION = 16
+LATEST_DB_VERSION = 17
 
 
 def _shanghai_date_key(ts: float) -> str:
@@ -106,11 +106,12 @@ class DataBase:
                 await _v13_ancient(self.conn)
                 await _v14_other_shore(self.conn)
                 await _v16_era(self.conn)
+                await _v17_tianjiao_faction(self.conn)
                 await self.conn.execute("INSERT INTO db_info (version) VALUES (?)", (LATEST_DB_VERSION,))
             return
 
         # 后续版本在此登记：MIGRATIONS[n] = upgrade_fn
-        MIGRATIONS = {2: _v2_inventory, 3: _v3_world_boss, 4: _v4_sects, 5: _v5_auction, 6: _v6_sect_score, 7: _v7_daily_tasks, 8: _v8_dark_boss, 9: _v9_raid, 10: _v10_rift, 11: _v11_calamity, 12: _v12_lingjie, 13: _v13_ancient, 14: _v14_other_shore, 15: _v15_market, 16: _v16_era}
+        MIGRATIONS = {2: _v2_inventory, 3: _v3_world_boss, 4: _v4_sects, 5: _v5_auction, 6: _v6_sect_score, 7: _v7_daily_tasks, 8: _v8_dark_boss, 9: _v9_raid, 10: _v10_rift, 11: _v11_calamity, 12: _v12_lingjie, 13: _v13_ancient, 14: _v14_other_shore, 15: _v15_market, 16: _v16_era, 17: _v17_tianjiao_faction}
         for version in sorted(v for v in MIGRATIONS if v > current):
             async with self.transaction():
                 await MIGRATIONS[version](self.conn)
@@ -366,6 +367,52 @@ class DataBase:
         owned = not self.conn.in_transaction
         await self.conn.execute(
             "INSERT OR REPLACE INTO era_state (id, doc) VALUES (1, ?)",
+            (json.dumps(doc, ensure_ascii=False),),
+        )
+        if owned:
+            await self.conn.commit()
+
+    async def get_tianjiao(self) -> dict[str, Any]:
+        """位面天骄共享状态（血条 / 轮回 / 贡献榜）。"""
+        assert self.conn is not None
+        async with self.conn.execute("SELECT doc FROM tianjiao_state WHERE id = 1") as cur:
+            row = await cur.fetchone()
+        if not row:
+            return {}
+        try:
+            return json.loads(row[0]) or {}
+        except Exception:
+            return {}
+
+    @_serialized
+    async def save_tianjiao(self, doc: dict[str, Any]) -> None:
+        assert self.conn is not None
+        owned = not self.conn.in_transaction
+        await self.conn.execute(
+            "INSERT OR REPLACE INTO tianjiao_state (id, doc) VALUES (1, ?)",
+            (json.dumps(doc, ensure_ascii=False),),
+        )
+        if owned:
+            await self.conn.commit()
+
+    async def get_faction(self) -> dict[str, Any]:
+        """势力全服状态（等级 / 成员 / 贡献）。"""
+        assert self.conn is not None
+        async with self.conn.execute("SELECT doc FROM faction_state WHERE id = 1") as cur:
+            row = await cur.fetchone()
+        if not row:
+            return {}
+        try:
+            return json.loads(row[0]) or {}
+        except Exception:
+            return {}
+
+    @_serialized
+    async def save_faction(self, doc: dict[str, Any]) -> None:
+        assert self.conn is not None
+        owned = not self.conn.in_transaction
+        await self.conn.execute(
+            "INSERT OR REPLACE INTO faction_state (id, doc) VALUES (1, ?)",
             (json.dumps(doc, ensure_ascii=False),),
         )
         if owned:
@@ -1077,6 +1124,20 @@ async def _v16_era(conn: aiosqlite.Connection) -> None:
     """时代系统：全服唯一的世界历法（五时代轮转 + 秘境出金率）。"""
     await conn.execute(
         "CREATE TABLE IF NOT EXISTS era_state ("
+        " id INTEGER PRIMARY KEY CHECK (id = 1),"
+        " doc TEXT NOT NULL)"
+    )
+
+
+async def _v17_tianjiao_faction(conn: aiosqlite.Connection) -> None:
+    """位面天骄共享状态 + 势力状态（两张单例）。"""
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS tianjiao_state ("
+        " id INTEGER PRIMARY KEY CHECK (id = 1),"
+        " doc TEXT NOT NULL)"
+    )
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS faction_state ("
         " id INTEGER PRIMARY KEY CHECK (id = 1),"
         " doc TEXT NOT NULL)"
     )

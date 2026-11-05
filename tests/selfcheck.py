@@ -170,10 +170,10 @@ async def main():
     ok, _, _ = items_mod.sell(inv_doc, junk, 1)
     assert not ok, "出售价 0 不可出售"
 
-    # 10. 迁移版本 = 16
+    # 10. 迁移版本 = 17
     from infra.db import LATEST_DB_VERSION
     async with db.conn.execute("SELECT version FROM db_info") as cur:
-        assert (await cur.fetchone())[0] == LATEST_DB_VERSION == 16
+        assert (await cur.fetchone())[0] == LATEST_DB_VERSION == 17
 
     # 11. 装备：穿戴/换位/卸下 + 比例与固定加成聚合
     from core import battle as battle_mod   # noqa: E402
@@ -3383,7 +3383,7 @@ async def main():
 
     # ④ 两张图鉴表补齐 + 分页 + 真实已获得收集态
     dc = PlayerDoc(uid="w7cat", realm_index=1, ext={})
-    assert "共 5 条" in ex.catalog("#位面天骄图鉴", c21, doc=dc)
+    assert "共 8 条" in ex.catalog("#位面天骄图鉴", c21, doc=dc)
     dc.ext["tianjiao_defeated"] = ["青冥剑子"]
     assert "✅已获得" in ex.catalog("#位面天骄图鉴", c21, doc=dc)
     assert "未开放兑换码兑换" in ex.catalog("#兑换码图鉴", c21, doc=dc)
@@ -3573,11 +3573,125 @@ async def main():
     up_db = DataBase(tmp15 / "z.db")
     await up_db.connect()
     async with up_db.conn.execute("SELECT version FROM db_info") as cur:
-        assert (await cur.fetchone())[0] == 16, "v15 → v16 迁移失败"
+        assert (await cur.fetchone())[0] == LATEST_DB_VERSION, "v15 → 最新版 迁移失败"
     await up_db.save_era({"years_total": 1, "last_tick": 1_800_000_000.0})
     assert (await up_db.get_era())["years_total"] == 1
     await up_db.close()
     print("W7-2 ⑤ db v16 fresh+upgrade ok")
+
+    # 24. W7-3 天骄深度（踪迹/仇恨/共享血条/贡献榜/污损）+ 源石坊账本 + 势力
+    from core import tianjiao as tj24, faction as fc24
+
+    # ① 天机寻踪：代价表 / 24 小时有效 / 过期即失效
+    assert tj24.COSTS == {"灵石": 3_000_000, "源石": 30_000}
+    d24 = PlayerDoc(uid="w7tj", realm_index=32, ext={})
+    assert tj24.trace_of(d24, "青冥剑子", n6) is None
+    tr24 = tj24.make_trace("青冥剑子", _random.Random(7), n6)
+    tj24.set_trace(d24, "青冥剑子", tr24)
+    assert tj24.trace_of(d24, "青冥剑子", n6 + 3600) is not None
+    assert tj24.trace_of(d24, "青冥剑子", n6 + 24 * 3600 + 1) is None
+    assert "（" in tj24.format_trace(tr24) and tj24.trace_left(tr24, n6) == 24 * 60
+    print("W7-3 ① trace cost/expiry ok")
+
+    # ② 个人冷却 90 分钟 + 六档仇恨与逃脱/护道人概率
+    assert tj24.cooldown_left(d24, n6) == 0
+    tj24.mark_fight(d24, n6)
+    assert 89 * 60 <= tj24.cooldown_left(d24, n6) <= 90 * 60
+    assert tj24.cooldown_left(d24, n6 + 90 * 60) == 0
+    assert tj24.add_hatred(d24, "青冥剑子", "挑战失败")[:2] == (0, 5)
+    assert tj24.add_hatred(d24, "青冥剑子", "挑战成功")[:2] == (5, 25)
+    assert tj24.level_of(0)[0] == "陌生" and tj24.level_of(50)[0] == "敌视"
+    assert tj24.level_of(500)[0] == "不死不休"
+    assert tj24.level_of(500)[1] > tj24.level_of(0)[1]      # 仇恨越高越容易逃
+    assert tj24.clear_hatred(d24, "青冥剑子") == 25 and tj24.hatred_of(d24, "青冥剑子") == 0
+    print("W7-3 ② cd 90min & hatred tiers ok")
+
+    # ③ 共享血条 + 贡献榜排序 + 击杀清榜与 18 小时轮回
+    world24 = tj24.world_ensure({})
+    boss24 = tj24.boss_of(world24, "青冥剑子")
+    assert boss24["hp_pct"] == 1.0 and tj24.status_of(boss24, n6) == "在世"
+    tj24.add_contribution(boss24, "u1", 500)
+    tj24.add_contribution(boss24, "u2", 1500)
+    tj24.add_contribution(boss24, "u1", 300)
+    assert tj24.ranking(boss24) == [("u2", 1500), ("u1", 800)]
+    assert tj24.CONTRIB_TOP_BONUS == (0.30, 0.20, 0.10)
+    boss24["hp_pct"] = 0.2
+    assert tj24.hp_pct_of(boss24) == 0.2
+    tj24.on_kill(boss24, "u2", n6)
+    assert boss24["hp_pct"] == 1.0 and boss24["contrib"] == {} and boss24["kills"] == 1
+    assert tj24.blocked_until(boss24) == n6 + 18 * 3600
+    assert "轮回中" in tj24.status_of(boss24, n6 + 60)
+    assert "失踪" in tj24.status_of({"escaped_until": n6 + 600, "alive_until": 0}, n6)
+    print("W7-3 ③ shared hp & contribution board ok")
+
+    # ④ 污损：比例属性 -20%，击杀来源或修复后复原
+    wpn24 = {"name": "赤霄", "class": "装备", "type": "武器", "atk": 0.9, "def": 0.2, "HP": 0.4}
+    d24e = PlayerDoc(uid="w7taint", realm_index=1, ext={"equipment": {"武器": "赤霄"}})
+    lv24 = store.table("Level/练气境界")
+    lookup24 = lambda n: wpn24 if n == "赤霄" else None       # noqa: E731
+    base24 = equip_mod.aggregate(d24e, lv24, lookup24)
+    tx24 = d24e.model_copy(deep=True)
+    tj24.apply_taint(tx24, "武器", "青冥剑子", n6)
+    hurt24 = equip_mod.aggregate(tx24, lv24, lookup24)
+    assert hurt24.atk < base24.atk and tj24.is_tainted(tx24, "武器")
+    assert tj24.pick_taint_slot(
+        PlayerDoc(uid="x", ext={"equipment": {"武器": "赤霄",
+                                              "护具": "铁甲"}}),
+        lambda n: wpn24 if n == "赤霄" else {"class": "装备", "type": "护具", "atk": 100},
+        _random.Random(1)) == "武器"
+    assert tj24.repair_by_source(tx24, "青冥剑子") == 1 and not tj24.tainted(tx24)
+    assert equip_mod.aggregate(tx24, lv24, lookup24).atk == base24.atk
+    print("W7-3 ④ taint -20% & repair ok")
+
+    # ⑤ 源石坊账本 + 天字号 20 小时冷却 + 势力贡献/分级俸禄 + db v17
+    y24 = ys_mod.system_of(PlayerDoc(uid="w7stone", ext={}))
+    assert y24["ledger"] == [] and y24["cuts"] == 0
+    stone24 = {"no": 1, "price": 100_000, "name": "纯净源", "outcome": "pure",
+               "ratio": 1.0, "item": None, "danger": False, "surface": "x"}
+    ok24, msg24, y24, _c24 = ys_mod.buy_and_cut(
+        PlayerDoc(uid="w7stone"), y24, "外园", [stone24], 1, 10 ** 9, 1000, 1000, n6, _random.Random(3))
+    assert ok24 and len(y24["ledger"]) == 1 and y24["cuts"] == 1
+    assert "源石坊账本" in ys_mod.ledger_text(y24)
+    y24["amount"] = 10 ** 9
+    ok24, msg24, y24b, _c24 = ys_mod.buy_and_cut(
+        PlayerDoc(uid="w7stone"), y24, "天字号", [stone24], 1, 0, 1000, 1000, n6, _random.Random(4))
+    assert ok24 and "天字号" in (y24b.get("cooldown") or {}), msg24
+    ok24, msg24, _y, _c = ys_mod.buy_and_cut(
+        PlayerDoc(uid="w7stone"), y24b, "天字号", [stone24], 1, 0, 1000, 1000,
+        n6 + 3600, _random.Random(5))
+    assert not ok24 and "冷却" in msg24
+    assert ys_mod.buy_and_cut(
+        PlayerDoc(uid="w7stone"), y24b, "天字号", [stone24], 1, 0, 1000, 1000,
+        n6 + 20 * 3600, _random.Random(5))[0]
+
+    fst24 = fc24.ensure(None)
+    assert fc24.join(fst24, "瑶池圣地", "u1", "张三", 0)[0]
+    assert fc24.faction_of(fst24, "u1") == "瑶池圣地" and fc24.is_leader(fst24, "瑶池圣地", "u1")
+    assert fc24.join(fst24, "瑶池圣地", "u2", "李四", 0)[0]
+    assert (fc24.member_of(fst24, "瑶池圣地", "u2") or {}).get("role") == "门人"
+    assert fc24.join(fst24, "瑶池圣地", "u3", "王五", 0)[0] is True    # 第三人仍是门人
+    assert not fc24.join(fst24, "剑云海", "u1", "张三", 0)[0]             # 已入势力
+    assert not fc24.join(fst24, "剑云海", "u9", "赵六", 5)[0]             # 门槛不足
+    ok24, msg24, pts24 = fc24.contribute(fst24, "u1", 100_000)
+    assert ok24 and pts24 == 200_000 and fst24["factions"]["瑶池圣地"]["level"] == 2
+    amt24, fname24, role24 = fc24.salary(fst24, "u1")
+    assert fname24 == "瑶池圣地" and role24 == "宗主" and amt24 == 2 * 1200 * 2
+    assert fc24.salary(fst24, "u2")[0] == 2 * 1200                          # 门人不加成
+    ok24, _m, paid24 = fc24.pay(fst24, "u1")
+    assert ok24 and paid24 == amt24
+    assert fst24["factions"]["瑶池圣地"]["fund"] == 100_000 - amt24
+    assert "瑶池圣地" in fc24.list_text(fst24, "u1")
+    assert "势力等级" in fc24.status_text(fst24, "u1")
+    assert "尚未加入" in fc24.status_text(fst24, "nobody")
+    # db v17：两张单例表 + 读写
+    async with db.conn.execute(
+            "SELECT name FROM sqlite_master WHERE name IN ('tianjiao_state','faction_state')") as cur:
+        assert {r[0] for r in await cur.fetchall()} == {"tianjiao_state", "faction_state"}
+    await db.save_tianjiao({"bosses": {"青冥剑子": {"hp_pct": 0.5}}})
+    assert (await db.get_tianjiao())["bosses"]["青冥剑子"]["hp_pct"] == 0.5
+    await db.save_faction(fst24)
+    assert (await db.get_faction())["factions"]["瑶池圣地"]["level"] == 2
+    print("W7-3 ⑤ stone ledger/sky cd/faction salary/db v17 ok")
 
     await db.close()
     print("ALL M12 CHECKS PASSED")

@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, equipment, era as era_mod, extras, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, equipment, era as era_mod, extras, faction, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -95,7 +95,6 @@ EXTRA_ALIASES = {
     "#位面天骄图鉴", "#更新公告", "#公告网页",
     "#练气境界", "#炼体境界", "#我的练气",
     "#修仙助手", "#打散雷劫",
-    "#天骄列表", "#天骄状态", "#讨伐天骄",
     "#灵市帮助", "#副本掉落", "#去", "#探索仙府",
     "#禁地", "#仙境", "#下界八域", "#九天十地",
     "#镇守仙境", "#献祭魂与血",
@@ -350,6 +349,23 @@ CMD_ERA_RESHAPE = "#重塑天地大道"
 CMD_ERA_SEAL = "#禁仙六封"
 CMD_ERA_UNSEAL = "#解除禁仙六封"
 ERA_RESHAPE_REALM = 41   # 地仙：原版门槛是准仙帝(权威20)，本移植境界表不同，取渡劫飞升后的第一境
+# W7-3：位面天骄深度 + 源石坊账本 + 势力
+CMD_TJ_TRACE = "#打听天机"
+CMD_TJ_SHARE = "#神识共享天骄位置"
+CMD_TJ_HATRED = "#天骄仇恨"
+CMD_TJ_RANK = "#天骄贡献榜"
+CMD_TJ_LIST = "#天骄列表"
+CMD_TJ_STATUS = "#天骄状态"
+CMD_TJ_FIGHT = "#讨伐天骄"
+CMD_TAINT_SHOW = "#查看污损"
+CMD_TAINT_FIX = "#修复污损"
+CMD_STONE_LEDGER = "#源石账本"
+CMD_FACTION_LIST = "#势力列表"
+CMD_FACTION_JOIN = "#加入势力"
+CMD_FACTION_LEAVE = "#退出势力"
+CMD_FACTION_CONTRIB = "#势力贡献"
+CMD_FACTION_SALARY = "#势力俸禄"
+CMD_FACTION_STATUS = "#势力状态"
 CMD_DARK_OPEN = "#开启黑暗动乱"
 CMD_DARK_CLOSE = "#关闭黑暗动乱"
 CMD_DARK_STATUS = "#禁区至尊状态"
@@ -1055,7 +1071,26 @@ class ZhutianPlugin(Star):
                 (f"{CMD_STONE_MARKET} [外园/地字号/天字号]", "当日 5 块原石（外园 5 万灵石起）"),
                 (f"{CMD_STONE_INSPECT} 序号", "勘石看线索（1 万灵石）"),
                 (f"{CMD_STONE_BUY} 序号 [档位]", "购石当场切开（凶源会反噬气血）"),
+                (CMD_STONE_LEDGER, "最近 20 笔切石账：投入/回收/连续空石/奇珍"),
                 (f"{CMD_STONE_EXCHANGE} 数量", "源石兑灵石（汇率 10）"),
+            ]},
+            {"title": "位面天骄", "lines": [
+                (CMD_TJ_LIST, "八位天骄：在世/轮回中、气血、赏格"),
+                (f"{CMD_TJ_STATUS} 姓名", "细节：仇恨档位、踪迹、冷却、贡献榜"),
+                (f"{CMD_TJ_TRACE} 姓名", "300 万灵石 / 3 万源石买 24 小时踪迹"),
+                (f"{CMD_TJ_SHARE} 姓名 @玩家", "把已知踪迹共享给道友"),
+                (f"{CMD_TJ_FIGHT} 姓名", "讨伐（90 分钟冷却，单场至多削 40% 气血）"),
+                (f"{CMD_TJ_HATRED} [姓名]", "六档仇恨：杀得越多，它越容易从你手里逃走"),
+                (f"{CMD_TJ_RANK} [姓名]", "伤害贡献榜；击杀时前三名另加 30%/20%/10%"),
+                (f"{CMD_TAINT_SHOW} / {CMD_TAINT_FIX}", "查看 / 修复被天骄污损的装备（比例属性 -20%）"),
+            ]},
+            {"title": "势力", "lines": [
+                (CMD_FACTION_LIST, "三大势力：等级/成员/基金/门槛"),
+                (f"{CMD_FACTION_JOIN} 名字", "加入（首人自动为宗主，俸禄 ×2）"),
+                (CMD_FACTION_LEAVE, "退出（宗主退出自动传位）"),
+                (f"{CMD_FACTION_CONTRIB} 灵石数", "1 灵石 = 2 点贡献；每 20 万贡献升 1 级"),
+                (CMD_FACTION_SALARY, "等级×1200 灵石、宗主 ×2，22 小时一次"),
+                (CMD_FACTION_STATUS, "本势力与你的贡献/俸禄"),
             ]},
             {"title": "问仙令", "lines": [
                 (CMD_WXL, "通行证面板（激活后：等级/经验/任务）"),
@@ -8866,6 +8901,533 @@ class ZhutianPlugin(Star):
         yield event.plain_result(
             f"【神源崩解】{doc.name}以源术震碎神源，{target.name}重见天日。"
             + ("" if was else "（封印本已随时代更迭失效）"))
+
+    # ---- W7-3：位面天骄（天机寻踪 / 仇恨 / 共享血条 / 贡献榜 / 污损） ----
+
+    def _tianjiao_rows(self) -> list[dict]:
+        rows = [r for r in (self.content.table("item/位面天骄") or []) if r.get("name")]
+        return rows or extras.TIANJIAO
+
+    def _tj_row(self, name: str) -> dict | None:
+        target = (name or "").strip()
+        return next((r for r in self._tianjiao_rows() if r["name"] == target), None)
+
+    async def _tj_world(self) -> dict:
+        return tj_mod.world_ensure(await self.db.get_tianjiao())
+
+    async def _uid_name(self, uid: str) -> str:
+        raw = await self.db.get_player(uid)
+        return str((raw or {}).get("name") or uid[:8])
+
+    @filter.command(CMD_TJ_LIST, "天骄列表")
+    async def handle_tj_list(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        now = time.time()
+        world = await self._tj_world()
+        rows = self._tianjiao_rows()
+        lines = ["--- 位面天骄 ---", f"共 {len(rows)} 位｜发 #天骄状态 姓名 看细节"]
+        done = set(doc.ext.get("tianjiao_defeated") or [])
+        for i, r in enumerate(rows, 1):
+            boss = tj_mod.boss_of(world, r["name"])
+            status = tj_mod.status_of(boss, now)
+            hp = tj_mod.hp_pct_of(boss)
+            mark = " ✅" if r["name"] in done else ""
+            lines.append(f"{i}. {r['name']}{mark}｜第 {int(r['realm']) + 1} 境｜"
+                         f"{status}｜气血 {hp:.0%}｜赏 {int(r['reward']):,}")
+        left = tj_mod.cooldown_left(doc, now)
+        lines.append(f"你的讨伐冷却：{'可用' if not left else f'{left // 60} 分 {left % 60} 秒'}"
+                     f"（90 分钟/次）")
+        lines.append("找不到踪迹就先 #打听天机 姓名 位置")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command(CMD_TJ_STATUS, "天骄状态")
+    async def handle_tj_status(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        row = self._tj_row(name)
+        if not row:
+            yield event.plain_result(f"没有「{name}」这位天骄。#天骄列表 查看。")
+            return
+        now = time.time()
+        world = await self._tj_world()
+        boss = tj_mod.boss_of(world, row["name"])
+        h = tj_mod.hatred_of(doc, row["name"])
+        level, escape, protector = tj_mod.level_of(h)
+        trace = tj_mod.trace_of(doc, row["name"], now)
+        left = tj_mod.cooldown_left(doc, now)
+        rank = tj_mod.ranking(boss, 10)
+        mine = next((i for i, (uid, _d) in enumerate(rank, 1) if uid == doc.uid), None)
+        lines = [
+            f"--- {row['name']} ---",
+            str(row.get("desc") or ""),
+            f"境界：第 {int(row['realm']) + 1} 境｜攻 {int(row['atk']):,}｜"
+            f"防 {int(row['defense']):,}｜血 {int(row['hp']):,}",
+            f"状态：{tj_mod.status_of(boss, now)}｜气血 {tj_mod.hp_pct_of(boss):.0%}"
+            f"｜已陨落 {int(boss.get('kills', 0) or 0)} 次",
+            f"你的仇恨：{h}（{level}）→ 逃脱 {escape:.0%}、护道人 {protector:.0%}",
+            f"你的踪迹：{tj_mod.format_trace(trace) + '（剩 ' + str(tj_mod.trace_left(trace, now)) + ' 分）' if trace else '未知'}",
+            f"讨伐冷却：{'可用' if not left else f'{left // 60} 分 {left % 60} 秒'}",
+            f"贡献榜：{('%d 人，你第 %d' % (len(rank), mine)) if rank else '尚无人出手'}"
+            f"{'（#天骄贡献榜 %s）' % row['name'] if rank else ''}",
+            f"赏格：灵石 {int(row['reward']):,}｜修为 {int(row['reward']) * 10:,}"
+            f"｜贡献前三另加 30%/20%/10%",
+        ]
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command(CMD_TJ_TRACE, "打听天机")
+    async def handle_tj_trace(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        raw = (event.get_message_str() or "").strip()
+        parts = raw.split()
+        if len(parts) < 2:
+            yield event.plain_result("用法：#打听天机 天骄名位置 [灵石/源石]")
+            return
+        row = self._tj_row(parts[1])
+        if not row:
+            yield event.plain_result(f"未找到名为「{parts[1]}」的天骄。#天骄列表 确认名号。")
+            return
+        currency = "源石" if "源石" in raw else "灵石"
+        cost = tj_mod.COSTS[currency]
+        now = time.time()
+        known = tj_mod.trace_of(doc, row["name"], now)
+        if known:
+            yield event.plain_result(
+                f"【天机寻踪·踪迹未变】你已知晓{row['name']}的位置：{tj_mod.format_trace(known)}，"
+                f"剩 {tj_mod.trace_left(known, now)} 分钟。")
+            return
+        if currency == "灵石":
+            if int(doc.stones) < cost:
+                yield event.plain_result(f"打听{row['name']}需要 {cost:,} 灵石，当前 {int(doc.stones):,}。")
+                return
+        else:
+            y = yuanshi.system_of(doc)
+            if int(y["amount"]) < cost:
+                yield event.plain_result(f"打听{row['name']}需要 {cost:,} 源石，当前 {int(y['amount']):,}。")
+                return
+        d = doc.model_copy(deep=True)
+        if currency == "灵石":
+            d.stones -= cost
+        else:
+            y = yuanshi.system_of(d)
+            y["amount"] = int(y["amount"]) - cost
+            d.ext["yuanshi"] = y
+        trace = tj_mod.make_trace(row["name"], random.Random(f"{doc.uid}:{row['name']}:{now}"), now)
+        tj_mod.set_trace(d, row["name"], trace)
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result(
+            f"【天机寻踪·位置已明】\n你以 {cost:,}{currency} 为代价，请动天机老人推演{row['name']}的踪迹。\n"
+            f"当前位置：{tj_mod.format_trace(trace)}｜24 小时内有效\n"
+            f"抵达后发 #讨伐天骄 {row['name']}")
+
+    @filter.command(CMD_TJ_SHARE, "神识共享天骄位置")
+    async def handle_tj_share(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        raw = (event.get_message_str() or "").strip()
+        parts = raw.split()
+        if len(parts) < 2:
+            yield event.plain_result("用法：#神识共享天骄位置 天骄名 @玩家")
+            return
+        row = self._tj_row(parts[1])
+        if not row:
+            yield event.plain_result(f"未找到名为「{parts[1]}」的天骄。")
+            return
+        target, terr = await self._target_doc(event)
+        if terr:
+            yield event.plain_result(terr)
+            return
+        if target.uid == doc.uid:
+            yield event.plain_result("无需向自己共享神识。")
+            return
+        now = time.time()
+        trace = tj_mod.trace_of(doc, row["name"], now)
+        if not trace:
+            yield event.plain_result(f"你尚未知晓{row['name']}的有效踪迹，先 #打听天机。")
+            return
+        dt = target.model_copy(deep=True)
+        tj_mod.set_trace(dt, row["name"], trace)
+        await self.db.save_player(dt.model_dump())
+        yield event.plain_result(
+            f"你以神识将{row['name']}的踪迹共享给{target.name}："
+            f"{tj_mod.format_trace(trace)}（剩 {tj_mod.trace_left(trace, now)} 分钟）。")
+
+    @filter.command(CMD_TJ_FIGHT, "讨伐天骄")
+    async def handle_tj_fight(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        row = self._tj_row(name)
+        if not row:
+            yield event.plain_result(f"请指定要讨伐的天骄，例如：#讨伐天骄 {self._tianjiao_rows()[0]['name']}")
+            return
+        now = time.time()
+        world = await self._tj_world()
+        boss = tj_mod.boss_of(world, row["name"])
+        if tj_mod.blocked_until(boss) > now:
+            yield event.plain_result(f"{row['name']}：{tj_mod.status_of(boss, now)}")
+            return
+        if not tj_mod.trace_of(doc, row["name"], now):
+            yield event.plain_result(
+                f"你尚未找到{row['name']}的踪迹。先 #打听天机 {row['name']} 位置"
+                f"（或请道友 #神识共享天骄位置 {row['name']} @你）。")
+            return
+        left = tj_mod.cooldown_left(doc, now)
+        if left:
+            yield event.plain_result(f"讨伐天骄冷却中，剩余 {left // 60} 分 {left % 60} 秒。")
+            return
+        if int(doc.realm_index) < tj_mod.MIN_REALM:
+            table = self.content.table(doc.realm_table)
+            need = table[min(tj_mod.MIN_REALM, len(table) - 1)]["level"]
+            yield event.plain_result(f"你的练气境界至少达到【{need}】才能讨伐天骄。")
+            return
+        hp_cur, hp_max = self._hp_pair(doc)
+        if hp_cur <= hp_max * 0.1:
+            yield event.plain_result("还是先疗伤吧，别急着参战了。")
+            return
+
+        st = self._stats(doc)
+        pct = tj_mod.hp_pct_of(boss)
+        foe_hp = max(1, int(int(row["hp"]) * pct))
+        me = battle.Unit(doc.name or doc.uid[:8], int(st.atk), int(st.defense), int(hp_cur), float(st.bao))
+        foe = battle.Unit(row["name"], int(row["atk"]), int(row["defense"]), foe_hp, 0.05)
+        rng = random.Random(f"{doc.uid}:{row['name']}:{now}:{tj_mod.hatred_of(doc, row['name'])}")
+        winner, log, a_hp, b_hp = battle.spar_full(me, foe, rng)
+        d = doc.model_copy(deep=True)
+        d.ext["hp"] = max(0, int(a_hp))
+        tj_mod.mark_fight(d, now)
+        damage = max(0, min(foe_hp - int(b_hp), int(int(row["hp"]) * 0.4)))   # 单场至多削 40%
+        if pct <= 0:
+            damage = 0
+        max_hp = max(1, int(row["hp"]))
+        new_pct = max(0.0, pct - damage / max_hp)
+        total = tj_mod.add_contribution(boss, doc.uid, damage)
+        tail = "\n".join([x for x in log if x.startswith("【")][:3] + [log[-1]]) if log else ""
+
+        if winner == 0 and new_pct <= 0:
+            # 击杀：赏金 + 贡献前三加成 + 清仇恨 + 污损复原 + 轮回
+            rank_pos = next((i for i, (uid, _d) in enumerate(tj_mod.ranking(boss, 3), 1)
+                             if uid == doc.uid), 0)
+            bonus = tj_mod.CONTRIB_TOP_BONUS[rank_pos - 1] if rank_pos else 0.0
+            stones = int(int(row["reward"]) * (1 + bonus))
+            exp = int(int(row["reward"]) * 10 * (1 + bonus))
+            d.stones += stones
+            d.exp += exp
+            done = set(d.ext.get("tianjiao_defeated") or [])
+            done.add(row["name"])
+            d.ext["tianjiao_defeated"] = sorted(done)
+            cleared = tj_mod.clear_hatred(d, row["name"])
+            fixed = tj_mod.repair_by_source(d, row["name"])
+            cleared = int(cleared)
+            tj_mod.on_kill(boss, doc.name or doc.uid, now)
+            async with self.db.transaction():
+                await self.db.save_player(d.model_dump())
+                await self.db.save_tianjiao(world)
+            lines = [f"【{row['name']}】道身崩灭，已入轮回！18 小时后转世归来。",
+                     f"赏金：灵石 +{stones:,}、修为 +{exp:,}"
+                     f"{f'（贡献榜第 {rank_pos} 名，+{bonus:.0%}）' if bonus else ''}",
+                     f"你对它累计造成 {total:,} 伤害（本场 {damage:,}）。"]
+            if fixed:
+                lines.append(f"【污损复原】{fixed} 件被它污损的装备重焕灵光。")
+            if cleared:
+                lines.append(f"旧怨已了，仇恨清零（原 {cleared}）。")
+            yield event.plain_result("\n".join(lines) + ("\n" + tail if tail else ""))
+            return
+
+        if winner == 0:
+            # 打赢但没打死（单场 40% 上限）：累积贡献与仇恨
+            _old, _new, lvl = tj_mod.add_hatred(d, row["name"], "挑战成功")
+            boss["hp_pct"] = new_pct
+            async with self.db.transaction():
+                await self.db.save_player(d.model_dump())
+                await self.db.save_tianjiao(world)
+            yield event.plain_result(
+                f"你重创了{row['name']}！本场削去 {damage:,} 气血，其残存 {new_pct:.0%}。\n"
+                f"累计贡献 {total:,}｜仇恨升至 {_new}（{lvl}）\n"
+                f"「{row['name']}」负伤遁走，可再战。\n{tail}")
+            return
+
+        # 战败：仇恨 +5、污损 20%、护道人回血、按仇恨档逃脱
+        _old, new_h, lvl = tj_mod.add_hatred(d, row["name"], "挑战失败")
+        _ln, escape_chance, protector_chance = tj_mod.level_of(new_h)
+        lines = [f"你不敌{row['name']}，血战脱身（气血 {int(d.ext['hp'])}）。",
+                 f"仇恨 +{new_h - _old} → {new_h}（{lvl}）"]
+        if damage:
+            boss["hp_pct"] = new_pct
+            lines.append(f"仍削去其 {damage:,} 气血（残存 {new_pct:.0%}），累计贡献 {total:,}。")
+        roll = rng.random()
+        if roll < tj_mod.TAINT_CHANCE:
+            slot = tj_mod.pick_taint_slot(d, self.item_index.get, rng)
+            if slot:
+                item_name = (d.ext.get("equipment") or {}).get(slot) or slot
+                tj_mod.apply_taint(d, slot, row["name"], now)
+                lines.append(f"【装备污损】{row['name']}以道痕污浊了你的【{item_name}】"
+                             f"（{slot} 属性 -20%），击杀它或 #修复污损 可复原。")
+        if rng.random() < protector_chance:
+            healed = min(1.0, new_pct + tj_mod.PROTECTOR_HEAL)
+            boss["hp_pct"] = healed
+            lines.append(f"【护道人出手】一位老者挡在你面前，喂下丹药——{row['name']}气血回复至 {healed:.0%}。")
+        if rng.random() < escape_chance:
+            boss["escaped_until"] = now + tj_mod.ESCAPE_SECONDS
+            lines.append(f"【遁走】{row['name']}借秘术遁走，6 小时内不会再现。")
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            await self.db.save_tianjiao(world)
+        yield event.plain_result("\n".join(lines) + ("\n" + tail if tail else ""))
+
+    @filter.command(CMD_TJ_HATRED, "天骄仇恨")
+    async def handle_tj_hatred(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        table = doc.ext.get("tianjiao_hatred")
+        table = dict(table) if isinstance(table, dict) else {}
+        if name:
+            row = self._tj_row(name)
+            if not row:
+                yield event.plain_result(f"没有「{name}」这位天骄。")
+                return
+            value = int(table.get(row["name"], 0) or 0)
+            lvl, escape, protector = tj_mod.level_of(value)
+            yield event.plain_result(
+                f"--- 与{row['name']}的仇恨 ---\n仇恨值：{value}（{lvl}）\n"
+                f"它的逃脱概率 {escape:.0%}｜护道人出手 {protector:.0%}\n"
+                f"来源：挑战失败 +5、挑战成功 +20、击杀 +50")
+            return
+        if not table:
+            yield event.plain_result("你与诸位天骄尚无旧怨（仇恨 0）。")
+            return
+        lines = ["--- 天骄仇恨 ---"]
+        for tj_name, value in sorted(table.items(), key=lambda kv: -int(kv[1] or 0)):
+            lvl, escape, _p = tj_mod.level_of(int(value or 0))
+            lines.append(f"· {tj_name}：{int(value)}（{lvl}）｜逃脱 {escape:.0%}")
+        lines.append("仇恨越高，天骄越容易从你手里逃掉——先杀小的攒实力，别死磕。")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command(CMD_TJ_RANK, "天骄贡献榜")
+    async def handle_tj_rank(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        world = await self._tj_world()
+        target = self._tj_row(name) if name else None
+        if name and not target:
+            yield event.plain_result(f"没有「{name}」这位天骄。")
+            return
+        rows = [target] if target else self._tianjiao_rows()
+        lines = []
+        for row in rows:
+            boss = tj_mod.boss_of(world, row["name"])
+            rank = tj_mod.ranking(boss, 5)
+            if not rank:
+                continue
+            lines.append(f"--- {row['name']} 贡献榜（气血 {tj_mod.hp_pct_of(boss):.0%}）---")
+            for i, (uid, dmg) in enumerate(rank, 1):
+                who = await self._uid_name(uid)
+                lines.append(f"{i}. {who}｜伤害 {dmg:,}")
+        if not lines:
+            yield event.plain_result("诸位天骄都还没挨过打，贡献榜空空如也。")
+            return
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command(CMD_TAINT_SHOW, "查看污损")
+    async def handle_taint_show(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        table = tj_mod.tainted(doc)
+        if not table:
+            yield event.plain_result("你身上没有被天骄污损的装备，道韵清朗。")
+            return
+        lines = ["--- 装备污损 ---"]
+        for slot, row in table.items():
+            item_name = (doc.ext.get("equipment") or {}).get(slot) or slot
+            lines.append(f"· 【{item_name}】（{slot}）｜污损来源：{row.get('by') or '?'}｜该槽比例属性 -20%")
+        lines.append(f"修复：#修复污损（每件 {tj_mod.REPAIR_LINGSHI:,} 灵石 + "
+                     f"{tj_mod.REPAIR_YUANSHI:,} 源石），或击杀污损来源天骄自动复原。")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command(CMD_TAINT_FIX, "修复污损")
+    async def handle_taint_fix(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        table = tj_mod.tainted(doc)
+        if not table:
+            yield event.plain_result("你身上没有污损装备，无需修复。")
+            return
+        n = len(table)
+        cost_l = tj_mod.REPAIR_LINGSHI * n
+        cost_y = tj_mod.REPAIR_YUANSHI * n
+        y = yuanshi.system_of(doc)
+        if int(doc.stones) < cost_l or int(y["amount"]) < cost_y:
+            yield event.plain_result(
+                f"修复 {n} 件污损装备需灵石 {cost_l:,} 与源石 {cost_y:,}；"
+                f"你现有灵石 {int(doc.stones):,}、源石 {int(y['amount']):,}。还是去击杀污损来源吧。")
+            return
+        d = doc.model_copy(deep=True)
+        d.stones -= cost_l
+        y = yuanshi.system_of(d)
+        y["amount"] = int(y["amount"]) - cost_y
+        d.ext["yuanshi"] = y
+        for slot in list(table):
+            tj_mod.repair(d, slot)
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result(
+            f"你以灵石 {cost_l:,}、源石 {cost_y:,} 洗去 {n} 件装备上的污损道痕，重焕灵光！")
+
+    @filter.command(CMD_STONE_LEDGER, "源石账本")
+    async def handle_stone_ledger(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result(yuanshi.ledger_text(yuanshi.system_of(doc)))
+
+    # ---- W7-3：势力（加入 / 退出 / 贡献 / 俸禄 / 状态） ----
+
+    async def _faction_state(self) -> dict:
+        return faction.ensure(await self.db.get_faction())
+
+    @filter.command(CMD_FACTION_LIST, "势力列表")
+    async def handle_faction_list(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result(faction.list_text(await self._faction_state(), doc.uid))
+
+    @filter.command(CMD_FACTION_JOIN, "加入势力")
+    async def handle_faction_join(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        target = (name or "").strip()
+        if not target:
+            yield event.plain_result(f"格式：{CMD_FACTION_JOIN} 名字（可选：{'、'.join(faction.names())}）")
+            return
+        state = await self._faction_state()
+        ok, msg = faction.join(state, target, doc.uid, doc.name or doc.uid[:8], int(doc.realm_index))
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self.db.save_faction(state)
+        yield event.plain_result(msg + f"\n{faction.status_text(state, doc.uid)}")
+
+    @filter.command(CMD_FACTION_LEAVE, "退出势力")
+    async def handle_faction_leave(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        state = await self._faction_state()
+        ok, msg = faction.leave(state, doc.uid)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self.db.save_faction(state)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_FACTION_CONTRIB, "势力贡献")
+    async def handle_faction_contrib(self, event: AstrMessageEvent, amount: int = 0):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        amount = int(amount or 0)
+        if amount <= 0:
+            yield event.plain_result(f"格式：{CMD_FACTION_CONTRIB} 灵石数（1 灵石 = {faction.CONTRIB_RATE} 点贡献）")
+            return
+        if int(doc.stones) < amount:
+            yield event.plain_result(f"灵石不足（需 {amount:,}，现有 {int(doc.stones):,}）。")
+            return
+        state = await self._faction_state()
+        d = doc.model_copy(deep=True)
+        d.stones -= amount
+        ok, msg, _points = faction.contribute(state, doc.uid, amount)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            await self.db.save_faction(state)
+        yield event.plain_result(msg + "\n" + faction.status_text(state, doc.uid))
+
+    @filter.command(CMD_FACTION_SALARY, "势力俸禄")
+    async def handle_faction_salary(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        now = time.time()
+        last = float(doc.ext.get("faction_salary_ts") or 0)
+        if now - last < faction.SALARY_COOLDOWN:
+            remain = int(faction.SALARY_COOLDOWN - (now - last))
+            yield event.plain_result(f"今日俸禄已领，{remain // 3600} 时 {(remain % 3600) // 60} 分后再来。")
+            return
+        state = await self._faction_state()
+        ok, msg, amount = faction.pay(state, doc.uid)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = doc.model_copy(deep=True)
+        d.stones += amount
+        d.ext["faction_salary_ts"] = now
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            await self.db.save_faction(state)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_FACTION_STATUS, "势力状态")
+    async def handle_faction_status(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result(faction.status_text(await self._faction_state(), doc.uid))
 
     # ---- 彼岸世界 / 真世界（基础世界层：世界 / 坐标 / 星辰 / 探索 / 道标） ----
 

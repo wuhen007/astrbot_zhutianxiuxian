@@ -22,7 +22,7 @@ GARDENS: dict[str, dict] = {
     "地字号": {"currency": "源石", "basePrice": 300_000, "dailyLimit": 2, "rate": 1,
               "sealCost": 100_000, "danger": 0.12},
     "天字号": {"currency": "源石", "basePrice": 2_000_000, "dailyLimit": 1, "rate": 1,
-              "sealCost": 500_000, "danger": 0.15},
+              "sealCost": 500_000, "danger": 0.15, "cooldownHours": 20},
 }
 
 # (id, 名称, 权重, ratio, 物品名/None, danger)
@@ -82,11 +82,18 @@ def _date_key(ts: float) -> str:
 
 
 def system_of(doc: Mapping) -> dict:
+    """源石账户快照。除 amount/day 外还带回账本与冷却（W7-3），避免回写时被抹掉。"""
     y = doc.ext.get("yuanshi") if isinstance(doc.ext, Mapping) else None
     if isinstance(y, dict):
-        return copy.deepcopy({"amount": int(y.get("amount", 0) or 0),
-                              "day": y.get("day") or {}})
-    return {"amount": 0, "day": {}}
+        out = copy.deepcopy(dict(y))
+        out["amount"] = int(y.get("amount", 0) or 0)
+        out["day"] = y.get("day") or {}
+        out.setdefault("ledger", [])
+        out.setdefault("cooldown", {})
+        out.setdefault("empty_streak", 0)
+        out.setdefault("cuts", 0)
+        return out
+    return {"amount": 0, "day": {}, "ledger": [], "cooldown": {}, "empty_streak": 0, "cuts": 0}
 
 
 def daily_of(y: dict, now: float) -> dict:
@@ -140,6 +147,13 @@ def buy_and_cut(
     """
     cfg = GARDENS[garden]
     d = daily_of(y, now)
+    cd_hours = float(cfg.get("cooldownHours") or 0)
+    if cd_hours > 0:
+        last_ts = float((y.get("cooldown") or {}).get(garden, 0) or 0)
+        if now - last_ts < cd_hours * 3600:
+            left = cd_hours * 3600 - (now - last_ts)
+            return (False, f"{garden}刚切过一块，需 {int(left // 3600)} 时 "
+                           f"{int(left % 3600 // 60)} 分后才能再购（原版 20 小时冷却）。", y, {})
     used = int(d["count"].get(garden, 0))
     if used >= cfg["dailyLimit"]:
         return False, f"{garden}今日已切 {used} 块（限额 {cfg['dailyLimit']} 块，明日再来）。", y, {}
@@ -158,6 +172,8 @@ def buy_and_cut(
         cost = {"currency": "源石", "amount": price}
     d["count"][garden] = used + 1
     y["day"] = d
+    if cd_hours > 0:
+        y["cooldown"] = {**(y.get("cooldown") or {}), garden: float(now)}
     price = int(stone["price"])
     outcome = stone["outcome"]
     lines = [f"刀锋落下——{stone['name']}！"]
@@ -166,6 +182,7 @@ def buy_and_cut(
     if stone["danger"]:
         hp_pct = cfg["danger"]
         lines.append(f"石中封着的凶物骤然反噬，气血被削去 {cfg['danger']:.0%}，你狼狈退出石园。")
+        _record(y, garden, price, cost["currency"], 0, stone, now)
         return True, "\n".join(lines), y, {
             "cost": cost, "hp_pct": hp_pct, "gains": {}, "source": 0,
         }
@@ -179,9 +196,58 @@ def buy_and_cut(
         lines.append(f"源石入账 +{source:,}（石价 {price:,} × {stone['ratio']:g} ÷ 汇率 {cfg['rate']}）")
     if not stone["item"] and stone["ratio"] == 0:
         lines.append("石心空空如也……赌石有风险，切石需谨慎。")
+    _record(y, garden, price, cost["currency"], source, stone, now)
     return True, "\n".join(lines), y, {
         "cost": cost, "hp_pct": hp_pct, "gains": gains, "source": source,
     }
+
+
+LEDGER_KEEP = 20
+
+
+def _record(y: dict, garden: str, price: int, currency: str,
+            source: int, stone: Mapping, now: float) -> None:
+    """记一笔切石账：最近 20 笔 + 连续空石 + 累计次数（原版 sourceStoneForms 的轻量版）。"""
+    empty = (not stone.get("item")) and float(stone.get("ratio") or 0) <= 0
+    ledger = list(y.get("ledger") or [])
+    ledger.append({
+        "t": float(now), "garden": garden, "price": int(price), "cur": currency,
+        "source": int(source), "item": str(stone.get("item") or ""),
+        "name": str(stone.get("name") or ""), "empty": bool(empty),
+    })
+    y["ledger"] = ledger[-LEDGER_KEEP:]
+    y["empty_streak"] = int(y.get("empty_streak", 0) or 0) + 1 if empty else 0
+    y["cuts"] = int(y.get("cuts", 0) or 0) + 1
+
+
+def ledger_text(y: Mapping) -> str:
+    ledger = list(y.get("ledger") or [])
+    if not ledger:
+        return ("--- 源石坊账本 ---\n尚无切石记录。#源石坊 外园/地字号/天字号 看石，"
+                "#购石 编号 切石。")
+    spend = {"灵石": 0, "源石": 0}
+    gained = 0
+    items: dict[str, int] = {}
+    for row in ledger:
+        cur = str(row.get("cur") or "灵石")
+        spend[cur] = spend.get(cur, 0) + int(row.get("price", 0) or 0)
+        gained += int(row.get("source", 0) or 0)
+        if row.get("item"):
+            items[str(row["item"])] = items.get(str(row["item"]), 0) + 1
+    lines = ["--- 源石坊账本（最近 %d 笔）---" % len(ledger)]
+    for row in ledger[-8:]:
+        t = time.strftime("%m-%d %H:%M", time.localtime(float(row.get("t", 0) or 0)))
+        got = (f"源石 +{int(row.get('source', 0)):,}" if int(row.get("source", 0) or 0)
+               else ("【" + str(row["item"]) + "】" if row.get("item") else "空石"))
+        lines.append(f"{t}｜{row.get('garden')}｜{int(row.get('price', 0)):,}"
+                     f"{row.get('cur')} → {got}")
+    lines.append(f"累计：切石 {int(y.get('cuts', len(ledger)) or 0)} 块｜"
+                 f"投灵石 {spend.get('灵石', 0):,}、投源石 {spend.get('源石', 0):,}"
+                 f"｜回收源石 {gained:,}")
+    lines.append(f"连续空石：{int(y.get('empty_streak', 0) or 0)} 块")
+    if items:
+        lines.append("所得奇珍：" + "、".join(f"{k}×{v}" for k, v in items.items()))
+    return "\n".join(lines)
 
 
 def market_text(garden: str, stones: list[dict], y: dict, now: float) -> str:
