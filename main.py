@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -338,6 +338,11 @@ CMD_OSW_EXPLORE = "#贡献探索"
 CMD_OSW_ANCHOR = "#建立道标"
 CMD_OSW_CLEAR = "#完成大星"
 CMD_OSW_NEAREST = "#最近星辰"
+# W7-5a：彼岸大道至宝
+CMD_OSF_PANEL = "#彼岸铸宝"
+CMD_OSF_START = "#大道开炉"
+CMD_OSF_CLAIM = "#大道出炉"
+CMD_OSF_MY = "#大道至宝"
 CMD_SHENPO = "#炼神魄"
 CMD_SHENPO_ALL = "#一键炼神魄"
 CMD_ERA_STATUS = "#纪元"
@@ -8637,7 +8642,13 @@ class ZhutianPlugin(Star):
                 if res["defeated"]:
                     cleared, karma_left = calamity.reduce_karma(doc, calamity.KARMA_OVERLORD)
                     favor = calamity.add_favor(doc, calamity.FAVOR_OVERLORD)
+                    st_osf = osf.ensure(doc)
+                    st_osf["overlord_kills"] = int(st_osf.get("overlord_kills", 0) or 0) + 1
+                    osf.add_materials(st_osf, osf.OVERLORD_BUNDLE)
                     lines.append(f"【魔主伏诛】{state['overlord']['name']} 被镇压！")
+                    lines.append("炼器材料：" + "、".join(f"{osf.MATERIAL_NAMES[k]}×{v}"
+                                                     for k, v in osf.OVERLORD_BUNDLE.items())
+                                 + f"（魔主战绩 {st_osf['overlord_kills']}/3）")
                     lines.append(f"业力 -{cleared}（余 {karma_left}）｜位面青睐 +{calamity.FAVOR_OVERLORD}（共 {favor}）")
                     break
             await self.db.save_calamity(state)
@@ -10004,10 +10015,96 @@ class ZhutianPlugin(Star):
         state = await self._osw_ensure()
         coord = self._osw_explicit_coord(event.message_str, CMD_OSW_CLEAR) or self._osw_nearest(state, prefer_visited=False)
         star = other_shore_world.require_star(state, coord)
+        before_phase = str((state.get("states", {}).get(star["id"], {}) or {}).get("phase") or "")
         new_state = other_shore_world.clear_other_shore_campaign_star(state, coord)
         await self._osw_save(new_state)
         lines = [f"「{star.get('name')}」已完成（{new_state['states'][star['id']].get('phase')}）。"]
+        if before_phase != "cleared":
+            # W7-5a：首次完成大星 → 彼岸炼器材料 + 层解锁进度
+            st_osf = osf.ensure(doc)
+            st_osf["clears"] = int(st_osf.get("clears", 0) or 0) + 1
+            osf.add_materials(st_osf, osf.CLEAR_BUNDLE)
+            await self.db.save_player(doc.model_dump())
+            lines.append("【彼岸战利】炼器材料已入炉库：" +
+                         "、".join(f"{osf.MATERIAL_NAMES[k]}×{v}"
+                                  for k, v in osf.CLEAR_BUNDLE.items()))
+            if st_osf["clears"] == 1:
+                lines.append("【真世界开启】完成首颗大星，可铸【三宝归墟法】等真世界至宝。")
         async for r in self._smart(event, "\\n".join(lines), "彼岸世界"):
+            yield r
+
+    # ---- W7-5a：彼岸大道至宝（三层位面 / 四配方 / 24 小时开炉） ----
+
+    @filter.command(CMD_OSF_PANEL, "彼岸铸宝")
+    async def handle_osf_panel(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        digits = "".join(ch for ch in (arg or "") if ch.isdigit())
+        if not digits:
+            async for r in self._smart(event, osf.panel(doc, time.time()), "彼岸铸宝"):
+                yield r
+            return
+        index = int(digits)
+        ok, missing, recipe = osf.preview(doc, index)
+        if not recipe:
+            yield event.plain_result("没有这个配方（1-4）。")
+            return
+        lines = [f"【大道至宝预览·{recipe['name']}】",
+                 f"状态：{'铸造预检通过，可 #大道开炉 ' + str(index) if ok else '尚有条件未满足'}",
+                 "材料需求：" + "、".join(f"{osf.MATERIAL_NAMES[k]}×{v}"
+                                          for k, v in recipe["materials"].items())]
+        if missing:
+            lines.append("缺口：" + "、".join(missing))
+        lines.append(f"产出：{recipe['output']['name']}｜全属性 +{recipe['output']['all']:.0%}"
+                     f"｜暴击 +{recipe['output']['bao']:.0%}")
+        async for r in self._smart(event, "\n".join(lines), "大道至宝预览"):
+            yield r
+
+    @filter.command(CMD_OSF_START, "大道开炉")
+    async def handle_osf_start(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        digits = "".join(ch for ch in (arg or "") if ch.isdigit())
+        if not digits:
+            yield event.plain_result(f"格式：{CMD_OSF_START} 1-4（#彼岸铸宝 看配方）")
+            return
+        ok, msg = osf.start(doc, int(digits), time.time())
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, msg, "大道开炉"):
+            yield r
+
+    @filter.command(CMD_OSF_CLAIM, "大道出炉")
+    async def handle_osf_claim(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, _treasure = osf.claim(doc, time.time())
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, msg, "大道出炉"):
+            yield r
+
+    @filter.command(CMD_OSF_MY, "大道至宝")
+    async def handle_osf_my(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, osf.treasure_text(doc), "大道至宝"):
             yield r
 
     @filter.command(CMD_OSW_NEAREST, "最近星辰")

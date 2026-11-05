@@ -3929,6 +3929,68 @@ async def main():
     assert dg27.rewards_of(row27, 5)[0] == int(row27["experience"]) // 2
     print("W7-5b ④ dungeon tables wired ok")
 
+    # 28. W7-5a 彼岸大道至宝：三层 / 四配方 / 24h 开炉 / 至宝加成
+    from core import other_shore_forge as osf28, dibing as db28
+
+    # ① 材料入炉库 + 层解锁（沧澜→真世界→乾坤）
+    d28 = PlayerDoc(uid="w7osf", realm_index=40, ext={})
+    st28 = osf28.ensure(d28)
+    assert osf28.layer_of(st28, d28) == "canglan"
+    assert not osf28.has_layer(st28, d28, "true_world")
+    osf28.add_materials(st28, osf28.CLEAR_BUNDLE)
+    assert int(st28["materials"]["true-world-source-crystal"]) == 60
+    st28["clears"] = 1
+    assert osf28.layer_of(st28, d28) == "true_world"       # 40 境破界 15 档 → 停在真世界
+    assert not osf28.has_layer(st28, d28, "qiankun")
+    hi28 = PlayerDoc(uid="w7qk", realm_index=52, ext={})    # 52 境 = 破界 20 档
+    st_hi = osf28.ensure(hi28)
+    st_hi["clears"] = 1
+    assert osf28.layer_of(st_hi, hi28) == "qiankun"
+    low28 = PlayerDoc(uid="w7low", realm_index=40, ext={})
+    st28b = osf28.ensure(low28)
+    st28b["clears"] = 1
+    print("W7-5a ① materials & layer unlock ok")
+
+    # ② 配方预览：缺材料/缺器胚分别列出；齐备后通过；第二法锁定
+    ok28, miss28, recipe28 = osf28.preview(d28, 1)
+    assert recipe28["name"] == "三宝归墟法" and not ok28
+    assert any("真界源晶" in m for m in miss28)
+    assert any("帝兵" in m for m in miss28)
+    ok28, miss28, _r = osf28.preview(d28, 2)
+    assert not ok28 and any("未开放" in m for m in miss28)
+    # 备齐材料 + 圣兵器胚
+    st28["materials"] = dict(recipe28["materials"])
+    w28 = db28.forge("仙泪绿金", "混沌剑")[2]
+    w28["stage"] = 4
+    d28.ext["dibing"] = w28
+    ok28, miss28, _r = osf28.preview(d28, 1)
+    assert ok28, miss28
+    print("W7-5a ② recipe preview gaps ok")
+
+    # ③ 24 小时开炉：重复开炉拒绝 / 未足拒领 / 到点出炉 / 炉空
+    ok28, msg28 = osf28.start(d28, 1, n6)
+    assert ok28 and "24 小时" in msg28
+    assert not osf28.start(d28, 1, n6)[0]
+    ok28, msg28, _t = osf28.claim(d28, n6 + 3600)
+    assert not ok28 and "炉火未足" in msg28
+    ok28, msg28, treasure28 = osf28.claim(d28, n6 + osf28.FORGE_SECONDS + 1)
+    assert ok28 and treasure28 and treasure28["all"] == 0.15
+    assert osf28.treasure_bonus(osf28.ensure(d28)) == (0.15, 0.05)
+    assert not osf28.claim(d28, n6 + osf28.FORGE_SECONDS + 2)[0]
+    print("W7-5a ③ 24h forge lifecycle ok")
+
+    # ④ 至宝加成进装备聚合（全属性 +15%、暴击 +5%）
+    lv28 = store.table("Level/练气境界")
+    bare28 = PlayerDoc(uid="w7bare", realm_index=40, ext={})
+    with28 = equip_mod.aggregate(d28, lv28, lambda n: None)
+    without28 = equip_mod.aggregate(bare28, lv28, lambda n: None)
+    assert with28.atk > without28.atk and with28.defense > without28.defense
+    assert abs(with28.bao - without28.bao - 0.05) < 1e-9
+    # 乾坤界配方：层不足拒绝
+    ok28, miss28, _r = osf28.preview(low28, 4)
+    assert not ok28 and any("乾坤界" in m for m in miss28)
+    print("W7-5a ④ treasure bonus & layer gate ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 
