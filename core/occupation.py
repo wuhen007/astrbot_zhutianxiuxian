@@ -38,6 +38,103 @@ MINE_POOL_B = (
 
 PINJI_NAMES = ("劣", "普", "优", "精", "极", "绝", "顶")
 
+# ---------------------------------------------------------------- 12 职业产线（W7-4）
+# 已有产线：采药师 #采药 / 采矿师 #采矿 / 符师 #制符 / 炼器师 #炼器 / 炼丹师 #炼丹
+# 这里补齐余下 7 个职业的「时长换产出」，统一由 #职业产出 分钟 驱动。
+PRODUCE: dict[str, dict] = {
+    "猎户": {
+        "action": "狩猎", "period": 30, "cycles": 24,
+        "pool": (("兽皮", 45), ("凶兽骨", 32), ("红色妖丹", 16), ("金色妖丹", 7)),
+    },
+    "侠客": {
+        "action": "行侠", "period": 60, "cycles": 12,
+        "stones": (12_000, 30_000),
+        "pool": (("兽皮", 70), ("凶兽骨", 30)),
+    },
+    "唤魔者": {
+        "action": "召魔", "period": 45, "cycles": 16,
+        "pool": (("神魂结晶", 18), ("凶兽骨", 52), ("凶兽精肉", 30)),
+    },
+    "源师": {
+        "action": "寻源", "period": 40, "cycles": 18,
+        "source": (400, 1_200),
+        "pool": (("下品源石", 70), ("中品源石", 30)),
+    },
+    "源地师": {
+        "action": "布阵寻源", "period": 60, "cycles": 12,
+        "source": (900, 2_400),
+        "pool": (("中品源石", 62), ("上品源石", 30), ("八卦阵盘", 8)),
+    },
+    "源天师": {
+        "action": "观星定源", "period": 90, "cycles": 8,
+        "source": (2_000, 6_000),
+        "pool": (("上品源石", 60), ("神源石", 32), ("八卦阵盘", 8)),
+    },
+    "阵法师": {
+        "action": "布阵", "period": 60, "cycles": 12,
+        "pool": (("符纸", 62), ("八卦阵盘", 26), ("轮回阵旗", 12)),
+    },
+}
+
+# 职业等级解锁：达到等级后产线额外 +1 档权重（展示用，同时给 rate 加成）
+SKILL_UNLOCKS: tuple[tuple[int, str, str], ...] = (
+    (5, "初窥门径", "产线经验 +10%"),
+    (12, "登堂入室", "产线经验 +25%，稀有产出权重 +1"),
+    (20, "炉火纯青", "产线经验 +40%，稀有产出权重 +2"),
+    (30, "出神入化", "产线经验 +60%，稀有产出权重 +3"),
+)
+
+
+def produce_skill(level: int) -> tuple[str, float, int]:
+    """等级 → (称号, 经验加成, 稀有产出入权重)。"""
+    title, exp_bonus, rare_bonus = "初学乍练", 0.0, 0
+    for need, name, desc in SKILL_UNLOCKS:
+        if int(level) >= need:
+            title = name
+            exp_bonus = {5: 0.10, 12: 0.25, 20: 0.40, 30: 0.60}[need]
+            rare_bonus = {5: 0, 12: 1, 20: 2, 30: 3}[need]
+    return title, exp_bonus, rare_bonus
+
+
+def produce_line(job: str) -> dict | None:
+    return PRODUCE.get(str(job or ""))
+
+
+def produce(
+    job: str, minutes: int, level: int, rng: random.Random,
+) -> tuple[dict[str, int], int, int, str]:
+    """结算产线：返回 (物品, 源石, 灵石, 说明)。
+
+    cycles = 分钟 // 周期；每次产出按权重掷一件。职业等级给额外轮次与稀有偏好。
+    """
+    line = produce_line(job)
+    if not line:
+        return {}, 0, 0, ""
+    title, exp_bonus, rare_bonus = produce_skill(level)
+    cycles = max(0, int(minutes)) // max(1, int(line["period"]))
+    if cycles <= 0:
+        return {}, 0, 0, title
+    rolls = cycles + int(cycles * min(0.5, 0.02 * int(level)))
+    pool = list(line.get("pool") or [])
+    weights = []
+    for i, (_name, w) in enumerate(pool):
+        # 越靠后的条目越稀有：稀有偏好把它们的权重抬高
+        weights.append(max(1, int(w) + (rare_bonus if i >= max(0, len(pool) - 2) else 0)))
+    items: dict[str, int] = {}
+    for _ in range(rolls):
+        name = rng.choices([p[0] for p in pool], weights=weights, k=1)[0]
+        items[name] = items.get(name, 0) + 1
+    source = 0
+    if line.get("source"):
+        lo, hi = line["source"]
+        source = int(rng.randint(int(lo), int(hi)) * cycles * (1.0 + exp_bonus))
+    stones = 0
+    if line.get("stones"):
+        lo, hi = line["stones"]
+        stones = int(rng.randint(int(lo), int(hi)) * cycles * (1.0 + exp_bonus))
+    exp = int(cycles * 12 * (1 + int(level)) * (1.0 + exp_bonus))
+    return items, source, stones, title
+
 
 def plant_period() -> int:
     """采药周期分钟（原版 y=15）。"""

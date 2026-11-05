@@ -138,12 +138,14 @@ def trace_left(trace: Mapping, now: float) -> int:
 
 # ---------------------------------------------------------------- 个人冷却
 
-def cooldown_left(doc: Any, now: float) -> int:
+def cooldown_left(doc: Any, now: float, cd_mult: float = 1.0) -> int:
+    """个人冷却剩余秒数；cd_mult < 1 为道法卡等减免（W7-4）。"""
     try:
         last = float(doc.ext.get("tianjiao_cd") or 0)
     except (TypeError, ValueError):
         last = 0.0
-    return max(0, int(last + PERSONAL_CD_SECONDS - now))
+    span = PERSONAL_CD_SECONDS * min(1.0, max(0.1, float(cd_mult)))
+    return max(0, int(last + span - now))
 
 
 def mark_fight(doc: Any, now: float) -> None:

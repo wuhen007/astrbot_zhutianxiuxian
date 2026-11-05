@@ -60,6 +60,38 @@ def _echo_once(atk_u, def_u, ctx) -> None:
                    f"（第 {ctx.get('round', 1)} 回合）")
 
 
+def _break_army(atk_u, def_u, ctx) -> None:
+    """破军：第 3 回合起，杀伐之气凝成锋，伤害乘区 +8%（一场一次）。"""
+    if int(ctx.get("round", 1) or 1) < 3 or atk_u.tags.get("_break_army"):
+        return
+    atk_u.tags["_break_army"] = True
+    atk_u.effects["dmg_dealt_mult"] = float(atk_u.eff("dmg_dealt_mult", 1.0)) + 0.08
+    log = ctx.get("log")
+    if isinstance(log, list):
+        log.append(f"【破军】{atk_u.name} 杀气凝锋，攻势暴涨（伤害 +8%）")
+
+
+def _rejuvenate(atk_u, def_u, ctx) -> None:
+    """回春：第 4 回合起，引动生机回复 10% 气血（一场一次）。"""
+    if int(ctx.get("round", 1) or 1) < 4 or atk_u.tags.get("_rejuvenate"):
+        return
+    atk_u.tags["_rejuvenate"] = True
+    heal = max(1, int(atk_u.hp_max * 0.10))
+    hp_table = ctx.get("hp")
+    side = ctx.get("side")
+    if isinstance(hp_table, list) and isinstance(side, int) and 0 <= side < len(hp_table):
+        before = int(hp_table[side])
+        hp_table[side] = min(int(atk_u.hp_max), before + heal)
+        gained = hp_table[side] - before
+    else:                       # 无引擎上下文（自检/单测直调）时退回写 Fighter
+        before = int(atk_u.hp)
+        atk_u.hp = min(int(atk_u.hp_max), before + heal)
+        gained = atk_u.hp - before
+    log = ctx.get("log")
+    if isinstance(log, list):
+        log.append(f"【回春】{atk_u.name} 生机流转，回复 {gained:,} 气血")
+
+
 BUILTIN_SKILLS = (
     SkillSpec(id="prof_echo", name="功法共鸣",
               on_turn=lambda a, b, c: _echo_once(a, b, {**c, "title": "功法共鸣"}),
@@ -67,6 +99,11 @@ BUILTIN_SKILLS = (
     SkillSpec(id="dual_echo", name="双轨共鸣",
               on_turn=lambda a, b, c: _echo_once(a, b, {**c, "title": "双轨共鸣"}),
               meta={"kind": "observe", "gate": "both_tracks>=10"}),
+    # W7-4：两个有数值的档位特效，挂载条件见 loadout.apply_proficiency / build_fighter
+    SkillSpec(id="break_army", name="破军", on_turn=_break_army,
+              meta={"kind": "buff", "gate": "prof_stage>=炉火纯青"}),
+    SkillSpec(id="rejuvenate", name="回春", on_turn=_rejuvenate,
+              meta={"kind": "heal", "gate": "heal_pool & realm>=20"}),
 )
 
 

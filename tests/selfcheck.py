@@ -3693,6 +3693,107 @@ async def main():
     assert (await db.get_faction())["factions"]["瑶池圣地"]["level"] == 2
     print("W7-3 ⑤ stone ledger/sky cd/faction salary/db v17 ok")
 
+    # 25. W7-4 养成深度：灵根觉醒 / 寿元救援 / 帝兵 12 档 / 职业产线 / 道法卡 / 功法特效
+    from core import linggen as lg25, lifespan as ls25, dibing as db25
+    from core import occupation as occ25, daofa as df25
+    from core.combat import engine as eng25, skills as sk25
+
+    # ① 灵根觉醒：四维进快照 + 觉醒抬四维 + 装备聚合真实生效 + 三阶封顶
+    lrow = {"id": 901, "name": "元灵体", "type": "体质", "eff": 0.1, "法球倍率": 0.12,
+            "攻击": 0.2, "防御": 0.2, "生命": 0.2, "生命本源": 100, "稀有度": 3}
+    snap25 = lg25.snapshot(lrow)
+    assert snap25["atk"] == 0.2 and snap25["origin"] == 100 and snap25["awaken"] == 0
+    atk25, _d25, _h25, flat25 = lg25.stats_of(snap25)
+    assert atk25 == 0.2 and flat25 == 100 * lg25.ORIGIN_SCALE
+    d25 = PlayerDoc(uid="w7lg", realm_index=21, stones=50_000_000,
+                    ext={"linggen": dict(snap25)})
+    lv25 = store.table("Level/练气境界")
+    no_item = lambda n: None                                     # noqa: E731
+    base25 = equip_mod.aggregate(d25, lv25, no_item)
+    ok25, msg25, d25b = lg25.awaken(d25, n6)
+    assert ok25 and d25b.ext["linggen"]["awaken"] == 1 and d25b.stones == d25.stones - 5_000_000
+    grew25 = equip_mod.aggregate(d25b, lv25, no_item)
+    assert grew25.atk > base25.atk and grew25.hp > base25.hp
+    d25b = lg25.awaken(d25b, n6)[2]
+    d25b = lg25.awaken(d25b, n6)[2]
+    assert lg25.awaken_level(d25b.ext["linggen"]) == 3
+    assert not lg25.awaken(d25b, n6)[0]                          # 已圆满
+    assert not lg25.awaken(PlayerDoc(uid="x", realm_index=3), n6)[0]
+    print("W7-4 ① linggen awaken & four stats ok")
+
+    # ② 寿元救援：24h 窗口 / 救人 / 逾期转世
+    d25l = PlayerDoc(uid="w7life", realm_index=5, ext={"shouyuan": 0})
+    msg25 = ls25.mark_death(d25l, n6)
+    assert "24 小时" in msg25 and ls25.pending(d25l) and ls25.rescue_left(d25l, n6) == 24 * 3600
+    ok25, _m25 = ls25.rescue(d25l, n6)
+    assert ok25 and d25l.ext["shouyuan"] == ls25.RESCUE_LIFESPAN and not ls25.pending(d25l)
+    assert ls25.resolve_if_due(d25l, n6 + 999999) is None
+    d25l2 = PlayerDoc(uid="w7life2", realm_index=5, ext={"shouyuan": 0})
+    ls25.mark_death(d25l2, n6)
+    assert ls25.resolve_if_due(d25l2, n6 + 3600) is None           # 窗口内不转世
+    born25 = ls25.resolve_if_due(d25l2, n6 + 24 * 3600 + 1)
+    assert born25 and "轮回往生" in born25 and d25l2.realm_index == 0 and not ls25.pending(d25l2)
+    print("W7-4 ② lifespan rescue window ok")
+
+    # ③ 帝兵 12 档：成长表 / 九金门槛 / 仙金祭炼 / 铭文门槛与每阶限一道
+    assert len(db25.STAGE_LIMITS) == 12 and db25.nurture_limit(0) == 6
+    assert db25.nurture_limit(5) == 22 and db25.nurture_limit(99) == 46
+    w25 = db25.forge("仙泪绿金", "混沌剑")[2]
+    ok25, msg25, _w = db25.tribulation(w25, 10 ** 12, 10 ** 12, gold_stock=99)
+    assert not ok25 and "九种仙金" in msg25
+    for g25 in [g for g in db25.GOLD_RARITY if g != "仙泪绿金"]:
+        _ok, _m, w25 = db25.fuse(w25, g25)
+    assert len(set(w25["fused"])) == len(db25.GOLD_RARITY) - 1
+    ok25, msg25, _w = db25.tribulation(w25, 10 ** 12, 10 ** 12, gold_stock=0)
+    assert not ok25 and "祭炼" in msg25
+    ok25, msg25, w25b = db25.tribulation(w25, 10 ** 12, 10 ** 12, gold_stock=1)
+    assert ok25 and w25b["stage"] == 1
+    ok25, msg25, _w = db25.inscribe(w25b, "斩道", 52)
+    assert not ok25 and "圣兵" in msg25
+    w25b["stage"] = 4
+    ok25, msg25, w25c = db25.inscribe(w25b, "斩道", 52)
+    assert ok25 and w25c["all"] > w25b["all"] and w25c["inscriptions"] == ["斩道"]
+    assert not db25.inscribe(w25c, "再来", 52)[0]                  # 同阶限一道
+    print("W7-4 ③ dibing 12 stages & inscription ok")
+
+    # ④ 12 职业产线：7 条产线可结算 / 无产线职业拒绝 / 等级加成
+    assert set(occ25.PRODUCE) == {"猎户", "侠客", "唤魔者", "源师", "源地师", "源天师", "阵法师"}
+    items25, _src, _st, title25 = occ25.produce("猎户", 300, 1, _random.Random(3))
+    assert items25 and sum(items25.values()) > 0 and title25
+    assert occ25.produce("炼丹师", 300, 1, _random.Random(1))[0] == {}
+    assert occ25.produce_skill(0)[1] == 0.0 and occ25.produce_skill(20)[1] == 0.4
+    assert occ25.produce_skill(30)[2] == 3
+    items25b, src25, _st25, _t = occ25.produce("源师", 720, 20, _random.Random(5))
+    assert src25 > 0 and items25b
+    assert occ25.produce_line("猎户")["period"] == 30 and occ25.produce_line("无") is None
+    print("W7-4 ④ occupation production lines ok")
+
+    # ⑤ 道法卡：购买/权益/到期/续期叠加
+    d25c = PlayerDoc(uid="w7card", stones=100_000_000, ext={})
+    ok25, msg25, d25c2 = df25.buy_card(d25c, "月卡", n6)
+    assert ok25 and d25c2.stones == d25c.stones - 40_000_000
+    bonus25 = df25.card_bonus(d25c2, n6)
+    assert bonus25 == {"loot": 2, "sign": 0.30, "cd": 0.20}
+    assert df25.card_of(d25c2, n6 + 31 * 86400)[0] is None        # 30 天到期
+    assert df25.card_bonus(d25c2, n6 + 31 * 86400)["loot"] == 0
+    ok25, msg25, d25c3 = df25.buy_card(d25c2, "月卡", n6 + 86400)
+    assert ok25 and (d25c3.ext["daofa_card"]["end"] - d25c2.ext["daofa_card"]["end"]) == 30 * 86400
+    assert df25.card_bonus(d25c3, n6)["sign"] == 0.30
+    print("W7-4 ⑤ daofa card tiers ok")
+
+    # ⑥ 功法特效：破军（伤害乘区）/ 回春（真实回血）在引擎中触发
+    sk25.ensure_builtin()
+    assert sk25.get("break_army") and sk25.get("rejuvenate")
+    fa25 = eng25.Fighter(name="甲", atk=2000, defense=100, hp=60000, hp_max=60000,
+                         skills=("break_army", "rejuvenate"))
+    fb25 = eng25.Fighter(name="乙", atk=1500, defense=200, hp=80000, hp_max=80000)
+    res25 = eng25.run_1v1(fa25, fb25, _random.Random(11), max_rounds=10)
+    assert any("【破军】" in x for x in res25.log), res25.log
+    assert any("【回春】" in x for x in res25.log)
+    assert fa25.tags.get("_break_army") and fa25.tags.get("_rejuvenate")
+    assert fa25.effects.get("dmg_dealt_mult", 1.0) > 1.0
+    print("W7-4 ⑥ break_army/rejuvenate skills ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

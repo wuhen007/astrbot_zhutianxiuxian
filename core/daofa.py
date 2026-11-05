@@ -87,9 +87,70 @@ def gift(doc: PlayerDoc, now: float, mult: float = 1.0) -> tuple[bool, str, Play
     return True, "\n".join(lines), d, items
 
 
+# ---------------------------------------------------------------- 道法卡（W7-4）
+
+CARDS: dict[str, dict] = {
+    "日卡": {"days": 1, "price": 2_000_000, "loot": 1, "sign": 0.10, "tianjiao_cd": 0.05},
+    "周卡": {"days": 7, "price": 12_000_000, "loot": 1, "sign": 0.20, "tianjiao_cd": 0.10},
+    "月卡": {"days": 30, "price": 40_000_000, "loot": 2, "sign": 0.30, "tianjiao_cd": 0.20},
+}
+
+
+def card_of(doc: PlayerDoc, now: float) -> tuple[str | None, dict]:
+    """当前生效的道法卡（读时惰性到期）。"""
+    raw = doc.ext.get("daofa_card")
+    if not isinstance(raw, dict):
+        return None, {}
+    tier = str(raw.get("tier") or "")
+    cfg = CARDS.get(tier)
+    if not cfg:
+        return None, {}
+    try:
+        end = float(raw.get("end") or 0)
+    except (TypeError, ValueError):
+        end = 0.0
+    if end <= now:
+        return None, {}
+    return tier, cfg
+
+
+def buy_card(doc: PlayerDoc, tier: str, now: float) -> tuple[bool, str, PlayerDoc]:
+    """#购买道法卡：按天叠加续期，灵石支付。"""
+    cfg = CARDS.get(tier)
+    if not cfg:
+        return False, f"没有「{tier}」这种卡（可选：{'、'.join(CARDS)}）。", doc
+    price = int(cfg["price"])
+    if int(doc.stones) < price:
+        return False, f"{tier}需 {price:,} 灵石（当前 {int(doc.stones):,}）。", doc
+    d = doc.model_copy(deep=True)
+    d.stones -= price
+    cur = d.ext.get("daofa_card") if isinstance(d.ext.get("daofa_card"), dict) else {}
+    base = max(now, float(cur.get("end") or 0)) if str(cur.get("tier") or "") == tier else now
+    d.ext["daofa_card"] = {"tier": tier, "end": base + int(cfg["days"]) * 86400}
+    left = (base + int(cfg["days"]) * 86400 - now) / 86400
+    return True, (f"购得【{tier}】×{int(cfg['days'])} 天：秘境出金档 +{cfg['loot']}、"
+                  f"签到灵石 +{cfg['sign']:.0%}、天骄冷却 -{cfg['tianjiao_cd']:.0%}"
+                  f"（剩余 {left:.1f} 天，花费 {price:,} 灵石）。"), d
+
+
+def card_bonus(doc: PlayerDoc, now: float) -> dict:
+    """卡权益汇总：{loot: 稀有档加成, sign: 签到倍率, cd: 天骄 CD 减免}。"""
+    _tier, cfg = card_of(doc, now)
+    if not cfg:
+        return {"loot": 0, "sign": 0.0, "cd": 0.0}
+    return {"loot": int(cfg["loot"]), "sign": float(cfg["sign"]), "cd": float(cfg["tianjiao_cd"])}
+
+
 def status_text(doc: PlayerDoc, now: float) -> str:
+    tier, cfg = card_of(doc, now)
+    card_line = ""
+    if tier:
+        left = (float(doc.ext["daofa_card"]["end"]) - now) / 86400
+        card_line = (f"\n道法卡：{tier}（剩 {left:.1f} 天）｜出金档 +{cfg['loot']}、"
+                     f"签到 +{cfg['sign']:.0%}、天骄冷却 -{cfg['tianjiao_cd']:.0%}")
     if active(doc, now):
         return (f"--- 道法仙术 ---\n状态：生效中｜剩余 {remaining_days(doc, now):.1f} 天"
                 f"｜连续赐福 {int(doc.ext.get('daofa_days', 0) or 0)} 天\n"
-                f"权益：#道法赐福、签到 ×2、每日抽奖每抽双份、天道赐福额外四类")
-    return "--- 道法仙术 ---\n状态：未开通或已过期（管理员 #开通道法仙术 @玩家 可开通 30 天）"
+                f"权益：#道法赐福、签到 ×2、每日抽奖每抽双份、天道赐福额外四类" + card_line)
+    return ("--- 道法仙术 ---\n状态：未开通或已过期（管理员 #开通道法仙术 @玩家 可开通 30 天）"
+            + card_line)

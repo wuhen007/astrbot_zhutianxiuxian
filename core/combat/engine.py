@@ -202,7 +202,9 @@ def run_1v1(
         for sid in atk_u.skills:
             spec = skills.get(sid)
             if spec and spec.on_turn:
-                spec.on_turn(atk_u, def_u, {"rng": rng, "round": rnd, "log": log})
+                # ctx 额外给出当前血量表与出手方下标，供治疗类技能改写真实血量
+                spec.on_turn(atk_u, def_u,
+                             {"rng": rng, "round": rnd, "log": log, "hp": hp, "side": i})
 
         # 治疗技能（W1-5）：出手前掷 pr 回血
         try_heal_skills(atk_u, hp, i, rng, log)

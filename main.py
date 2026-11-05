@@ -366,6 +366,13 @@ CMD_FACTION_LEAVE = "#退出势力"
 CMD_FACTION_CONTRIB = "#势力贡献"
 CMD_FACTION_SALARY = "#势力俸禄"
 CMD_FACTION_STATUS = "#势力状态"
+# W7-4：养成深度（灵根觉醒 / 寿元救援 / 帝兵铭文 / 职业产线 / 道法卡）
+CMD_LG_AWAKEN = "#灵根觉醒"
+CMD_RESCUE = "#轮回救人"
+CMD_DB_INSCRIBE = "#刻写帝兵"
+CMD_OCC_PRODUCE = "#职业产出"
+CMD_OCC_PRODUCE_END = "#结束产出"
+CMD_CARD_BUY = "#购买道法卡"
 CMD_DARK_OPEN = "#开启黑暗动乱"
 CMD_DARK_CLOSE = "#关闭黑暗动乱"
 CMD_DARK_STATUS = "#禁区至尊状态"
@@ -620,6 +627,10 @@ class ZhutianPlugin(Star):
             return None, f"道友尚未踏入仙途，请发送「{CMD_START}」。"
         if doc.ext.get("banned"):
             return None, "道友已被打入天牢，静候管理员赦免。"
+        resolved = lifespan.resolve_if_due(doc, now)   # W7-4：24h 救援窗口到期 → 转世
+        if resolved:
+            await self.db.save_player(doc.model_dump())
+            return None, resolved
         return doc, None
 
     SMART_TEXT_LIMIT = 200
@@ -843,6 +854,9 @@ class ZhutianPlugin(Star):
                 (CMD_BODY_MY, "炼体境界与肉身属性"),
             ]},
             {"title": "灵根天资", "lines": [
+                (CMD_LG_AWAKEN, "觉醒灵根（0-3 阶，每阶四维 +25%）"),
+                (CMD_CARD_BUY, "购买道法卡（日/周/月卡）"),
+                (f"{CMD_RESCUE} @玩家", "寿元耗尽 24h 内救回（500 万灵石）"),
                 (CMD_LINGGEN, "查看灵根（/我的灵根 同效）"),
                 ("天命轮回丹 · 神心丹", "使用后洗炼重摇，资质好坏全凭天命"),
                 ("#丹药效果", "查看当前生效的丹药 buff"),
@@ -865,6 +879,8 @@ class ZhutianPlugin(Star):
                 (f"{CMD_MINE} 分钟", "采矿（采矿师，30 分钟周期）"),
                 (CMD_MINE_END, "结束采矿结算"),
                 (f"{CMD_MAKE} 符名 数量", "制作符箓（符师，必成）"),
+                (f"{CMD_OCC_PRODUCE} 分钟", "产线（猎户/侠客/唤魔者/源师/源地师/源天师/阵法师）"),
+                (CMD_OCC_PRODUCE_END, "结束产出结算（物品/源石/灵石 + 职业经验）"),
             ]},
             {"title": "黑暗动乱 · 神魄", "lines": [
                 (f"{CMD_DARK_OPEN} / {CMD_DARK_CLOSE}", "管理员开启/关闭黑暗动乱"),
@@ -934,6 +950,7 @@ class ZhutianPlugin(Star):
                 (CMD_DB_TRIB, "雷劫洗礼进阶（需九金全融合）"),
                 (f"{CMD_DB_NURTURE}*次数", "蕴养（修为血气各 2000 万/次，三维 +50 万）"),
                 (f"{CMD_DB_RENAME} 新名", "更名（仍须含形态字）"),
+                (f"{CMD_DB_INSCRIBE} 铭文", "刻写铭文（圣兵起/超凡入圣，每阶一道）"),
             ]},
             {"title": "历练寻宝", "lines": [
                 (CMD_TOWER, "挑战当前层（胜+5 层得灵石，败罚灵石）"),
@@ -1297,14 +1314,18 @@ class ZhutianPlugin(Star):
             doc, int(self._val("SIGN_REWARD_MIN", 100)), int(self._val("SIGN_REWARD_MAX", 500)),
             time.time(), _random.Random(f"{doc.uid}:{int(time.time() // 86400)}"),
             reward_mult=mingge.multiplier(doc, "签到奖励倍率")
-            * (2 if daofa.active(doc, time.time()) else 1),     # 命格（W4-2）+ 道法仙术签到翻倍
+            * (2 if daofa.active(doc, time.time()) else 1)      # 命格（W4-2）+ 道法仙术签到翻倍
+            * (1 + daofa.card_bonus(doc, time.time())["sign"]),  # 道法卡（W7-4）
         )
         if daofa.active(doc, time.time()):
             msg += "\n【道法仙术】签到奖励 ×2"
+        card_tier, _card_cfg = daofa.card_of(doc, time.time())
+        if card_tier:
+            msg += f"\n【{card_tier}】签到灵石 +{daofa.card_bonus(doc, time.time())['sign']:.0%}"
         if ok:
             lost, dead = lifespan.daily_decay(d, time.time())   # 寿元流逝（W2-2）
             if dead:
-                msg = lifespan.rebirth(d)
+                msg = lifespan.mark_death(d, time.time())        # W7-4：先进 24h 救援窗口
             elif lost:
                 msg += f"\n岁月无声，寿元 -{lost}（剩余 {int(d.ext['shouyuan']):,}）"
             async with self.db.transaction():
@@ -5572,8 +5593,10 @@ class ZhutianPlugin(Star):
         s = story_npc.state_of(doc)
         cheat = bool(s.get("trib_pending"))
         need = dibing.TRIBULATION_COST // 2 if cheat else dibing.TRIBULATION_COST
+        inv = await self.db.get_inventory(doc.uid)
+        gold_stock = sum(int(inv.get(g, 0) or 0) for g in dibing.GOLD_RARITY)
         ok, msg, w2 = dibing.tribulation(
-            w, doc.exp, float(doc.ext.get("xueqi", 0) or 0), cost=need
+            w, doc.exp, float(doc.ext.get("xueqi", 0) or 0), cost=need, gold_stock=gold_stock
         )
         if not ok:
             yield event.plain_result(msg)
@@ -5585,7 +5608,23 @@ class ZhutianPlugin(Star):
         d = story_npc.save(d, s)
         d.exp -= need
         d.ext["xueqi"] = max(0.0, float(d.ext.get("xueqi", 0) or 0) - need)
-        await self.db.save_player(d.model_dump())
+        sacrifice = int(w.get("stage", 0)) + 1          # W7-4：仙金祭炼（第 1 跳 1 枚，逐阶 +1）
+        used_gold: dict[str, int] = {}
+        left = sacrifice
+        for gname in sorted([g for g in dibing.GOLD_RARITY if inv.get(g)], key=lambda g: -int(inv[g])):
+            take = min(left, int(inv[g]))
+            if take <= 0:
+                continue
+            used_gold[gname] = take
+            left -= take
+            if left <= 0:
+                break
+        if used_gold:
+            msg += f"\n祭炼：{'、'.join(f'{k}×{v}' for k, v in used_gold.items())}"
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            for gname, cnt in used_gold.items():
+                await self.db.remove_item(doc.uid, gname, cnt)
         async for r in self._smart(event, msg, "雷劫洗礼"):
             yield r
 
@@ -8915,6 +8954,11 @@ class ZhutianPlugin(Star):
     async def _tj_world(self) -> dict:
         return tj_mod.world_ensure(await self.db.get_tianjiao())
 
+    def _tj_cd_left(self, doc: PlayerDoc, now: float) -> int:
+        """讨伐冷却（道法卡可减免，W7-4）。"""
+        bonus = float(daofa.card_bonus(doc, now).get("cd", 0.0) or 0.0)
+        return tj_mod.cooldown_left(doc, now, 1.0 - min(0.5, bonus))
+
     async def _uid_name(self, uid: str) -> str:
         raw = await self.db.get_player(uid)
         return str((raw or {}).get("name") or uid[:8])
@@ -8939,7 +8983,7 @@ class ZhutianPlugin(Star):
             mark = " ✅" if r["name"] in done else ""
             lines.append(f"{i}. {r['name']}{mark}｜第 {int(r['realm']) + 1} 境｜"
                          f"{status}｜气血 {hp:.0%}｜赏 {int(r['reward']):,}")
-        left = tj_mod.cooldown_left(doc, now)
+        left = self._tj_cd_left(doc, now)
         lines.append(f"你的讨伐冷却：{'可用' if not left else f'{left // 60} 分 {left % 60} 秒'}"
                      f"（90 分钟/次）")
         lines.append("找不到踪迹就先 #打听天机 姓名 位置")
@@ -8963,7 +9007,7 @@ class ZhutianPlugin(Star):
         h = tj_mod.hatred_of(doc, row["name"])
         level, escape, protector = tj_mod.level_of(h)
         trace = tj_mod.trace_of(doc, row["name"], now)
-        left = tj_mod.cooldown_left(doc, now)
+        left = self._tj_cd_left(doc, now)
         rank = tj_mod.ranking(boss, 10)
         mine = next((i for i, (uid, _d) in enumerate(rank, 1) if uid == doc.uid), None)
         lines = [
@@ -9092,7 +9136,7 @@ class ZhutianPlugin(Star):
                 f"你尚未找到{row['name']}的踪迹。先 #打听天机 {row['name']} 位置"
                 f"（或请道友 #神识共享天骄位置 {row['name']} @你）。")
             return
-        left = tj_mod.cooldown_left(doc, now)
+        left = self._tj_cd_left(doc, now)
         if left:
             yield event.plain_result(f"讨伐天骄冷却中，剩余 {left // 60} 分 {left % 60} 秒。")
             return
@@ -9428,6 +9472,183 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         yield event.plain_result(faction.status_text(await self._faction_state(), doc.uid))
+
+    # ---- W7-4：养成深度（灵根觉醒 / 寿元救援 / 帝兵铭文 / 职业产线 / 道法卡） ----
+
+    @filter.command(CMD_LG_AWAKEN, "灵根觉醒")
+    async def handle_lg_awaken(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if linggen.sync_stats(doc, self.content.table("item/灵根列表") or []):
+            await self.db.save_player(doc.model_dump())
+        ok, msg, d = linggen.awaken(doc, time.time())
+        if ok:
+            await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_RESCUE, "轮回救人")
+    async def handle_rescue(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        target, terr = await self._target_doc(event)
+        if terr:
+            yield event.plain_result(terr)
+            return
+        if target.uid == doc.uid:
+            yield event.plain_result("自己救不了自己——去求道友吧。")
+            return
+        if not lifespan.pending(target):
+            yield event.plain_result(f"{target.name} 真灵尚在体内，无需救援。")
+            return
+        cost = lifespan.RESCUE_COST
+        if int(doc.stones) < cost:
+            yield event.plain_result(f"续命需 {cost:,} 灵石（当前 {int(doc.stones):,}）。")
+            return
+        d = doc.model_copy(deep=True)
+        d.stones -= cost
+        dt = target.model_copy(deep=True)
+        ok, msg = lifespan.rescue(dt, time.time())
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            await self.db.save_player(dt.model_dump())
+        yield event.plain_result(f"{msg}\n（{doc.name} 代付 {cost:,} 灵石）")
+
+    @filter.command(CMD_DB_INSCRIBE, "刻写帝兵")
+    async def handle_db_inscribe(self, event: AstrMessageEvent, text: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = dibing.system_of(doc)
+        if not w:
+            yield event.plain_result("尚未炼制本命帝兵（#炼制帝兵）。")
+            return
+        cost = dibing.INSCRIBE_COST
+        if int(doc.stones) < cost:
+            yield event.plain_result(f"刻写铭文需 {cost:,} 灵石（当前 {int(doc.stones):,}）。")
+            return
+        ok, msg, w2 = dibing.inscribe(w, text, int(doc.realm_index))
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = self._db_sync(doc, w2)
+        d.stones -= cost
+        await self.db.save_player(d.model_dump())
+        async for r in self._smart(event, msg, "刻写帝兵"):
+            yield r
+
+    @filter.command(CMD_OCC_PRODUCE, "职业产出")
+    async def handle_occ_produce(self, event: AstrMessageEvent, minutes: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        job = str(doc.ext.get("occupation") or "")
+        line = occupation.produce_line(job)
+        if not line:
+            tl = "、".join(occupation.PRODUCE)
+            yield event.plain_result(
+                f"「{job or '无职业'}」没有这条产线。可产出职业：{tl}；"
+                f"采药/采矿各有专属指令。")
+            return
+        digits = "".join(ch for ch in (minutes or "") if ch.isdigit())
+        t = int(digits) if digits else int(line["period"])
+        action = f"{line['action']}中"
+        ok, msg, d = self._timed_action_start(doc, action, t, int(line["period"]), int(line["cycles"]))
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result(
+            f"{job}·{line['action']}开始（{int(d.ext['action_minutes'])} 分钟）。"
+            f"结束后发 {CMD_OCC_PRODUCE_END} 结算。")
+
+    @filter.command(CMD_OCC_PRODUCE_END, "结束产出")
+    async def handle_occ_produce_end(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        job = str(doc.ext.get("occupation") or "")
+        line = occupation.produce_line(job)
+        if not line:
+            yield event.plain_result("你没有可结算的产线。")
+            return
+        action = f"{line['action']}中"
+        ok, minutes, d = self._timed_action_end(
+            doc, action, int(line["period"]), int(line["cycles"]))
+        if not ok:
+            yield event.plain_result(f"道友并未在{line['action']}。")
+            return
+        lv, lexp = self._ensure_occ(doc)
+        items, source, stones, title = occupation.produce(
+            job, minutes, lv, random.Random(f"{doc.uid}:produce:{job}:{time.time_ns()}"))
+        exp = int(minutes // max(1, int(line["period"])) * 12 * (1 + lv))
+        nlv, nexp = occupation.add_exp(lv, lexp, exp, self.occ_exp_table)
+        d.ext["occupation_level"] = nlv
+        d.ext["occupation_exp"] = nexp
+        d.ext["occupation_skill"] = occupation.produce_skill(nlv)[0]
+        if stones:
+            d.stones += stones
+        if source:
+            y = yuanshi.system_of(d)
+            y["amount"] = int(y["amount"]) + source
+            d.ext["yuanshi"] = y
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            if items:
+                await self.db.add_items(doc.uid, items)
+        lines = [f"{job}·{line['action']}结束（{minutes} 分钟，{title}）",
+                 f"职业经验 +{exp}" + (f"，升到 {nlv} 级！" if nlv > lv else "")]
+        if items:
+            lines += [f"· {n}×{c}" for n, c in items.items()]
+        if source:
+            lines.append(f"· 源石 +{source:,}")
+        if stones:
+            lines.append(f"· 灵石 +{stones:,}")
+        if not items and not source and not stones:
+            lines.append("· 空手而归")
+        async for _r in self._smart(event, "\n".join(lines)):
+            yield _r
+
+    @filter.command(CMD_CARD_BUY, "购买道法卡")
+    async def handle_daofa_card(self, event: AstrMessageEvent, tier: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        tier = (tier or "").strip()
+        if not tier:
+            lines = ["--- 道法卡 ---"]
+            for name, cfg in daofa.CARDS.items():
+                lines.append(f"· {name}：{cfg['price']:,} 灵石｜{cfg['days']} 天｜"
+                             f"出金档 +{cfg['loot']}、签到 +{cfg['sign']:.0%}、天骄冷却 -{cfg['tianjiao_cd']:.0%}")
+            lines.append(f"购买：{CMD_CARD_BUY} 日卡/周卡/月卡")
+            yield event.plain_result("\n".join(lines))
+            return
+        ok, msg, d = daofa.buy_card(doc, tier, time.time())
+        if ok:
+            await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
 
     # ---- 彼岸世界 / 真世界（基础世界层：世界 / 坐标 / 星辰 / 探索 / 道标） ----
 
@@ -10301,6 +10522,7 @@ class ZhutianPlugin(Star):
             treasure_bonus=mingge.bonus(doc, "寻宝加成"),
             buff=_buff, protect=_protect,
             loot_rates=era_mod.seal_rates(await self._era_state()),
+            loot_bonus=int(daofa.card_bonus(doc, time.time()).get("loot", 0) or 0),
         )
         if used_arrays:
             flavor = "【阵法·" + "、".join(used_arrays) + "】阵纹复苏，笼罩战场！\n" + flavor
@@ -10988,11 +11210,19 @@ class ZhutianPlugin(Star):
         except (TypeError, ValueError):
             eff = 1.0
         eff_note = "（低于常人，勤能补拙）" if eff < 1.0 else ("（资质平平，与常人同）" if eff == 1.0 else "（天资卓越！）")
+        if linggen.sync_stats(doc, self.content.table("item/灵根列表") or []):
+            await self.db.save_player(doc.model_dump())     # 老快照补四维（一次即可）
+        atk_b, def_b, hp_b, origin_b = linggen.stats_of(doc.ext.get("linggen"))
+        lv = linggen.awaken_level(doc.ext.get("linggen"))
+        nxt = ("已圆满" if lv >= linggen.AWAKEN_MAX
+               else f"下一阶 {linggen.awaken_cost(lv):,} 灵石（#灵根觉醒）")
         lines = [
             "--- 灵根 · 天资 ---",
             f"灵根：{snap.get('name')}",
             f"品阶：{snap.get('type')}" + (f"（稀有度 {snap.get('rarity')}）" if snap.get("rarity") else ""),
             f"修炼效率：×{eff:g} {eff_note}",
+            f"觉醒：{lv}/{linggen.AWAKEN_MAX} 阶（{nxt}）",
+            f"四维：攻 +{atk_b:.0%}｜防 +{def_b:.0%}｜血 +{hp_b:.0%}｜生命本源 +{origin_b:,.0f} 气血",
             "效果：闭关出关所得修为 ×此效率；欲改天命，再服天命轮回丹/神心丹重新洗炼。",
         ]
         async for _r in self._smart(event, "\n".join(lines)):

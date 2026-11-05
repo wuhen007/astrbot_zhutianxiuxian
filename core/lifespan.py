@@ -79,6 +79,64 @@ def daily_decay(doc: PlayerDoc, now: float) -> tuple[int, bool]:
     return cur - left, left <= 0
 
 
+# ---------------------------------------------------------------- 濒死救援（W7-4）
+
+RESCUE_SECONDS = 24 * 3600      # 原版 24 小时救援窗口
+RESCUE_LIFESPAN = 1000          # 救回后寿元重续
+RESCUE_COST = 5_000_000         # 救人者代为续命的代价（灵石）
+
+
+def pending(doc: PlayerDoc) -> bool:
+    """真灵离体、等待救援或转世。"""
+    return bool(doc.ext.get("awaiting_rescue")) and int(shouyuan_of(doc)) <= 0
+
+
+def rescue_left(doc: PlayerDoc, now: float) -> int:
+    if not pending(doc):
+        return 0
+    try:
+        deadline = float(doc.ext.get("rescue_deadline") or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, int(deadline - now))
+
+
+def mark_death(doc: PlayerDoc, now: float) -> str:
+    """寿元耗尽 → 进入 24 小时救援窗口（不立即转世）。"""
+    doc.ext["awaiting_rescue"] = True
+    doc.ext["rescue_deadline"] = float(now) + RESCUE_SECONDS
+    doc.ext["shouyuan"] = 0
+    return (f"【真灵离体】寿元已尽，你的真灵被天地拘入轮回路。\n"
+            f"24 小时内若有道友发「#轮回救人 @你」（耗 {RESCUE_COST:,} 灵石），"
+            f"可把你从轮回路上拉回来；逾期则自动转世。")
+
+
+def rescue(doc: PlayerDoc, now: float) -> tuple[bool, str]:
+    """#轮回救人：把濒死修士拉回人间。"""
+    if not pending(doc):
+        return False, "此人真灵尚未离体，无需救援。"
+    doc.ext.pop("awaiting_rescue", None)
+    doc.ext.pop("rescue_deadline", None)
+    doc.ext["shouyuan"] = RESCUE_LIFESPAN
+    doc.ext["rescued_count"] = int(doc.ext.get("rescued_count", 0) or 0) + 1
+    return True, f"真灵归位！{doc.name or doc.uid} 自轮回路被拉回，寿元重续 {RESCUE_LIFESPAN} 年。"
+
+
+def resolve_if_due(doc: PlayerDoc, now: float) -> str | None:
+    """读时惰性结算：过期的救援窗口 → 转世。返回转世文案或 None。"""
+    if not pending(doc):
+        return None
+    try:
+        deadline = float(doc.ext.get("rescue_deadline") or 0)
+    except (TypeError, ValueError):
+        deadline = 0.0
+    if deadline > now:
+        return None
+    doc.ext.pop("awaiting_rescue", None)
+    doc.ext.pop("rescue_deadline", None)
+    return rebirth(doc)
+
+
 def rebirth(doc: PlayerDoc) -> str:
     """寿元耗尽转世：境界/修为/血气归零，灵石折半，轮回 +1。"""
     count = int(doc.ext.get("rebirths", 0) or 0) + 1
@@ -142,6 +200,8 @@ def text(doc: PlayerDoc) -> str:
     ]
     if disc is not None:
         lines.append(f"体质「{t}」岁月侵蚀 ×{disc:g}")
-    if cur <= 100:
+    if pending(doc):
+        lines.append("⚠ 真灵离体：等待道友 #轮回救人，逾期将转世")
+    elif cur <= 100:
         lines.append("⚠ 寿元将尽，大限将至……")
     return "\n".join(lines)

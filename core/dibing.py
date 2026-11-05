@@ -26,6 +26,14 @@ GOLD_RARITY = {
 STAGES = ("雏形", "通灵", "铭刻道与理", "斩道王兵", "圣兵", "准帝兵", "极道帝兵",
           "仙器", "仙王器", "准仙帝器", "仙帝器", "祭道器")
 
+# W7-4：12 档成长表（原版每阶蕴养上限递增，非单一线性公式）
+STAGE_LIMITS = (6, 9, 12, 15, 18, 22, 26, 30, 34, 38, 42, 46)
+# 祭炼：雷劫除九金外，还须已融合「当前品阶 + 2」种仙金作祭
+REFINE_BASE = 2
+INSCRIBE_REALM = 52       # 超凡入圣（原版圣人王门槛的对应档）
+INSCRIBE_COST = 100_000_000
+INSCRIBE_CAP = 3          # 最多刻写 3 道铭文
+
 MAX_POTENTIAL = 40
 NURTURE_COST = 20_000_000        # 修为/血气各（原版 200 亿 ÷1000）
 NURTURE_BOOST = 500_000          # 三维各（原版 50 亿 ÷1000 再 ÷10 适配量级）
@@ -85,10 +93,13 @@ def fuse(d: Mapping, gold: str) -> tuple[bool, str, dict]:
 
 
 def tribulation(
-    d: Mapping, exp: int, xueqi: float, cost: int | None = None
+    d: Mapping, exp: int, xueqi: float, cost: int | None = None,
+    gold_stock: int | None = None,
 ) -> tuple[bool, str, dict]:
-    """雷劫洗礼：需九金全融合，消耗修为血气，品阶 +1（必成，原版语义即"齐备即跃迁"）。
+    """雷劫洗礼：需九金全融合 + 同阶仙金祭炼，消耗修为血气，品阶 +1。
 
+    原版要求「以同品阶帝兵祭炼」，本移植无多兵器系统 → 改为消耗 `品阶+1` 枚仙金
+    （任意仙金库存，由调用方扣除），既保留阶数越高压料越重的曲线，也不与九金门槛冲突。
     cost 可覆盖消耗（黑皇「欺天阵纹」减半）。
     """
     need = int(cost or TRIBULATION_COST)
@@ -103,6 +114,10 @@ def tribulation(
                        f"缺少：{'、'.join(need9[:9])}"), w
     if exp < need or xueqi < need:
         return False, f"雷劫洗礼需修为/血气各 {need:,}（当前 {exp:,}/{int(xueqi):,}）。", w
+    sacrifice = stage + REFINE_BASE - 1          # 第 1 跳 1 枚，逐阶 +1
+    if gold_stock is not None and int(gold_stock) < sacrifice:
+        return False, (f"进阶【{STAGES[stage + 1]}】需 {sacrifice} 枚仙金祭炼"
+                       f"（现备 {int(gold_stock)} 枚；任意仙金皆可）。"), w
     w["stage"] = stage + 1
     return True, (
         f"九金共鸣，天雷灌顶——【{w['name']}】渡过雷劫，进阶【{STAGES[stage + 1]}】！\n"
@@ -111,7 +126,34 @@ def tribulation(
 
 
 def nurture_limit(stage: int) -> int:
-    return 5 + int(stage) * 3
+    """12 档成长表：品阶越高，单阶可蕴养次数越多。"""
+    return STAGE_LIMITS[min(max(0, int(stage)), len(STAGE_LIMITS) - 1)]
+
+
+def inscribe(d: Mapping, text: str, realm_index: int) -> tuple[bool, str, dict]:
+    """#刻写帝兵：圣兵（第 5 档）起可刻铭文，每阶限一道，+5% 全属性/+3% 暴击。"""
+    w = copy.deepcopy(dict(d))
+    stage = int(w.get("stage", 0))
+    if stage < 4:
+        return False, f"【{w['name']}】尚是{STAGES[stage]}，需至【圣兵】方可承载铭文。", w
+    if int(realm_index) < INSCRIBE_REALM:
+        return False, f"刻写铭文需第 {INSCRIBE_REALM + 1} 境以上（原版圣人王门槛）。", w
+    if int(w.get("inscribed_stage", -1)) >= stage:
+        return False, f"本阶（{STAGES[stage]}）已刻过铭文，雷劫进阶后可再刻。", w
+    marks = list(w.get("inscriptions") or [])
+    if len(marks) >= INSCRIBE_CAP:
+        return False, f"已刻 {INSCRIBE_CAP} 道铭文，器身再承不住更多道韵。", w
+    text = (text or "").strip()[:8]
+    if not text:
+        return False, "请给铭文取个名字（十字以内）。", w
+    marks.append(text)
+    w["inscriptions"] = marks
+    w["inscribed_stage"] = stage
+    w["all"] = round(float(w.get("all", 0)) + 0.05, 2)
+    w["bao"] = round(float(w.get("bao", 0)) + 0.03, 4)
+    return True, (f"剑锋映月，道韵入器——【{w['name']}】新添铭文「{text}」。\n"
+                  f"全属性 +5%（现 +{w['all']}）｜暴击 +3%（现 {w['bao']:.0%}）"
+                  f"｜铭文 {len(marks)}/{INSCRIBE_CAP}"), w
 
 
 def nurture(d: Mapping, times: int, exp: int, xueqi: float) -> tuple[bool, str, dict, dict]:
@@ -174,6 +216,7 @@ def summary(d: Mapping) -> str:
         f"三维：{int(d.get('atk', 0)):,}｜全属性 +{d.get('all', 0)}｜暴击 +{float(d.get('bao', 0)):.0%}\n"
         f"潜力：{d.get('potential', 0)}/{MAX_POTENTIAL}｜主材：{d.get('gold')}\n"
         f"已融仙金 {total}/9：{'、'.join(fused) or '（仅主材）'}\n"
+        f"铭文：{'、'.join(d.get('inscriptions') or []) or '（未刻）'}\n"
         f"蕴养：{d.get('nurture', 0)}/{cap}\n"
         f"#装备 {d.get('name')} 穿戴｜#蕴养帝兵*次数｜#融合帝兵 仙金｜#雷劫洗礼帝兵｜#为帝兵更名 新名"
     )

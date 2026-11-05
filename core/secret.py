@@ -172,6 +172,7 @@ def explore(
     me_fighter: Any = None,
     treasure_bonus: float = 0.0,
     loot_rates: tuple[float, float, float] | None = None,
+    loot_bonus: int = 0,
 ) -> tuple[Session, Unit, str, bool]:
     """寻宝一次。返回 (更新后的会话, 战斗后的我, 文本, 是否被打出局)。
 
@@ -182,6 +183,7 @@ def explore(
     protect：护道回调 (place, floor, enemy) -> (护道人, 文案) | None；
     战败瞬间调用，触发则气血全复、收益不减、留在秘境。
     loot_rates：时代法则的秘境出金率 (one, two, three)；None = 不套用（旧行为）。
+    loot_bonus：道法卡额外档位（W7-4），直接抬高可掉稀有度上限。
     """
     session.floor += 1
     boss_floor = sect_mode and (session.floor % 5 == 0)
@@ -192,10 +194,10 @@ def explore(
     def grade() -> tuple[str, float, int]:
         """掷出金档（无时代配置时按 low 折算，保持历史行为）。"""
         if not loot_rates:
-            return "low", 1.0, 0
+            return "low", 1.0, int(loot_bonus or 0)
         g = loot_grade(tuple(loot_rates), rng)
         mult, rar = LOOT_GRADES[g]
-        return g, mult, rar
+        return g, mult, rar + int(loot_bonus or 0)
 
     if boss_floor:
         monster = make_monster(

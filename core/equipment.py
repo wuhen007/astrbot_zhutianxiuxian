@@ -192,6 +192,14 @@ def aggregate(
         xueqi_flat = 0.0
     flat["hp"] += xueqi_flat
 
+    # 灵根四维（W7-4 觉醒）：攻击/防御/生命按比例、生命本源折算扁平气血
+    lg_atk = lg_def = lg_hp = lg_flat = 0.0
+    try:
+        from . import linggen as _lg
+        lg_atk, lg_def, lg_hp, lg_flat = _lg.stats_of(doc.ext.get("linggen"))
+    except Exception:
+        pass
+
     # 诸天化身：装载化身时的三维比例加成（ext["zhutian"]["current"] 对应化身的 root）
     av_atk = av_def = av_hp = 0.0
     zt = doc.ext.get("zhutian")
@@ -205,10 +213,12 @@ def aggregate(
         except (TypeError, ValueError):
             pass
 
+    flat["hp"] += lg_flat
+
     return Stats(
-        atk=int((base_atk * (1 + ratio["atk"] + av_atk) + flat["atk"]) * set_mult * pet_mult),
-        defense=int((base_def * (1 + ratio["def"] + av_def) + flat["def"]) * set_mult * pet_mult),
-        hp=int((base_hp * (1 + ratio["hp"] + av_hp) + flat["hp"]) * set_mult * pet_mult),
+        atk=int((base_atk * (1 + ratio["atk"] + av_atk + lg_atk) + flat["atk"]) * set_mult * pet_mult),
+        defense=int((base_def * (1 + ratio["def"] + av_def + lg_def) + flat["def"]) * set_mult * pet_mult),
+        hp=int((base_hp * (1 + ratio["hp"] + av_hp + lg_hp) + flat["hp"]) * set_mult * pet_mult),
         bao=min(bao, 1.0),
         set_lines=tuple(set_lines),
     )

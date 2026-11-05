@@ -108,6 +108,8 @@ def apply_proficiency(f: Fighter, doc: Any) -> None:
                                       * min(1.10, numeric))
     if name in ("融会贯通", "炉火纯青", "登峰造极", "出神入化"):
         f.skills = (*f.skills, "prof_echo")
+    if name in ("炉火纯青", "登峰造极", "出神入化"):
+        f.skills = (*f.skills, "break_army")      # W7-4 档位特效
     f.tags["prof_stage"] = name
 
 
@@ -159,4 +161,7 @@ def build_fighter(
     if (int(getattr(doc, "realm_index", 0) or 0) >= 10
             and int(getattr(doc, "physique_index", 0) or 0) >= 10):
         f.skills = (*f.skills, "dual_echo")
+    if (f.tags.get("heal_skills")
+            and int(getattr(doc, "realm_index", 0) or 0) >= 20):
+        f.skills = (*f.skills, "rejuvenate")      # W7-4 有治疗技时的续航特效
     return f
