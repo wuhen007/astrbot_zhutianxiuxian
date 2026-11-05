@@ -30,6 +30,17 @@ BATTLE_CD_SECONDS = 15 * 60
 REFINE_WINDOW_SECONDS = 5 * 60
 NATURAL_YEAR = 1000
 OVERLORD_BASE_KILLS = 10
+# W7-5c：域外业力 / 位面青睐 / 魔主逆命复生
+KARMA_PER_100_PENALTY = 0.10      # 每 100 业力，突破成功率 -10%
+KARMA_PENALTY_CAP = 0.30          # 最多 -30%
+KARMA_REWARD_RANGE = (5, 10)      # 击杀普通灾厄：业力 -5~10
+KARMA_OVERLORD = 20               # 击杀魔主：业力 -20
+FAVOR_REWARD_RANGE = (5, 20)      # 击杀普通灾厄：位面青睐 +5~20
+FAVOR_OVERLORD = 50               # 击杀魔主：位面青睐 +50
+PLANE_FAVOR_WUDAO_COST = 50       # 悟道消耗 50 点青睐换 +20% 感悟
+PLANE_FAVOR_WUDAO_BONUS = 0.20
+REVIVE_MULT = 1.25                # 魔主逆命复生：全属性永久 +25%
+
 PLANE_NAMES = ("下界八域", "遮天", "九天十地", "界海", "太初星墟", "小阴间", "大阴间", "仙界", "仙域", "阳间")
 
 TECHNIQUES: tuple[dict, ...] = (
@@ -89,6 +100,65 @@ def default_state() -> dict[str, Any]:
             "events": [],
         },
     }
+
+
+# ---------------------------------------------------------------- 业力 / 青睐
+
+def karma_of(doc: Any) -> int:
+    try:
+        return max(0, int(doc.ext.get("karma", 0) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def add_karma(doc: Any, amount: int) -> int:
+    value = max(0, karma_of(doc) + int(amount))
+    doc.ext["karma"] = value
+    return value
+
+
+def reduce_karma(doc: Any, amount: int) -> tuple[int, int]:
+    """返回 (实际消减, 剩余)。业力不为负。"""
+    before = karma_of(doc)
+    after = max(0, before - max(0, int(amount)))
+    doc.ext["karma"] = after
+    return before - after, after
+
+
+def karma_penalty(doc: Any) -> float:
+    """业力对突破成功率的减益（负值，最多 -30%）。"""
+    return -min(KARMA_PENALTY_CAP,
+                (karma_of(doc) // 100) * KARMA_PER_100_PENALTY)
+
+
+def favor_of(doc: Any) -> int:
+    try:
+        return max(0, int(doc.ext.get("plane_favor", 0) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def add_favor(doc: Any, amount: int) -> int:
+    value = max(0, favor_of(doc) + int(amount))
+    doc.ext["plane_favor"] = value
+    return value
+
+
+def consume_favor_for_wudao(doc: Any, gain: int, remaining: int | None = None) -> tuple[int, int]:
+    """悟道结算：青睐 ≥50 时消耗 50 点，本次感悟 +20%（不超过剩余可补量）。
+
+    返回 (实际获得, 消耗点数)。不足 50 或没有增益空间时不消耗。
+    """
+    base = max(0, int(gain))
+    cap = base if remaining is None else max(0, min(base, int(remaining)))
+    favor = favor_of(doc)
+    enhanced = int(base * (1 + PLANE_FAVOR_WUDAO_BONUS))
+    if remaining is not None:
+        enhanced = min(enhanced, max(0, int(remaining)))
+    if favor < PLANE_FAVOR_WUDAO_COST or enhanced <= cap:
+        return cap, 0
+    doc.ext["plane_favor"] = favor - PLANE_FAVOR_WUDAO_COST
+    return enhanced, PLANE_FAVOR_WUDAO_COST
 
 
 def ensure(value: Mapping | None) -> dict[str, Any]:
@@ -302,6 +372,22 @@ def battle_overlord(state: dict, doc: Any, stats: Mapping,
         }
         ov["contributions"] = contrib
     defeated = after <= 0
+    revived = False
+    if defeated and not ov.get("revived"):
+        # 逆命劫生经：首次伏诛时满血复生，全属性永久 +25%
+        revived = True
+        ov["revived"] = True
+        ov["revived_at"] = float(now)
+        ov["max_hp"] = max(1, int(int(ov.get("max_hp", 1)) * REVIVE_MULT))
+        ov["hp"] = ov["max_hp"]
+        ov["atk"] = max(1, int(int(ov.get("atk", 1)) * REVIVE_MULT))
+        ov["defense"] = max(1, int(int(ov.get("defense", 1)) * REVIVE_MULT))
+        ov["status"] = "active"
+        after = int(ov["hp"])          # 返回给调用方的血量要反映复生后的真实值
+        state["era"]["events"] = (state["era"].get("events") or [])[-11:] + [
+            {"at": float(now), "text": f"【逆命劫生】{ov['name']}满血复生，全属性 +25%！"}
+        ]
+        defeated = False
     if defeated:
         ov["status"] = "defeated"
         ov["defeated_by"] = uid
@@ -314,6 +400,7 @@ def battle_overlord(state: dict, doc: Any, stats: Mapping,
         "log": list(log),
         "damage": damage,
         "defeated": defeated,
+        "revived": revived,
         "hp": after,
         "max_hp": int(ov["max_hp"]),
         "a_hp": max(1, int(a_hp or 1)),
@@ -343,6 +430,8 @@ def overlord_reward(ov: Mapping, uid: str) -> dict | None:
         "damage": ranking[rank - 1]["damage"],
         "page": f"{technique['name']}残页",
         "amount": page_amount,
+        "karma": KARMA_OVERLORD,
+        "favor": FAVOR_OVERLORD,
     }
 
 

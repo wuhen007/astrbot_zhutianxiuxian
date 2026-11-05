@@ -100,11 +100,15 @@ def roam(doc: PlayerDoc, stats: Any, build_fighter_fn: Any, run_1v1: Any, rng: r
             lines.append(f"长河反噬，岁月沉淀 +{CRYSTAL_LOSE}，修为 -{losses:,}。")
         gains["hp"] = max(0, int(me_f.hp))
     elif roll < 0.70:
-        # 悟道：观长河上游岁月
+        # 悟道：观长河上游岁月（W7-5c：位面青睐 50 点换 +20% 感悟）
+        from . import calamity
         exp_g = 600_000 * (int(doc.realm_index) + 1)
+        exp_g, favor_used = calamity.consume_favor_for_wudao(doc, exp_g)
         gains["exp"] = exp_g
         gains["insight"] = 3
         lines.append(f"你在长河之畔静观一个纪元的兴衰——修为 +{exp_g:,}，功法感悟 +3。")
+        if favor_used:
+            lines.append(f"【位面青睐】天地垂青，此番感悟 +20%（消耗青睐 {favor_used} 点）。")
     elif roll < 0.88:
         # 拾遗：上游漂来的时光遗物
         stones = 50_000 * (int(doc.realm_index) + 1) * rng.randint(2, 5)

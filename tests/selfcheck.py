@@ -1687,7 +1687,9 @@ async def main():
     assert ov and ov["status"] == "active" and ov["hp"] > 0, ov
     assert cal_mod.maybe_spawn_overlord(cs, avg, rr, t0) is None, "魔主在场不重复降临"
     hit = cal_mod.battle_overlord(cs, cd, strong, rr, t0)
-    assert hit["damage"] > 0 and ov["hp"] < ov["max_hp"], hit
+    assert hit["damage"] > 0, hit
+    # W7-5c 起首次伏诛会满血复生（逆命劫生），故此处要么掉血、要么复生满血
+    assert (hit["revived"] and ov["hp"] == ov["max_hp"]) or ov["hp"] < ov["max_hp"], hit
     rank = cal_mod.overlord_rank(ov)
     assert rank and rank[0]["uid"] == "cal_p", rank
     reward = cal_mod.overlord_reward(ov, "cal_p")
@@ -3793,6 +3795,75 @@ async def main():
     assert fa25.tags.get("_break_army") and fa25.tags.get("_rejuvenate")
     assert fa25.effects.get("dmg_dealt_mult", 1.0) > 1.0
     print("W7-4 ⑥ break_army/rejuvenate skills ok")
+
+    # 26. W7-5c 域外：业力 / 位面青睐 / 魔主逆命复生
+    from core import calamity as cal26, river as rv26
+
+    # ① 业力：累加、消减不为负、突破惩罚封顶 -30%
+    d26 = PlayerDoc(uid="w7karma", realm_index=5, ext={})
+    assert cal26.karma_of(d26) == 0 and cal26.karma_penalty(d26) == 0.0
+    assert cal26.add_karma(d26, 50) == 50 and cal26.karma_penalty(d26) == 0.0
+    assert cal26.add_karma(d26, 150) == 200
+    assert abs(cal26.karma_penalty(d26) + 0.20) < 1e-9
+    cal26.add_karma(d26, 500)
+    assert abs(cal26.karma_penalty(d26) + cal26.KARMA_PENALTY_CAP) < 1e-9
+    cleared26, left26 = cal26.reduce_karma(d26, 10000)
+    assert left26 == 0 and cleared26 == 700
+    assert cal26.reduce_karma(d26, 10) == (0, 0)              # 已归零不再减
+    print("W7-5c ① karma accumulate/penalty ok")
+
+    # ② 位面青睐：满 50 换 +20% 悟道；不足或无数值空间时不动
+    d26f = PlayerDoc(uid="w7favor", realm_index=5, ext={"plane_favor": 60})
+    gain26, used26 = cal26.consume_favor_for_wudao(d26f, 1_000_000)
+    assert used26 == 50 and gain26 == 1_200_000 and cal26.favor_of(d26f) == 10
+    poor26 = PlayerDoc(uid="w7favor2", ext={"plane_favor": 49})
+    assert cal26.consume_favor_for_wudao(poor26, 1_000_000) == (1_000_000, 0)
+    assert cal26.favor_of(poor26) == 49
+    full26 = PlayerDoc(uid="w7favor3", ext={"plane_favor": 50})
+    assert cal26.consume_favor_for_wudao(full26, 1000, remaining=1000) == (1000, 0)
+    assert cal26.favor_of(full26) == 50                       # 没增益空间不消耗
+    # 长河悟道分支真消耗（rng 固定在悟道区间）
+    class _SeqRng26:
+        def __init__(self, *vals):
+            self.vals = list(vals)
+
+        def random(self):
+            return self.vals.pop(0) if self.vals else 0.5
+
+        def randint(self, a, b):
+            return a
+
+        def uniform(self, a, b):
+            return a
+
+        def choice(self, seq):
+            return seq[0]
+
+    d26r = PlayerDoc(uid="w7river", realm_index=5, ext={"plane_favor": 60})
+    text26, gains26 = rv26.roam(d26r, None, None, None, _SeqRng26(0.5), n6)
+    assert gains26["exp"] == int(600_000 * 6 * 1.2), gains26
+    assert cal26.favor_of(d26r) == 10 and "位面青睐" in text26
+    print("W7-5c ② plane favor exchange ok")
+
+    # ③ 魔主逆命复生：首次伏诛满血复生且全属性 +25%，再杀才真正陨落
+    st26 = cal26.ensure({})
+    st26["overlord"] = {"id": "ov-test", "name": "试验魔主", "status": "active",
+                        "hp": 1000, "max_hp": 1000, "atk": 100, "defense": 50,
+                        "contributions": {}}
+    killer26 = PlayerDoc(uid="w7ov", name="斩杀者", realm_index=5, ext={})
+    stats26 = {"atk": 10 ** 9, "defense": 10 ** 9, "hp": 10 ** 9, "bao": 0.0}
+    res26 = cal26.battle_overlord(st26, killer26, stats26, _random.Random(1), n6)
+    assert res26["revived"] and not res26["defeated"]
+    ov26 = st26["overlord"]
+    assert ov26["status"] == "active" and ov26["hp"] == 1250 and ov26["max_hp"] == 1250
+    assert ov26["atk"] == 125 and ov26["defense"] == 62       # int(50*1.25)
+    res26b = cal26.battle_overlord(st26, killer26, stats26, _random.Random(2), n6 + 60)
+    assert res26b["defeated"] and not res26b["revived"] and ov26["status"] == "defeated"
+    reward26 = cal26.overlord_reward(ov26, "w7ov")
+    assert reward26 and reward26["karma"] == cal26.KARMA_OVERLORD
+    assert reward26["favor"] == cal26.FAVOR_OVERLORD
+    assert cal26.KARMA_REWARD_RANGE == (5, 10) and cal26.FAVOR_REWARD_RANGE == (5, 20)
+    print("W7-5c ③ overlord revival ok")
 
     await db.close()
     print("ALL M12 CHECKS PASSED")

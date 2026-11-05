@@ -373,6 +373,7 @@ CMD_DB_INSCRIBE = "#刻写帝兵"
 CMD_OCC_PRODUCE = "#职业产出"
 CMD_OCC_PRODUCE_END = "#结束产出"
 CMD_CARD_BUY = "#购买道法卡"
+CMD_KARMA = "#业力"          # W7-5c：业力 / 位面青睐面板（别名 #位面青睐）
 CMD_DARK_OPEN = "#开启黑暗动乱"
 CMD_DARK_CLOSE = "#关闭黑暗动乱"
 CMD_DARK_STATUS = "#禁区至尊状态"
@@ -1007,6 +1008,7 @@ class ZhutianPlugin(Star):
                 (CMD_ERA_LOSSES, "查看纪元损失与位面青睐"),
                 (CMD_ERA_CHARM, "使用星宇护身符（免疫下一次损失）"),
                 (CMD_ERA_EVENTS, "位面大事件记录"),
+                (CMD_KARMA, "业力与位面青睐（业力高则突破成功率下降，青睐可在悟道时换 +20%）"),
             ]},
             {"title": "彼岸古文明", "lines": [
                 (CMD_ANCIENT, "四章贡献链状态（全服共享进度 + 你的贡献）"),
@@ -1720,6 +1722,7 @@ class ZhutianPlugin(Star):
             yield event.plain_result(blocked)
             return
         rate_bonus, cost_factor = era_mod.qi_mods(st)
+        rate_bonus += calamity.karma_penalty(doc)          # W7-5c：业力缠身，破境艰难
         mg_rate = mingge.bonus(doc, "境界突破成功率")     # 命格·破障通玄（W2-3）
         ok, msg, d = cultivate.breakthrough(
             doc, self.content.table(doc.realm_table),
@@ -1756,6 +1759,7 @@ class ZhutianPlugin(Star):
             rate_bonus, cost_factor = era_mod.body_mods(st)
         else:
             rate_bonus, cost_factor = era_mod.qi_mods(st)
+        rate_bonus += calamity.karma_penalty(doc)      # W7-5c：业力减益（练气/炼体都吃）
         note = self._era_note(st, body=body)
         no_grass = False
         if luck and grass < 1:
@@ -8414,6 +8418,11 @@ class ZhutianPlugin(Star):
                 exp = int(2000 * mult)
                 doc.exp += exp
                 lines.append(f"战利品：{'、'.join(f'{k}×{v}' for k, v in items.items())}；修为 +{exp:,}")
+                # W7-5c：伏诛洗业、天地垂青
+                cleared, karma_left = calamity.reduce_karma(doc, rng.randint(*calamity.KARMA_REWARD_RANGE))
+                favor_gain = rng.randint(*calamity.FAVOR_REWARD_RANGE)
+                favor = calamity.add_favor(doc, favor_gain)
+                lines.append(f"业力 -{cleared}（余 {karma_left}）｜位面青睐 +{favor_gain}（共 {favor}）")
                 overlord = calamity.maybe_spawn_overlord(state, await self._calamity_avg(), rng, now)
                 if overlord:
                     lines.append(f"【裂界魔临】击杀惊动虚空，{overlord['name']}降临！")
@@ -8425,6 +8434,27 @@ class ZhutianPlugin(Star):
             await self.db.save_calamity(state)
         async for _r in self._smart(event, "\n".join(lines), "域外灾厄"):
             yield _r
+
+    @filter.command(CMD_KARMA, alias={"#位面青睐"})
+    async def handle_karma(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        karma = calamity.karma_of(doc)
+        favor = calamity.favor_of(doc)
+        penalty = calamity.karma_penalty(doc)
+        lines = [
+            "--- 业力与位面青睐 ---",
+            f"业力：{karma}｜突破成功率 {penalty:.0%}"
+            f"（每 {100} 点 -10%，上限 -30%）",
+            f"位面青睐：{favor}｜悟道时满 {calamity.PLANE_FAVOR_WUDAO_COST} 点自动消耗，换 +20% 感悟",
+            "业力来源：天魔炼化灾厄残躯 +50；消减：伏诛域外灾厄 -5~10、镇压魔主 -20",
+            "青睐来源：伏诛域外灾厄 +5~20、镇压魔主 +50（#遨游时间长河 遇悟道时消耗）",
+        ]
+        yield event.plain_result("\n".join(lines))
 
     @filter.command(CMD_CALAMITY_CLAIM, "领取域外战利品")
     async def handle_calamity_claim(self, event: AstrMessageEvent):
@@ -8514,8 +8544,14 @@ class ZhutianPlugin(Star):
                 else:
                     lines.extend(res["log"])
                     lines.append(f"造成 {res['damage']:,} 伤害，魔主剩余 {res['hp']:,} 气血")
+                if res.get("revived"):
+                    lines.append("【逆命劫生】魔主解除一切控制、满血复生，全属性永久 +25%！")
+                    continue
                 if res["defeated"]:
+                    cleared, karma_left = calamity.reduce_karma(doc, calamity.KARMA_OVERLORD)
+                    favor = calamity.add_favor(doc, calamity.FAVOR_OVERLORD)
                     lines.append(f"【魔主伏诛】{state['overlord']['name']} 被镇压！")
+                    lines.append(f"业力 -{cleared}（余 {karma_left}）｜位面青睐 +{calamity.FAVOR_OVERLORD}（共 {favor}）")
                     break
             await self.db.save_calamity(state)
         async for _r in self._smart(event, "\n".join(lines), "灾厄魔主"):
@@ -8600,11 +8636,12 @@ class ZhutianPlugin(Star):
         stats = self._stats(doc)
         gain = max(1, int(stats.atk * 0.05))
         doc.ext["modao"] = int(doc.ext.get("modao") or 0) + 50
+        karma = calamity.add_karma(doc, 50)      # W7-5c：炼化残躯伤天和
         async with self.db.transaction():
             await self.db.save_player(doc.model_dump())
             await self.db.save_calamity(state)
         yield event.plain_result(
-            f"【天魔炼化】你炼化【{pending['name']}】残躯，攻击 +{gain}，魔道值 +50。"
+            f"【天魔炼化】你炼化【{pending['name']}】残躯，攻击 +{gain}，魔道值 +50，业力 +50（共 {karma}）。"
         )
 
     @filter.command(CMD_FOREIGN_COMBINE, "合成域外功法")
