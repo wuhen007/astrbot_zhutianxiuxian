@@ -3991,6 +3991,284 @@ async def main():
     assert not ok28 and any("乾坤界" in m for m in miss28)
     print("W7-5a ④ treasure bonus & layer gate ok")
 
+    # ================= W8-A1 诸天遗珍 =================
+    from core import relic as rl29
+    from core import equipment as eq29
+    from core.combat import loadout as lo29
+    rr29 = _random.Random(29)
+    st29 = rl29.default_state()
+    st29["fragments"] = 2000
+
+    # ① 合成 → 背包 / 碎片扣除 / 数量与品质
+    st29, made29, cost29 = rl29.synthesize(st29, "荒古战血", "至圣", 3, rr29)
+    assert len(made29) == 3 and cost29 == 300 and st29["fragments"] == 1700
+    assert len(st29["bag"]) == 3 and all(r["quality"] == "至圣" for r in made29)
+    assert all(len(r["affixes"]) == 3 for r in made29)       # 至圣 3 词条
+
+    # ② 铭刻 / 卸下 / 第二槽门槛 / 替换回背包
+    st29, r29, _ = rl29.engrave(st29, 1, "武器", 1)
+    st29, _r2, _ = rl29.engrave(st29, 1, "护具", 1)
+    assert len(st29["bag"]) == 1
+    try:
+        rl29.engrave(st29, 1, "武器", 2)
+        raise AssertionError("未拓展的第二铭刻位不应可铭刻")
+    except ValueError:
+        pass
+    st29 = rl29.expand(st29, "武器")
+    st29, _r3, replaced29 = rl29.engrave(st29, 1, "武器", 2)
+    assert replaced29 is None or isinstance(replaced29, dict)
+    st29, back29 = rl29.unequip(st29, "武器", 2)
+    assert back29["quality"] == "至圣" and len(st29["bag"]) >= 1
+
+    # ③ 三件同套 → 共鸣；缺一件 → 无共鸣
+    st29b = rl29.default_state()
+    st29b["fragments"] = 2000
+    st29b, made29b, _ = rl29.synthesize(st29b, "玄黄不灭", "灵玄", 3, rr29)
+    for idx, part in enumerate(("武器", "护具", "法宝"), 1):
+        st29b, _x, _ = rl29.engrave(st29b, 1, part, 1)
+    eff29, reso29 = rl29.effects(st29b)
+    assert reso29 == ["玄黄不灭"], reso29
+    assert eff29["开战护盾率"] >= 0.15 - 1e-9 and eff29["近战伤害减免"] >= 0.05 - 1e-9
+
+    # ④ 分解守卫：已铭刻拒绝；批量按品质；碎片按品质给
+    engraved29 = st29["engrave"]["武器"][0]["id"]
+    try:
+        rl29.salvage(st29, [engraved29])
+        raise AssertionError("已铭刻的遗珍不应可分解")
+    except ValueError:
+        pass
+    ids29 = rl29.select_for_salvage(st29, "至圣")
+    st29c, picked29, frag29 = rl29.salvage(st29, ids29)
+    assert picked29 and frag29 == 10 * len(picked29)
+
+    # ⑤ 战斗映射：bao 进装备聚合；增伤/减伤/护盾进 Fighter
+    doc29 = PlayerDoc(uid="w8relic", realm_index=40, ext={"relics": st29b})
+    t29 = store.table("Level/练气境界")
+    with29 = eq29.aggregate(doc29, t29, lambda n: None)
+    bare29 = PlayerDoc(uid="w8relic0", realm_index=40, ext={})
+    without29 = eq29.aggregate(bare29, t29, lambda n: None)
+    assert with29.bao > without29.bao
+    cb29 = rl29.combat(st29b)
+    assert cb29["taken"] > 0 and cb29["shield"] > 0
+    f29 = lo29.build_fighter(doc29, "测试", 1000, 500, 10000, 0.1, lambda n: None)
+    assert float(f29.eff("dmg_taken_mult", 1.0)) < 1.0
+    assert int(f29.effects.get("shield", 0) or 0) > 0
+    assert abs(float(f29.eff("dmg_dealt_mult", 1.0)) - 1.0) > 1e-9 or cb29["dealt"] == 0
+    # 卸下一件 → 共鸣消失
+    st29b, _ = rl29.unequip(st29b, "法宝", 1)
+    assert rl29.resonances(st29b) == []
+
+    # ⑥ 老档归一：未拓展的第二铭刻位退回背包；坏词条丢弃；碎片纠正
+    legacy29 = {"fragments": -5, "bag": "bad",
+                "engrave": {"武器": [{"quality": "灵玄", "set": "万法天章",
+                                      "affixes": [{"name": "不存在的词条", "value": 1},
+                                                  {"name": "洞虚", "value": 0.02}]},
+                                    {"quality": "至圣", "set": "荒古战血", "affixes": []}],
+                            "护具": [], "法宝": []},
+                "expanded": {"武器": False}}
+    norm29 = rl29.normalize(legacy29)
+    assert norm29["fragments"] == 0
+    assert len(norm29["bag"]) == 1                     # 第二槽退回
+    assert norm29["engrave"]["武器"][1] is None
+    kept29 = norm29["engrave"]["武器"][0]
+    assert [a["name"] for a in kept29["affixes"]] == ["洞虚"]   # 坏词条被丢
+    print("W8-A1 relic system ok")
+
+    # ================= W8-A2 众生仙钓 + 鱼王 =================
+    from core import fishing as fs30
+    fr30 = _random.Random(30)
+
+    # ① 数据与潮汐：7 位面 / 5 仙饵 / 5000-2000 周期 / 旺潮两位面不重复
+    assert len(fs30.planes()) == 7 and len(fs30.baits()) == 5
+    t30 = fs30.tide(100)
+    assert t30["active"] and t30["remaining"] == 1900
+    assert len(set(t30["planes"])) == 2
+    assert not fs30.tide(2500)["active"]
+    assert fs30.tide(5100)["cycle"] == 1
+
+    # ② 签到：首日得钓竿 / 同日拒绝 / 连续第 3 日加赠仙饵
+    d30 = PlayerDoc(uid="w8fish", ext={})
+    t0 = 1_800_000_000.0
+    ok30, msg30, items30, streak30 = fs30.sign(d30, t0, fr30)
+    assert ok30 and streak30 == 1 and items30.get(fs30.ROD_ITEM) == 1
+    assert not fs30.sign(d30, t0 + 3600, fr30)[0]
+    ok30, _m, items30, streak30 = fs30.sign(d30, t0 + 86400, fr30)
+    assert ok30 and streak30 == 2
+    ok30, _m, items30, streak30 = fs30.sign(d30, t0 + 2 * 86400, fr30)
+    assert streak30 == 3 and any(b in items30 for b in fs30.baits())
+
+    # ③ 垂钓结算：无饵记鱼谱；有饵出仙饵奖池；单次数量 1~5
+    res30 = fs30.roll_catch("凡间", 0, None, fr30)
+    assert res30["kind"] in ("fish", "king") and res30["item"]
+    res30b = fs30.roll_catch("凡间", 0, "神藏仙饵", fr30)
+    assert res30b["kind"] == "bait" and 1 <= res30b["amount"] <= 5
+    st30 = fs30.state_of(d30)
+    fs30.record(st30, "凡间", "青灵鲤")
+    fs30.set_state(d30, st30)
+    a30 = fs30.atlas_of(d30, "凡间")
+    assert a30["collected"] == 1 and a30["total"] == 4
+
+    # ④ 鱼谱领奖：未集齐拒绝；集齐后每位面愿鳞 ×10
+    assert not fs30.claim_atlas(d30)[0]
+    st30 = fs30.state_of(d30)
+    for p in fs30.planes():
+        for f in (fs30.data()["planes"][p]["fish"] + [fs30.data()["planes"][p]["king"]]):
+            fs30.record(st30, p, f["name"])
+    fs30.set_state(d30, st30)
+    ok30, msg30, items30 = fs30.claim_atlas(d30)
+    assert ok30 and items30[fs30.SCALE_ITEM] == 10 * len(fs30.planes())
+    assert not fs30.claim_atlas(d30)[0]          # 不可重复领
+
+    # ⑤ 潮汐加成：旺潮位面走 50/30/20 权重；鱼王率 1%→2%
+    assert fs30.tide(0)["active"]
+    cfg30 = fs30.data()["planes"]["凡间"]
+    assert len(cfg30["fish"]) == 3 and cfg30["king"]["name"]
+
+    # ⑥ 愿鳞兑换：成本 × 份数，唯一物品标记
+    cost30, reward30 = fs30.wish_cost("万界引潮灯")
+    assert cost30 == 120 and reward30["name"] == "万界引潮灯"
+    ok30, msg30, items30 = fs30.exchange(d30, "百草香饵", 3)
+    assert ok30 and items30["百草香饵"] == 15
+    assert fs30.wish_cost("不存在的东西") is None
+
+    # ⑦ 鱼王：加入 → 单次至多 10% → 多轮击杀 → 榜 → 宝箱一次性
+    world30: dict = {}
+    avg30 = 10000.0
+    row30 = fs30.fk_row(world30, "凡间", avg30)
+    assert row30["hp"] == row30["hp_max"] == 300000
+    assert not fs30.fk_strike(world30, "凡间", "u1", 10 ** 9, fr30, avg30)[0]
+    assert fs30.fk_join(world30, "凡间", "u1", avg30)[0]
+    assert not fs30.fk_join(world30, "凡间", "u1", avg30)[0]
+    ok30, _m, dmg30, killed30 = fs30.fk_strike(world30, "凡间", "u1", 10 ** 9, fr30, avg30)
+    assert ok30 and dmg30 == int(300000 * fs30.KING_STRIKE_CAP) and not killed30
+    for _ in range(12):
+        ok30, _m, _d, killed30 = fs30.fk_strike(world30, "凡间", "u1", 10 ** 9, fr30, avg30)
+        if killed30:
+            break
+    assert killed30
+    assert "u1" in fs30.fk_rank(world30, "凡间", avg30)
+    ok30, msg30, items30, _relic30 = fs30.fk_open(world30, "凡间", "u1", fr30, avg30)
+    assert ok30 and items30[fs30.SCALE_ITEM] >= 15
+    assert not fs30.fk_open(world30, "凡间", "u1", fr30, avg30)[0]
+    assert not fs30.fk_open(world30, "凡间", "u2", fr30, avg30)[0]
+    print("W8-A2 fishing & fish king ok")
+
+    # ================= W8-A3 舟出海 =================
+    from core import voyage as vy31
+
+    class _SeqRng:
+        def __init__(self, seq):
+            self.seq = list(seq)
+            self.i = 0
+
+        def random(self):
+            v = self.seq[self.i % len(self.seq)]
+            self.i += 1
+            return v
+
+    d31 = PlayerDoc(uid="w8boat", ext={})
+    inv31 = dict(vy31.FIRST_BOAT_MATS)
+    # ① 首舟：材料齐 → 造成；不足 → 拒绝并报缺口
+    ok31, msg31, need31 = vy31.build(d31, {})
+    assert not ok31 and "缺口" in msg31
+    ok31, msg31, need31 = vy31.build(d31, inv31)
+    assert ok31 and d31.ext["voyage"]["boat"] == "一叶轻舟"
+    assert need31 == vy31.FIRST_BOAT_MATS
+    # ② 升阶：材料齐才可，升至界河灵舟（×1.5）
+    up31 = vy31.BOATS[0]["upgrade"]["mats"]
+    ok31, msg31, _ = vy31.build(d31, up31)
+    assert ok31 and d31.ext["voyage"]["boat"] == "界河灵舟"
+    assert vy31.boat_mult("界河灵舟") == 1.5
+    assert "诸天仙舟" in vy31.build_cost(d31)[1]
+    # ③ 出海：扣 1 钓竿 + 10 愿鳞；每日 3 趟；在海上不可再出
+    inv31 = {vy31.ROD_ITEM: 3, vy31.SCALE_ITEM: 100}
+    ok31, msg31, cost31 = vy31.start(d31, "凡间河", 1000.0, inv31)
+    assert ok31 and cost31 == {vy31.ROD_ITEM: 1, vy31.SCALE_ITEM: 10}
+    assert not vy31.can_sail(d31, 1100.0, inv31)[0]
+    # ④ 回港：未到点拒绝；到点给愿鳞（×1.5 舟倍率）
+    bad31, _m, _i, _e = vy31.settle(d31, 1000.0 + 60, 0, _random.Random(1))
+    assert not bad31
+    ok31, msg31, items31, _ev = vy31.settle(d31, 1000.0 + vy31.VOYAGE_MINUTES * 60 + 1,
+                                           0, _random.Random(2))
+    assert ok31 and items31[vy31.SCALE_ITEM] >= 15      # 10~20 × 1.5
+    # ⑤ 每日上限：3 趟后拒绝
+    for i in range(2):
+        ok31, _m, _c = vy31.start(d31, "界海", 2000.0 + i, inv31)
+        assert ok31
+        vy31.settle(d31, 2000.0 + i + vy31.VOYAGE_MINUTES * 60 + 1, 0, _random.Random(3))
+    assert not vy31.can_sail(d31, 2600.0, inv31)[0]
+    # ⑥ 恶性事件：界河灵舟 → 降阶；一叶轻舟 → 沉没返材料
+    d31b = PlayerDoc(uid="w8boat2", ext={"voyage": {"boat": "界河灵舟",
+                                                   "voyage": {"route": "凡间河", "end": 0,
+                                                              "boat": "界河灵舟"}}})
+    ok31, msg31, items31, _e = vy31.settle(d31b, 10.0, 0, _SeqRng([0.01, 0.0]))
+    assert ok31 and d31b.ext["voyage"]["boat"] == "一叶轻舟" and "残骸重组" in msg31
+    d31c = PlayerDoc(uid="w8boat3", ext={"voyage": {"boat": "一叶轻舟",
+                                                   "voyage": {"route": "凡间河", "end": 0,
+                                                              "boat": "一叶轻舟"}}})
+    ok31, msg31, items31, _e = vy31.settle(d31c, 10.0, 0, _SeqRng([0.01, 0.0]))
+    assert ok31 and d31c.ext["voyage"]["boat"] is None and items31
+    # ⑦ 见闻：集齐一条航线 → 领该航线仙饵
+    d31d = PlayerDoc(uid="w8boat4", ext={"voyage": {"boat": "一叶轻舟"}})
+    st31 = vy31.state_of(d31d)
+    for name, _k in vy31.ROUTES["凡间河"]["atlas"]:
+        st31.setdefault("atlas", {}).setdefault("凡间河", {})[name] = 1
+    vy31.set_state(d31d, st31)
+    ok31, msg31, items31 = vy31.claim_atlas(d31d)
+    assert ok31 and items31.get("百草香饵") == 2
+    assert not vy31.claim_atlas(d31d)[0]
+    print("W8-A3 sea voyage ok")
+
+    # ================= W8-A4 轮回路与遗落纳戒 =================
+    from core import reincarnation as rein32
+    w32: dict = {}
+    d32 = PlayerDoc(uid="w8rein", name="试炼者", realm_index=55, stones=1_000_000,
+                    ext={"plane": {"current": "凡间", "coords": {"x": 12, "y": 34}}})
+    # ① 转世留纳戒：20% 灵石 + 至多 3 件遗物
+    row32 = rein32.make_drop(w32, d32, "凡间", {"x": 12, "y": 34}, 200_000,
+                             {"丹药A": 3, "材料B": 2, "道具C": 1, "多余D": 9}, 1000.0)
+    assert row32 and row32["stones"] == 200_000
+    assert len(row32["items"]) == rein32.DROP_ITEM_MAX
+    assert rein32.mode_of(w32) == "纳戒"
+    # ② 归虚模式不留纳戒
+    w32b: dict = {"reincarnation": {"mode": "归虚", "drops": []}}
+    assert rein32.make_drop(w32b, d32, "凡间", {}, 1, {"x": 1}, 1000.0) is None
+    assert not rein32.list_text(w32b, None, 1000.0).count("编号")
+    # ③ 执掌：境界门槛 / 唯一 / 夺位看境界 / 放弃
+    low32 = PlayerDoc(uid="w8low", name="低境", realm_index=10, ext={})
+    assert not rein32.take(w32, low32, 1000.0)[0]
+    ok32, msg32 = rein32.take(w32, d32, 1000.0)
+    assert ok32 and "轮回路" in msg32
+    assert not rein32.take(w32, d32, 1001.0)[0]                 # 已在自己手里
+    higher32 = PlayerDoc(uid="w8hi", name="高境", realm_index=60, ext={})
+    assert rein32.take(w32, higher32, 1002.0)[0]                # 高境夺位
+    assert not rein32.take(w32, d32, 1003.0)[0]                 # 低境夺不回
+    # ④ 输出切换只限执掌者
+    assert not rein32.toggle(w32, d32)[0]
+    ok32, msg32 = rein32.toggle(w32, higher32)
+    assert ok32 and rein32.mode_of(w32) == "归虚"
+    rein32.toggle(w32, higher32)
+    assert rein32.mode_of(w32) == "纳戒"
+    # ⑤ 列表 / 详情 / 按序号与编号定位
+    st32 = rein32.list_text(w32, None, 1000.0)
+    assert "试炼者" in st32 and "编号" in st32
+    assert rein32.pick(w32, row32["id"], 1000.0)["uid"] == "w8rein"
+    assert rein32.pick(w32, "1", 1000.0)["uid"] == "w8rein"
+    assert "灵石" in rein32.detail_text(row32, 1000.0)
+    # ⑥ 拾取：转移并移除，二次拾取失败
+    ok32, msg32, stones32, items32 = rein32.claim(w32, row32, 1000.0)
+    assert ok32 and stones32 == 200_000 and items32
+    assert not rein32.claim(w32, row32, 1000.0)[0]
+    # ⑦ 过期清扫
+    w32c: dict = {}
+    rein32.make_drop(w32c, d32, "凡间", {}, 1, {"a": 1}, 1000.0)
+    assert "没有遗落纳戒" in rein32.list_text(w32c, None, 1000.0 + rein32.DROP_TTL + 1)
+    # ⑧ 强闯成功率：同境 50%，高 10 境 70%，下限 10%
+    assert abs(rein32.force_chance({"realm": 50}, PlayerDoc(uid="a", realm_index=50, ext={})) - 0.5) < 1e-9
+    assert abs(rein32.force_chance({"realm": 50}, PlayerDoc(uid="b", realm_index=60, ext={})) - 0.7) < 1e-9
+    assert rein32.force_chance({"realm": 50}, PlayerDoc(uid="c", realm_index=0, ext={})) == 0.10
+    print("W8-A4 reincarnation ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

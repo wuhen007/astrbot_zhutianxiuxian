@@ -208,6 +208,13 @@ def aggregate(
     except Exception:
         pass
 
+    # 诸天遗珍（W8-A1）：暴击率/暴击伤害折算进 bao；其余乘区由 build_fighter 注入
+    try:
+        from . import relic as _relic
+        dt_bao += _relic.bao_of(doc)
+    except Exception:
+        pass
+
     # 诸天化身：装载化身时的三维比例加成（ext["zhutian"]["current"] 对应化身的 root）
     av_atk = av_def = av_hp = 0.0
     zt = doc.ext.get("zhutian")

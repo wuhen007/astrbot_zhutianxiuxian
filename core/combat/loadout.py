@@ -157,6 +157,21 @@ def build_fighter(
         f.tags["battle_skills"] = [str(s.get("name")) for s in battle_skills]
     equip_skill_pool(f, doc, skill_tables)
     skills.ensure_builtin()
+    # W8-A1 诸天遗珍：增伤/减伤/汲取/开战护盾（暴击率已在 equipment.aggregate 里并入 bao）
+    try:
+        from .. import relic as relic_mod
+        rel = relic_mod.combat(relic_mod.state_of(doc))
+        if rel["dealt"] > 0:
+            f.effects["dmg_dealt_mult"] = float(f.eff("dmg_dealt_mult", 1.0)) * (1 + rel["dealt"])
+        if rel["taken"] > 0:
+            f.effects["dmg_taken_mult"] = max(0.5, float(f.eff("dmg_taken_mult", 1.0))
+                                              * (1 - rel["taken"]))
+        if rel["lifesteal"] > 0:
+            f.effects["lifesteal"] = float(f.eff("lifesteal", 0.0)) + rel["lifesteal"]
+        if rel["shield"] > 0:
+            f.effects["shield"] = int(f.effects.get("shield", 0) or 0) + int(f.hp_max * rel["shield"])
+    except Exception:
+        pass
     apply_proficiency(f, doc)   # W7-0：三乘区 + 档位共鸣，PvP/PvE 同源
     if (int(getattr(doc, "realm_index", 0) or 0) >= 10
             and int(getattr(doc, "physique_index", 0) or 0) >= 10):

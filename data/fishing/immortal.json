@@ -1,0 +1,584 @@
+{
+ "planes": {
+  "凡间": {
+   "fish": [
+    {
+     "name": "青灵鲤",
+     "weight": 60
+    },
+    {
+     "name": "赤鳞妖鲫",
+     "weight": 30
+    },
+    {
+     "name": "天南玉龙鱼",
+     "weight": 10
+    }
+   ],
+   "king": {
+    "name": "吞舟玄龟",
+    "speed": 80,
+    "skills": [
+     "真龙宝术",
+     "不灭经"
+    ],
+    "灵根": {
+     "type": "真灵根",
+     "name": "水灵根",
+     "法球倍率": 0.08,
+     "攻击": 0,
+     "防御": 0,
+     "生命": 0
+    }
+   }
+  },
+  "仙界": {
+   "fish": [
+    {
+     "name": "洗仙池锦鲤",
+     "weight": 60
+    },
+    {
+     "name": "长生银鳐",
+     "weight": 30
+    },
+    {
+     "name": "九窍仙鱼",
+     "weight": 10
+    }
+   ],
+   "king": {
+    "name": "沧溟仙鲲",
+    "speed": 110,
+    "skills": [
+     "鲲鹏宝术",
+     "不灭经"
+    ],
+    "灵根": {
+     "type": "变异灵根",
+     "name": "冰灵根",
+     "法球倍率": 0.1,
+     "攻击": 0,
+     "防御": 0,
+     "生命": 0
+    }
+   }
+  },
+  "遮天位面": {
+   "fish": [
+    {
+     "name": "北斗龙鳅",
+     "weight": 60
+    },
+    {
+     "name": "神泉金鲤",
+     "weight": 30
+    },
+    {
+     "name": "葬帝星鱼",
+     "weight": 10
+    }
+   ],
+   "king": {
+    "name": "葬帝星龙鳅",
+    "speed": 150,
+    "skills": [
+     "行字秘",
+     "吞天魔功"
+    ],
+    "灵根": {
+     "type": "变异灵根",
+     "name": "暗灵根",
+     "法球倍率": 0.1,
+     "攻击": 0,
+     "防御": 0,
+     "生命": 0
+    }
+   }
+  },
+  "下界八域": {
+   "fish": [
+    {
+     "name": "祭灵青鱼",
+     "weight": 60
+    },
+    {
+     "name": "太古宝鳞鱼",
+     "weight": 30
+    },
+    {
+     "name": "虚神界骨鱼",
+     "weight": 10
+    }
+   ],
+   "king": {
+    "name": "纯血太古鱼龙",
+    "speed": 130,
+    "skills": [
+     "真龙宝术",
+     "六道轮回天功"
+    ],
+    "灵根": {
+     "type": "变异灵根",
+     "name": "蛮荒",
+     "法球倍率": 0.17,
+     "攻击": 0,
+     "防御": 0,
+     "生命": 0
+    }
+   }
+  },
+  "九天十地": {
+   "fish": [
+    {
+     "name": "帝关战鲟",
+     "weight": 60
+    },
+    {
+     "name": "仙古道鱼",
+     "weight": 30
+    },
+    {
+     "name": "界河鲲鱼",
+     "weight": 10
+    }
+   ],
+   "king": {
+    "name": "界河鲲鹏残灵",
+    "speed": 180,
+    "skills": [
+     "鲲鹏宝术",
+     "六道轮回天功"
+    ],
+    "灵根": {
+     "type": "变异灵根",
+     "name": "风灵根",
+     "法球倍率": 0.1,
+     "攻击": 0,
+     "防御": 0,
+     "生命": 0
+    }
+   }
+  },
+  "太初星墟": {
+   "fish": [
+    {
+     "name": "星骸游鱼",
+     "weight": 60
+    },
+    {
+     "name": "吞光晶鳐",
+     "weight": 30
+    },
+    {
+     "name": "宇宙胎鱼",
+     "weight": 10
+    }
+   ],
+   "king": {
+    "name": "噬界星鲸",
+    "speed": 220,
+    "skills": [
+     "吞天魔功",
+     "六道轮回天功"
+    ],
+    "灵根": {
+     "type": "变异灵根",
+     "name": "雷灵根",
+     "法球倍率": 0.1,
+     "攻击": 0,
+     "防御": 0,
+     "生命": 0
+    }
+   }
+  },
+  "仙域": {
+   "fish": [
+    {
+     "name": "界海银鱼",
+     "weight": 60
+    },
+    {
+     "name": "仙王道鲤",
+     "weight": 30
+    },
+    {
+     "name": "岁月舟鱼",
+     "weight": 10
+    }
+   ],
+   "king": {
+    "name": "界海古鲲",
+    "speed": 260,
+    "skills": [
+     "鲲鹏宝术",
+     "不灭经",
+     "行字秘"
+    ],
+    "灵根": {
+     "type": "天灵根",
+     "name": "纯阳体",
+     "法球倍率": 0.3,
+     "攻击": 0,
+     "防御": 0,
+     "生命": 0
+    }
+   }
+  }
+ },
+ "baits": {
+  "神藏仙饵": {
+   "effect": "专钓神药、潜力、心神与功法参悟类宝物",
+   "rewards": [
+    {
+     "name": "天药",
+     "class": "丹药",
+     "amount": 5,
+     "weight": 20,
+     "scalable": true
+    },
+    {
+     "name": "群星秘钥",
+     "class": "道具",
+     "amount": 1,
+     "weight": 5
+    },
+    {
+     "name": "九转天药",
+     "class": "丹药",
+     "amount": 1,
+     "weight": 8
+    },
+    {
+     "name": "煌天造化丹",
+     "class": "丹药",
+     "amount": 1,
+     "weight": 4
+    },
+    {
+     "name": "潜力丹",
+     "class": "丹药",
+     "amount": 1,
+     "weight": 20
+    },
+    {
+     "name": "心神丹",
+     "class": "丹药",
+     "amount": 1,
+     "weight": 20
+    },
+    {
+     "name": "功法参悟丹",
+     "class": "丹药",
+     "amount": 1,
+     "weight": 23
+    }
+   ]
+  },
+  "矿髓沉饵": {
+   "effect": "专钓矿石、神材与沉没遗物",
+   "rewards": [
+    {
+     "name": "仙晶矿",
+     "class": "道具",
+     "amount": 100,
+     "weight": 32,
+     "scalable": true
+    },
+    {
+     "name": "七彩流晶矿",
+     "class": "道具",
+     "amount": 10,
+     "weight": 24,
+     "scalable": true
+    },
+    {
+     "name": "欺天石",
+     "class": "材料",
+     "amount": 1,
+     "weight": 10
+    },
+    {
+     "name": "时光石",
+     "class": "材料",
+     "amount": 1,
+     "weight": 12
+    },
+    {
+     "name": "万古虚空铁",
+     "class": "材料",
+     "amount": 1,
+     "weight": 10
+    },
+    {
+     "name": "罗天晶",
+     "class": "材料",
+     "amount": 1,
+     "weight": 5
+    },
+    {
+     "name": "道衍晶",
+     "class": "材料",
+     "amount": 1,
+     "weight": 5
+    },
+    {
+     "name": "造化仙晶",
+     "class": "材料",
+     "amount": 1,
+     "weight": 2
+    }
+   ]
+  },
+  "百草香饵": {
+   "effect": "专钓生灵、仙果与珍稀药苗",
+   "rewards": [
+    {
+     "name": "鱼肉",
+     "class": "食材",
+     "amount": 100,
+     "weight": 40,
+     "scalable": true
+    },
+    {
+     "name": "仙馐果",
+     "class": "食材",
+     "amount": 10,
+     "weight": 30,
+     "scalable": true
+    },
+    {
+     "name": "悟道古茶树幼苗",
+     "class": "草药",
+     "amount": 1,
+     "weight": 20
+    },
+    {
+     "name": "九转天药幼苗",
+     "class": "草药",
+     "amount": 1,
+     "weight": 10
+    }
+   ]
+  },
+  "因果道饵": {
+   "effect": "排除普通渔获，只钓诸天稀有特产",
+   "rewards": [
+    {
+     "name": "仙品道心果",
+     "class": "丹药",
+     "amount": 1,
+     "weight": 8
+    },
+    {
+     "name": "群星之沙",
+     "class": "道具",
+     "amount": 5,
+     "weight": 20,
+     "scalable": true
+    },
+    {
+     "name": "世界石",
+     "class": "材料",
+     "amount": 1,
+     "weight": 22
+    },
+    {
+     "name": "无尽秘钥",
+     "class": "道具",
+     "amount": 1,
+     "weight": 15
+    },
+    {
+     "name": "超越宝盒",
+     "class": "盒子",
+     "amount": 1,
+     "weight": 12
+    },
+    {
+     "name": "真我宝盒",
+     "class": "盒子",
+     "amount": 1,
+     "weight": 8
+    },
+    {
+     "name": "神主触屏碎片",
+     "class": "道具",
+     "amount": 1,
+     "weight": 15
+    }
+   ]
+  },
+  "轮回冥饵": {
+   "effect": "专钓炼器传承、轮回奇物与唯一仙武界坐标",
+   "rewards": [
+    {
+     "name": "百炼诀残页",
+     "class": "材料",
+     "amount": 1,
+     "weight": 22
+    },
+    {
+     "name": "九转炼器诀残页",
+     "class": "材料",
+     "amount": 1,
+     "weight": 15
+    },
+    {
+     "name": "乾坤炼器经残页",
+     "class": "材料",
+     "amount": 1,
+     "weight": 9
+    },
+    {
+     "name": "无上炼器道残页",
+     "class": "材料",
+     "amount": 1,
+     "weight": 5
+    },
+    {
+     "name": "纪元之力",
+     "class": "材料",
+     "amount": 1,
+     "weight": 10
+    },
+    {
+     "name": "彼岸星砂",
+     "class": "材料",
+     "amount": 1,
+     "weight": 15
+    },
+    {
+     "name": "往世乐土的记忆结晶",
+     "class": "道具",
+     "amount": 1,
+     "weight": 12
+    },
+    {
+     "name": "轮回魂晶",
+     "class": "材料",
+     "amount": 1,
+     "weight": 12
+    }
+   ]
+  }
+ },
+ "wish": {
+  "众生仙钓": {
+   "cost": 5,
+   "reward": {
+    "name": "众生仙钓",
+    "class": "道具",
+    "amount": 1
+   }
+  },
+  "百草香饵": {
+   "cost": 30,
+   "reward": {
+    "name": "百草香饵",
+    "class": "道具",
+    "amount": 5
+   }
+  },
+  "神藏仙饵": {
+   "cost": 30,
+   "reward": {
+    "name": "神藏仙饵",
+    "class": "道具",
+    "amount": 5
+   }
+  },
+  "矿髓沉饵": {
+   "cost": 40,
+   "reward": {
+    "name": "矿髓沉饵",
+    "class": "道具",
+    "amount": 5
+   }
+  },
+  "因果道饵": {
+   "cost": 50,
+   "reward": {
+    "name": "因果道饵",
+    "class": "道具",
+    "amount": 5
+   }
+  },
+  "轮回冥饵": {
+   "cost": 50,
+   "reward": {
+    "name": "轮回冥饵",
+    "class": "道具",
+    "amount": 5
+   }
+  },
+  "宇宙核心": {
+   "cost": 80,
+   "reward": {
+    "name": "宇宙核心",
+    "class": "材料",
+    "amount": 5
+   }
+  },
+  "界核": {
+   "cost": 80,
+   "reward": {
+    "name": "界核",
+    "class": "材料",
+    "amount": 5
+   }
+  },
+  "鸿蒙道火": {
+   "cost": 80,
+   "reward": {
+    "name": "鸿蒙道火",
+    "class": "材料",
+    "amount": 5
+   }
+  },
+  "三千弱水": {
+   "cost": 80,
+   "reward": {
+    "name": "三千弱水",
+    "class": "材料",
+    "amount": 5
+   }
+  },
+  "万界引潮灯": {
+   "cost": 120,
+   "reward": {
+    "name": "万界引潮灯",
+    "class": "道具",
+    "amount": 1
+   },
+   "unique": true
+  },
+  "大衍悟道丹配方": {
+   "cost": 200,
+   "reward": {
+    "name": "大衍悟道丹配方",
+    "class": "道具",
+    "amount": 1
+   },
+   "unique": true,
+   "unlockFlag": "大衍悟道丹配方"
+  },
+  "轮回命签": {
+   "cost": 50,
+   "reward": {
+    "name": "轮回命签",
+    "class": "道具",
+    "amount": 50
+   }
+  }
+ },
+ "tide": {
+  "interval": 5000,
+  "duration": 2000
+ },
+ "consts": {
+  "eventChance": 0.08,
+  "fishKingChance": 0.01,
+  "cooldownMin": 40
+ }
+}

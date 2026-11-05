@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -375,6 +375,51 @@ CMD_FACTION_LEAVE = "#退出势力"
 CMD_FACTION_CONTRIB = "#势力贡献"
 CMD_FACTION_SALARY = "#势力俸禄"
 CMD_FACTION_STATUS = "#势力状态"
+# W8-A1：诸天遗珍
+CMD_RELIC = "#我的遗珍"
+CMD_RELIC_BAG = "#遗珍背包"
+CMD_RELIC_ATLAS = "#遗珍图鉴"
+CMD_RELIC_FRAG = "#遗珍碎片"
+CMD_RELIC_SALVAGE = "#分解遗珍"
+CMD_RELIC_SALVAGE_OK = "#确认分解遗珍"
+CMD_RELIC_SALVAGE_NO = "#取消分解遗珍"
+CMD_RELIC_SYNTH = "#合成遗珍"
+CMD_RELIC_ENGRAVE = "#铭刻遗珍"
+CMD_RELIC_REMOVE = "#卸下遗珍"
+CMD_RELIC_EXPAND = "#拓展遗珍槽"
+CMD_RELIC_GRANT = "#发放遗珍"
+# W8-A2：众生仙钓 + 鱼王
+CMD_FISH_BAIT = "#众生仙饵"
+CMD_FISH_SIGN = "#垂纶"
+CMD_FISH_CAST = "#垂钓"
+CMD_FISH_ATLAS = "#众生鱼图鉴"
+CMD_FISH_CLAIM = "#领取鱼谱奖励"
+CMD_FISH_TIDE = "#万界潮汐"
+CMD_FISH_EVENT = "#垂钓奇遇"
+CMD_FISH_EXCHANGE = "#愿鳞兑换"
+CMD_FK_LIST = "#鱼王列表"
+CMD_FK_STATUS = "#鱼王状态"
+CMD_FK_RANK = "#鱼王榜"
+CMD_FK_JOIN = "#加入鱼王讨伐"
+CMD_FK_LEAVE = "#退出鱼王讨伐"
+CMD_FK_FIGHT = "#讨伐鱼王"
+CMD_FK_CHEST = "#打开鱼王宝箱"
+# W8-A3：舟出海
+CMD_BOAT_BUILD = "#造舟"
+CMD_BOAT_SHED = "#舟仓"
+CMD_BOAT_SAIL = "#出海"
+CMD_SEA_ATLAS = "#海域见闻"
+CMD_SEA_CLAIM = "#领取见闻奖励"
+# W8-A4：轮回路与遗落纳戒
+CMD_REIN_TAKE = "#执掌轮回路"
+CMD_REIN_RELEASE = "#放弃执掌轮回路"
+CMD_REIN_STATUS = "#轮回路状态"
+CMD_REIN_TOGGLE = "#轮回往生输出切换"
+CMD_REIN_DROPS = "#遗落纳戒列表"
+CMD_REIN_NEAR = "#附近纳戒"
+CMD_REIN_LOOK = "#查询纳戒"
+CMD_REIN_PICK = "#捡取纳戒"
+CMD_REIN_FORCE = "#强闯轮回路"
 # W7-4：养成深度（灵根觉醒 / 寿元救援 / 帝兵铭文 / 职业产线 / 道法卡）
 CMD_LG_AWAKEN = "#灵根觉醒"
 CMD_RESCUE = "#轮回救人"
@@ -640,6 +685,7 @@ class ZhutianPlugin(Star):
         resolved = lifespan.resolve_if_due(doc, now)   # W7-4：24h 救援窗口到期 → 转世
         if resolved:
             await self.db.save_player(doc.model_dump())
+            await self._drop_legacy_ring(doc, now)     # W8-A4：转世留下遗落纳戒
             return None, resolved
         return doc, None
 
@@ -9607,6 +9653,955 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         yield event.plain_result(faction.status_text(await self._faction_state(), doc.uid))
+
+    # ---- W8-A1：诸天遗珍（原版 RelicSystem.js 329 + model/relicSystem.js 408） ----
+
+    @filter.command(CMD_RELIC, alias={"#诸天遗珍"})
+    async def handle_relic(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, relic_mod.panel(doc), "诸天遗珍"):
+            yield r
+
+    @filter.command(CMD_RELIC_BAG, "遗珍背包")
+    async def handle_relic_bag(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, relic_mod.bag_text(doc), "遗珍背包"):
+            yield r
+
+    @filter.command(CMD_RELIC_ATLAS, "遗珍图鉴")
+    async def handle_relic_atlas(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, relic_mod.atlas_text(doc), "遗珍图鉴"):
+            yield r
+
+    @filter.command(CMD_RELIC_FRAG, "遗珍碎片")
+    async def handle_relic_frag(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, relic_mod.fragments_text(doc), "遗珍碎片"):
+            yield r
+
+    @filter.command(CMD_RELIC_SALVAGE, "分解遗珍")
+    async def handle_relic_salvage(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        parts = (arg or "").replace("*", " ").split()
+        if not parts:
+            yield event.plain_result(
+                f"用法：{CMD_RELIC_SALVAGE} 编号（单件）或 {CMD_RELIC_SALVAGE} 凡耀（批量）")
+            return
+        try:
+            ids = relic_mod.select_for_salvage(relic_mod.state_of(doc), parts[0])
+            _st, picked, frag = relic_mod.salvage(relic_mod.state_of(doc), ids)
+        except ValueError as exc:
+            yield event.plain_result(str(exc))
+            return
+        token = f"{int(time.time() * 1000) % 100000000:08x}"
+        d = doc.model_copy(deep=True)
+        d.ext["relic_pending"] = {"token": token, "ids": ids,
+                                  "exp": time.time() + relic_mod.PENDING_TTL}
+        await self.db.save_player(d.model_dump())
+        lines = ["【遗珍分解预览】"]
+        lines += [relic_mod.line(r) for r in picked[:10]]
+        if len(picked) > 10:
+            lines.append(f"另有 {len(picked) - 10} 件同品质遗珍。")
+        lines.append(f"共 {len(picked)} 件，可得碎片 {frag}（现有 {relic_mod.state_of(doc)['fragments']}）。")
+        lines.append("已铭刻的遗珍不参与分解；确认后永久消耗以上选中项。")
+        lines.append(f"{relic_mod.PENDING_TTL} 秒内发送：{CMD_RELIC_SALVAGE_OK} {token}")
+        lines.append(f"取消：{CMD_RELIC_SALVAGE_NO}")
+        async for r in self._smart(event, "\n".join(lines), "遗珍分解预览"):
+            yield r
+
+    @filter.command(CMD_RELIC_SALVAGE_OK, "确认分解遗珍")
+    async def handle_relic_salvage_ok(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        token = (arg or "").replace("*", " ").strip().split()[0] if (arg or "").strip() else ""
+        pending = doc.ext.get("relic_pending")
+        if not isinstance(pending, dict):
+            yield event.plain_result("没有待确认的分解预览，请先 #分解遗珍。")
+            return
+        if str(pending.get("token")) != token:
+            yield event.plain_result("确认令牌不对，请使用预览里给出的那一串。")
+            return
+        if time.time() > float(pending.get("exp") or 0):
+            d = doc.model_copy(deep=True)
+            d.ext.pop("relic_pending", None)
+            await self.db.save_player(d.model_dump())
+            yield event.plain_result("分解预览已过期（120 秒），请重新 #分解遗珍。")
+            return
+        st = relic_mod.state_of(doc)
+        try:
+            st2, picked, frag = relic_mod.salvage(st, list(pending.get("ids") or []))
+        except ValueError as exc:
+            d = doc.model_copy(deep=True)
+            d.ext.pop("relic_pending", None)
+            await self.db.save_player(d.model_dump())
+            yield event.plain_result(f"{exc}；本次未分解，请重新预览。")
+            return
+        d = doc.model_copy(deep=True)
+        relic_mod.set_state(d, st2)
+        d.ext.pop("relic_pending", None)
+        await self.db.save_player(d.model_dump())
+        async for r in self._smart(
+                event,
+                f"已分解 {len(picked)} 件遗珍，获得碎片 {frag}，现有 {st2['fragments']}。\n"
+                f"背包：{len(st2['bag'])}/{relic_mod.BAG_MAX}，编号已更新（#遗珍背包）。",
+                "遗珍分解"):
+            yield r
+
+    @filter.command(CMD_RELIC_SALVAGE_NO, "取消分解遗珍")
+    async def handle_relic_salvage_no(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        d = doc.model_copy(deep=True)
+        d.ext.pop("relic_pending", None)
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result("已取消遗珍分解预览。")
+
+    @filter.command(CMD_RELIC_SYNTH, "合成遗珍")
+    async def handle_relic_synth(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        parts = (arg or "").replace("*", " ").split()
+        if len(parts) < 2:
+            yield event.plain_result(f"用法：{CMD_RELIC_SYNTH} 套装 品质 [数量]，套装：{'、'.join(relic_mod.SETS)}")
+            return
+        count = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 1
+        try:
+            st, relics, cost = relic_mod.synthesize(
+                relic_mod.state_of(doc), parts[0], parts[1], count,
+                random.Random(f"{doc.uid}:relic:{time.time_ns()}"))
+        except ValueError as exc:
+            yield event.plain_result(str(exc))
+            return
+        d = doc.model_copy(deep=True)
+        relic_mod.set_state(d, st)
+        await self.db.save_player(d.model_dump())
+        start = len(st["bag"]) - len(relics) + 1
+        span = f"{start}~{len(st['bag'])}" if len(relics) > 1 else str(start)
+        async for r in self._smart(
+                event,
+                f"已合成【{parts[1]}·{parts[0]}】遗珍 {len(relics)} 件，消耗碎片 {cost}，剩余 {st['fragments']}。\n"
+                f"背包编号：{span}（副词条随机）。铭刻：{CMD_RELIC_ENGRAVE} 编号 武器",
+                "合成遗珍"):
+            yield r
+
+    @filter.command(CMD_RELIC_ENGRAVE, "铭刻遗珍")
+    async def handle_relic_engrave(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        parts = (arg or "").replace("*", " ").split()
+        if len(parts) < 2:
+            yield event.plain_result(f"用法：{CMD_RELIC_ENGRAVE} 编号 武器/护具/法宝 [1/2]")
+            return
+        slot = int(parts[2]) if len(parts) > 2 and parts[2] in ("1", "2") else 1
+        try:
+            st, relic, replaced = relic_mod.engrave(
+                relic_mod.state_of(doc), int(parts[0]), parts[1], slot)
+        except (ValueError, TypeError) as exc:
+            yield event.plain_result(str(exc))
+            return
+        d = doc.model_copy(deep=True)
+        relic_mod.set_state(d, st)
+        await self.db.save_player(d.model_dump())
+        tail = f"，原【{replaced['quality']}·{replaced['set']}】已放回背包" if replaced else ""
+        eff, reso = relic_mod.effects(st)
+        async for r in self._smart(
+                event,
+                f"已将【{relic['quality']}·{relic['set']}】铭刻至{parts[1]}第 {slot} 位{tail}。\n"
+                f"道韵共鸣：{'、'.join(reso) or '无'}\n"
+                f"遗珍总效：{'、'.join(f'{k}+{v:.1%}' for k, v in eff.items()) or '无'}",
+                "铭刻遗珍"):
+            yield r
+
+    @filter.command(CMD_RELIC_REMOVE, "卸下遗珍")
+    async def handle_relic_remove(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        parts = (arg or "").replace("*", " ").split()
+        if not parts:
+            yield event.plain_result(f"用法：{CMD_RELIC_REMOVE} 武器/护具/法宝 [1/2]")
+            return
+        slot = int(parts[1]) if len(parts) > 1 and parts[1] in ("1", "2") else 1
+        try:
+            st, relic = relic_mod.unequip(relic_mod.state_of(doc), parts[0], slot)
+        except ValueError as exc:
+            yield event.plain_result(str(exc))
+            return
+        d = doc.model_copy(deep=True)
+        relic_mod.set_state(d, st)
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result(
+            f"已卸下【{relic['quality']}·{relic['set']}】，遗珍放回背包。")
+
+    @filter.command(CMD_RELIC_EXPAND, "拓展遗珍槽")
+    async def handle_relic_expand(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        part = (arg or "").replace("*", " ").strip().split()[0] if (arg or "").strip() else ""
+        if part not in relic_mod.PARTS:
+            yield event.plain_result(f"用法：{CMD_RELIC_EXPAND} 武器/护具/法宝（需 1 个{relic_mod.EXPANSION_ITEM}）")
+            return
+        try:
+            st = relic_mod.expand(relic_mod.state_of(doc), part)
+        except ValueError as exc:
+            yield event.plain_result(str(exc))
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        if int(inv.get(relic_mod.EXPANSION_ITEM, 0) or 0) < 1:
+            yield event.plain_result(f"纳戒里没有【{relic_mod.EXPANSION_ITEM}】。")
+            return
+        async with self.db.transaction():
+            await self.db.remove_item(doc.uid, relic_mod.EXPANSION_ITEM, 1)
+            d = doc.model_copy(deep=True)
+            relic_mod.set_state(d, st)
+            await self.db.save_player(d.model_dump())
+        yield event.plain_result(f"【{relic_mod.EXPANSION_ITEM}】化入器身，{part}的第二铭刻位已开启。")
+
+    @filter.command(CMD_RELIC_GRANT, "发放遗珍")
+    async def handle_relic_grant(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        if not event.is_admin:
+            yield event.plain_result("发放遗珍是管理员指令。")
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        parts = (arg or "").replace("*", " ").split()
+        if len(parts) < 2:
+            yield event.plain_result(
+                f"用法：{CMD_RELIC_GRANT} 品质 套装 [数量]，品质：{'、'.join(relic_mod.QUALITIES)}")
+            return
+        count = max(1, min(20, int(parts[2]))) if len(parts) > 2 and parts[2].isdigit() else 1
+        if parts[0] not in relic_mod.QUALITIES or parts[1] not in relic_mod.SETS:
+            yield event.plain_result("品质或套装名不对，先用 #遗珍图鉴 看清单。")
+            return
+        rng = random.Random(f"{doc.uid}:grant:{time.time_ns()}")
+        st = relic_mod.state_of(doc)
+        try:
+            for _ in range(count):
+                st = relic_mod.add(st, relic_mod.create(parts[0], parts[1], rng))
+        except ValueError as exc:
+            yield event.plain_result(str(exc))
+            return
+        d = doc.model_copy(deep=True)
+        relic_mod.set_state(d, st)
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result(
+            f"已发放【{parts[0]}·{parts[1]}】遗珍 ×{count}，背包 {len(st['bag'])}/{relic_mod.BAG_MAX}。")
+
+    # ---- W8-A2：众生仙钓 + 鱼王（原版 ImmortalFishing 469 + FishKing 614） ----
+
+    async def _fish_plane(self, doc: PlayerDoc) -> str:
+        """当前位面若不在鱼表内（高维位面等），退回凡间。"""
+        try:
+            cur = str(plane.state_of(doc).get("current") or "")
+        except Exception:
+            cur = ""
+        return cur if cur in fish_mod.planes() else fish_mod.planes()[0]
+
+    async def _fk_context(self, plane: str) -> tuple[dict, float]:
+        state = calamity.ensure(await self.db.get_calamity())
+        avg = float((await self._calamity_avg()).get("hp") or 15000)
+        return state, avg
+
+    @filter.command(CMD_FISH_BAIT, "众生仙饵")
+    async def handle_fish_bait(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        lines = [f"【众生仙饵】共 {len(fish_mod.baits())} 种，垂钓时带上可改钓获"]
+        for name in fish_mod.baits():
+            cfg = fish_mod.bait_config(name) or {}
+            pool = "、".join(str(r.get("name")) for r in (cfg.get("rewards") or [])[:4])
+            lines.append(f"{name}｜{cfg.get('effect') or ''}")
+            lines.append(f"　可钓：{pool}…")
+        lines.append(f"钓竿：{fish_mod.ROD_ITEM}（#垂纶 每日领取）｜兑换：{CMD_FISH_EXCHANGE}")
+        lines.append(f"下竿：{CMD_FISH_CAST} [仙饵]（40 分钟一次，气血需 ≥{fish_mod.HP_MIN}）")
+        async for r in self._smart(event, "\n".join(lines), "众生仙饵"):
+            yield r
+
+    @filter.command(CMD_FISH_SIGN, alias={"#仙钓签到", "#垂钓签到"})
+    async def handle_fish_sign(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, items, _streak = fish_mod.sign(
+            doc, time.time(), random.Random(f"{doc.uid}:fishsign:{int(time.time()) // 86400}"))
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            await self.db.add_items(doc.uid, items)
+        async for r in self._smart(event, msg, "垂纶签到"):
+            yield r
+
+    @filter.command(CMD_FISH_CAST, alias={"#垂钓众生"})
+    async def handle_fish_cast(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        now = time.time()
+        bait = (arg or "").replace("*", " ").strip().split()
+        bait = bait[0] if bait else ""
+        if bait and not fish_mod.bait_config(bait):
+            yield event.plain_result(f"未知仙饵【{bait}】，发 {CMD_FISH_BAIT} 查看可用仙饵。")
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        if int(inv.get(fish_mod.ROD_ITEM, 0) or 0) < 1:
+            yield event.plain_result(f"无【{fish_mod.ROD_ITEM}】也敢窥探轮回？先发 {CMD_FISH_SIGN} 领一根。")
+            return
+        if bait and int(inv.get(bait, 0) or 0) < 1:
+            yield event.plain_result(f"纳戒中没有【{bait}】。")
+            return
+        hp_cur, _hp_max = self._hp_pair(doc)
+        if hp_cur < fish_mod.HP_MIN:
+            yield event.plain_result(f"气血不足 {fish_mod.HP_MIN}，道伤未愈不可强提真元。")
+            return
+        lamp = int(inv.get(fish_mod.LAMP_ITEM, 0) or 0) > 0
+        left = fish_mod.cooldown_left(doc, now, lamp=lamp, daofa=daofa.active(doc, now))
+        if left > 0:
+            yield event.plain_result(f"界潮未平，还需 {left // 60} 分 {left % 60} 秒方可再钓。")
+            return
+        world_year = int((await self._era_state()).get("years_total") or 0)
+        good, msg, items, _res = fish_mod.do_cast(
+            doc, now, world_year, await self._fish_plane(doc), bait or None,
+            random.Random(f"{doc.uid}:fish:{time.time_ns()}"))
+        if not good:
+            yield event.plain_result(msg)
+            return
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            if bait:
+                await self.db.remove_item(doc.uid, bait, 1)
+            await self.db.add_items(doc.uid, items)
+        async for r in self._smart(event, msg, "垂钓众生"):
+            yield r
+
+    @filter.command(CMD_FISH_ATLAS, "众生鱼图鉴")
+    async def handle_fish_atlas(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        query = (arg or "").replace("*", " ").strip()
+        if query in ("全部", "总览", "all"):
+            text = fish_mod.atlas_all(doc)
+        else:
+            name = query if query in fish_mod.planes() else await self._fish_plane(doc)
+            text = fish_mod.atlas_text(doc, name)
+        async for r in self._smart(event, text, "众生鱼图鉴"):
+            yield r
+
+    @filter.command(CMD_FISH_CLAIM, alias={"#领取鱼图鉴奖励"})
+    async def handle_fish_claim(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, items = fish_mod.claim_atlas(doc)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            await self.db.add_items(doc.uid, items)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_FISH_TIDE, "万界潮汐")
+    async def handle_fish_tide(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        world_year = int((await self._era_state()).get("years_total") or 0)
+        async for r in self._smart(event, fish_mod.tide_text(world_year), "万界潮汐"):
+            yield r
+
+    @filter.command(CMD_FISH_EVENT, "垂钓奇遇")
+    async def handle_fish_event(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        choice = (arg or "").replace("*", " ").strip()
+        if not choice:
+            yield event.plain_result(fish_mod.event_text(doc, time.time()))
+            return
+        if not choice.isdigit():
+            yield event.plain_result("用法：#垂钓奇遇 1/2/3")
+            return
+        ok, msg, items, stones = fish_mod.choose_event(doc, int(choice), time.time())
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        async with self.db.transaction():
+            if stones:
+                doc.stones += stones
+            await self.db.save_player(doc.model_dump())
+            if items:
+                await self.db.add_items(doc.uid, items)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_FISH_EXCHANGE, "愿鳞兑换")
+    async def handle_fish_exchange(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        parts = (arg or "").replace("＊", "*").replace("*", " ").split()
+        if not parts:
+            async for r in self._smart(event, fish_mod.wish_text(), "愿鳞兑换"):
+                yield r
+            return
+        cfg = fish_mod.wish_cost(parts[0])
+        if not cfg:
+            yield event.plain_result(f"愿鳞兑换单里没有「{parts[0]}」。")
+            return
+        qty = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 1
+        cost, _reward = cfg
+        need = cost * max(1, qty)
+        inv = await self.db.get_inventory(doc.uid)
+        have = int(inv.get(fish_mod.SCALE_ITEM, 0) or 0)
+        if have < need:
+            yield event.plain_result(f"{fish_mod.SCALE_ITEM}不足：需 {need}，现有 {have}。")
+            return
+        ok, msg, items = fish_mod.exchange(doc, parts[0], qty)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        async with self.db.transaction():
+            await self.db.remove_item(doc.uid, fish_mod.SCALE_ITEM, need)
+            await self.db.add_items(doc.uid, items)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_FK_LIST, "鱼王列表")
+    async def handle_fk_list(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        state, avg = await self._fk_context("")
+        async for r in self._smart(event, fish_mod.fk_list(state, avg), "鱼王列表"):
+            yield r
+
+    @filter.command(CMD_FK_STATUS, "鱼王状态")
+    async def handle_fk_status(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        name = await self._fk_pick(None, arg)
+        if not name:
+            yield event.plain_result(f"用法：{CMD_FK_STATUS} 编号（#鱼王列表 看编号）")
+            return
+        state, avg = await self._fk_context(name)
+        async for r in self._smart(event, fish_mod.fk_status(state, name, avg), "鱼王状态"):
+            yield r
+
+    async def _fk_pick(self, doc: PlayerDoc | None, arg: str) -> str | None:
+        """编号（1 起）→ 位面名；也接受位面名本身。"""
+        raw = (arg or "").replace("*", " ").strip().split()
+        if not raw:
+            return None
+        token = raw[0]
+        if token in fish_mod.planes():
+            return token
+        if token.isdigit():
+            idx = int(token) - 1
+            pool = fish_mod.planes()
+            if 0 <= idx < len(pool):
+                return pool[idx]
+        return None
+
+    @filter.command(CMD_FK_RANK, "鱼王榜")
+    async def handle_fk_rank(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        name = await self._fk_pick(None, arg)
+        if not name:
+            yield event.plain_result(f"用法：{CMD_FK_RANK} 编号")
+            return
+        state, avg = await self._fk_context(name)
+        async for r in self._smart(event, fish_mod.fk_rank(state, name, avg), "鱼王榜"):
+            yield r
+
+    @filter.command(CMD_FK_JOIN, "加入鱼王讨伐")
+    async def handle_fk_join(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        name = await self._fk_pick(doc, arg)
+        if not name:
+            yield event.plain_result(f"用法：{CMD_FK_JOIN} 编号（#鱼王列表）")
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        if int(inv.get(fish_mod.ROD_ITEM, 0) or 0) < 1:
+            yield event.plain_result(f"需持【{fish_mod.ROD_ITEM}】方可参与讨伐。")
+            return
+        async with self.db.transaction():
+            state = calamity.ensure(await self.db.get_calamity())
+            avg = float((await self._calamity_avg()).get("hp") or 15000)
+            ok, msg = fish_mod.fk_join(state, name, doc.uid, avg)
+            if ok:
+                await self.db.save_calamity(state)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_FK_LEAVE, "退出鱼王讨伐")
+    async def handle_fk_leave(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        name = await self._fk_pick(doc, arg)
+        if not name:
+            yield event.plain_result(f"用法：{CMD_FK_LEAVE} 编号")
+            return
+        async with self.db.transaction():
+            state = calamity.ensure(await self.db.get_calamity())
+            avg = float((await self._calamity_avg()).get("hp") or 15000)
+            row = fish_mod.fk_row(state, name, avg)
+            joined = [u for u in (row.get("joined") or []) if u != doc.uid]
+            row["joined"] = joined
+            fish_mod.fk_put(state, row)
+            await self.db.save_calamity(state)
+        yield event.plain_result(f"已退出【{name}】讨伐（余 {len(joined)} 人）。")
+
+    @filter.command(CMD_FK_FIGHT, "讨伐鱼王")
+    async def handle_fk_fight(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        name = await self._fk_pick(doc, arg)
+        if not name:
+            yield event.plain_result(f"用法：{CMD_FK_FIGHT} 编号（先 #加入鱼王讨伐）")
+            return
+        atk = int(self._stats(doc).atk)
+        async with self.db.transaction():
+            state = calamity.ensure(await self.db.get_calamity())
+            avg = float((await self._calamity_avg()).get("hp") or 15000)
+            ok, msg, dmg, killed = fish_mod.fk_strike(
+                state, name, doc.uid, atk,
+                random.Random(f"{doc.uid}:fk:{time.time_ns()}"), avg)
+            if ok:
+                await self.db.save_calamity(state)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_FK_CHEST, "打开鱼王宝箱")
+    async def handle_fk_chest(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        name = await self._fk_pick(doc, arg)
+        if not name:
+            yield event.plain_result(f"用法：{CMD_FK_CHEST} 编号")
+            return
+        async with self.db.transaction():
+            state = calamity.ensure(await self.db.get_calamity())
+            avg = float((await self._calamity_avg()).get("hp") or 15000)
+            ok, msg, items, relic = fish_mod.fk_open(
+                state, name, doc.uid, random.Random(f"{doc.uid}:fkbox:{time.time_ns()}"), avg)
+            if not ok:
+                yield event.plain_result(msg)
+                return
+            await self.db.save_calamity(state)
+            await self.db.add_items(doc.uid, items)
+            if relic:
+                try:
+                    st = relic_mod.add(relic_mod.state_of(doc), relic)
+                    relic_mod.set_state(doc, st)
+                except ValueError:
+                    pass
+            await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, msg, "鱼王宝箱"):
+            yield r
+
+    # ---- W8-A3：舟出海（原版 SeaVoyage.js 650 + model/seaVoyage.js 363） ----
+
+    async def _voyage_settle(self, doc: PlayerDoc, now: float) -> tuple[bool, str]:
+        """回港惰性结算；到点才落库（读指令不白写盘）。"""
+        world_year = int((await self._era_state()).get("years_total") or 0)
+        ok, msg, items, _event = voyage_mod.settle(
+            doc, now, world_year, random.Random(f"{doc.uid}:sea:{int(now)}"))
+        if not ok:
+            return False, msg
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            if items:
+                await self.db.add_items(doc.uid, items)
+        return True, msg
+
+    @filter.command(CMD_BOAT_BUILD, "造舟")
+    async def handle_boat_build(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        ok, msg, need = voyage_mod.build(doc, inv)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            for name, qty in need.items():
+                await self.db.remove_item(doc.uid, name, qty)
+        async for r in self._smart(event, msg, "造舟"):
+            yield r
+
+    @filter.command(CMD_BOAT_SHED, "舟仓")
+    async def handle_boat_shed(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = await self._voyage_settle(doc, time.time())
+        text = (msg + "\n\n" if ok else "") + voyage_mod.shed_text(doc)
+        async for r in self._smart(event, text, "舟仓"):
+            yield r
+
+    @filter.command(CMD_BOAT_SAIL, "出海")
+    async def handle_boat_sail(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        now = time.time()
+        parts = (arg or "").replace("*", " ").split()
+        if parts and parts[0] in ("事件", "决策"):
+            choice = parts[1] if len(parts) > 1 and parts[1].isdigit() else "0"
+            ok, msg, items = voyage_mod.choose_event(
+                doc, now, int(choice), random.Random(f"{doc.uid}:seaev:{time.time_ns()}"))
+            if ok:
+                async with self.db.transaction():
+                    await self.db.save_player(doc.model_dump())
+                    if items:
+                        await self.db.add_items(doc.uid, items)
+            yield event.plain_result(msg)
+            return
+        if not parts:
+            ok, msg = await self._voyage_settle(doc, now)
+            pending = voyage_mod.event_pending(doc, now)
+            lines = [msg] if ok else []
+            if pending:
+                lines.append(voyage_mod.event_text(doc, now))
+            lines.append("--- 航线 ---")
+            for name, cfg in voyage_mod.ROUTES.items():
+                lines.append(f"{name}｜{'、'.join(cfg['planes'])}｜特产 {cfg['bait']}")
+            lines.append(f"出海：{CMD_BOAT_SAIL} 航线（每日 {voyage_mod.DAILY_LIMIT} 趟，"
+                         f"每趟 {voyage_mod.VOYAGE_MINUTES} 分钟）")
+            async for r in self._smart(event, "\n".join(lines), "出海"):
+                yield r
+            return
+        route = parts[0]
+        use_bait = parts[1] if len(parts) > 1 and fish_mod.bait_config(parts[1]) else None
+        inv = await self.db.get_inventory(doc.uid)
+        ok, msg, cost = voyage_mod.start(doc, route, now, inv, use_bait)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            for name, qty in cost.items():
+                await self.db.remove_item(doc.uid, name, qty)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_SEA_ATLAS, "海域见闻")
+    async def handle_sea_atlas(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, voyage_mod.atlas_text(doc), "海域见闻"):
+            yield r
+
+    @filter.command(CMD_SEA_CLAIM, "领取见闻奖励")
+    async def handle_sea_claim(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, items = voyage_mod.claim_atlas(doc)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            await self.db.add_items(doc.uid, items)
+        yield event.plain_result(msg)
+
+    # ---- W8-A4：轮回路与遗落纳戒（原版 ZhuanshiTask 2278 + lunhui 458） ----
+
+    async def _drop_legacy_ring(self, doc: PlayerDoc, now: float) -> None:
+        """转世时按纳戒生成遗落纳戒（输出为「归虚」时不生成）。"""
+        try:
+            st = plane.state_of(doc)
+            inv = await self.db.get_inventory(doc.uid)
+            stones = int(max(0, int(doc.stones)) * rein_mod.DROP_STONE_RATE)
+            async with self.db.transaction():
+                world = calamity.ensure(await self.db.get_calamity())
+                row = rein_mod.make_drop(world, doc, str(st.get("current") or ""),
+                                         st.get("coords"), stones, inv, now)
+                if row:
+                    await self.db.save_calamity(world)
+        except Exception:
+            pass
+
+    @filter.command(CMD_REIN_TAKE, "执掌轮回路")
+    async def handle_rein_take(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async with self.db.transaction():
+            world = calamity.ensure(await self.db.get_calamity())
+            ok, msg = rein_mod.take(world, doc, time.time())
+            if ok:
+                await self.db.save_calamity(world)
+        async for r in self._smart(event, msg, "执掌轮回路"):
+            yield r
+
+    @filter.command(CMD_REIN_RELEASE, "放弃执掌轮回路")
+    async def handle_rein_release(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async with self.db.transaction():
+            world = calamity.ensure(await self.db.get_calamity())
+            ok, msg = rein_mod.release(world, doc)
+            if ok:
+                await self.db.save_calamity(world)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_REIN_STATUS, "轮回路状态")
+    async def handle_rein_status(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        world = calamity.ensure(await self.db.get_calamity())
+        async for r in self._smart(event, rein_mod.status_text(world), "轮回路状态"):
+            yield r
+
+    @filter.command(CMD_REIN_TOGGLE, "轮回往生输出切换")
+    async def handle_rein_toggle(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async with self.db.transaction():
+            world = calamity.ensure(await self.db.get_calamity())
+            ok, msg = rein_mod.toggle(world, doc)
+            if ok:
+                await self.db.save_calamity(world)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_REIN_DROPS, "遗落纳戒列表")
+    async def handle_rein_drops(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        world = calamity.ensure(await self.db.get_calamity())
+        async for r in self._smart(event, rein_mod.list_text(world, None, time.time()), "遗落纳戒"):
+            yield r
+
+    @filter.command(CMD_REIN_NEAR, "附近纳戒")
+    async def handle_rein_near(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        here = str(plane.state_of(doc).get("current") or "")
+        world = calamity.ensure(await self.db.get_calamity())
+        async for r in self._smart(event, rein_mod.list_text(world, here, time.time()), "附近纳戒"):
+            yield r
+
+    @filter.command(CMD_REIN_LOOK, "查询纳戒")
+    async def handle_rein_look(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        ref = (arg or "").replace("*", " ").strip().split()
+        if not ref:
+            yield event.plain_result(f"用法：{CMD_REIN_LOOK} 编号或序号")
+            return
+        world = calamity.ensure(await self.db.get_calamity())
+        row = rein_mod.pick(world, ref[0], time.time())
+        if not row:
+            yield event.plain_result("没有这枚遗落纳戒（可能已消散或被捡走）。")
+            return
+        async for r in self._smart(event, rein_mod.detail_text(row, time.time()), "查询纳戒"):
+            yield r
+
+    async def _rein_claim(self, event: AstrMessageEvent, row: dict):
+        """把纳戒里的东西并给玩家并落库（异步生成器，便于 yield 回执）。"""
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async with self.db.transaction():
+            world = calamity.ensure(await self.db.get_calamity())
+            ok, msg, stones, items = rein_mod.claim(world, row, time.time())
+            if ok:
+                await self.db.save_calamity(world)
+                if stones:
+                    doc.stones += int(stones)
+                await self.db.save_player(doc.model_dump())
+                if items:
+                    await self.db.add_items(doc.uid, items)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        async for r in self._smart(event, msg, "拾取纳戒"):
+            yield r
+
+    @filter.command(CMD_REIN_PICK, "捡取纳戒")
+    async def handle_rein_pick(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        ref = (arg or "").replace("*", " ").strip().split()
+        if not ref:
+            yield event.plain_result(f"用法：{CMD_REIN_PICK} 编号或序号")
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        world = calamity.ensure(await self.db.get_calamity())
+        ctrl = rein_mod.controller_of(world)
+        if ctrl and str(ctrl.get("uid")) != doc.uid:
+            yield event.plain_result(
+                f"轮回路在【{ctrl.get('name')}】手中，直接捡会被拦下——改发 {CMD_REIN_FORCE} 编号。")
+            return
+        row = rein_mod.pick(world, ref[0], time.time())
+        if not row:
+            yield event.plain_result("没有这枚遗落纳戒（可能已消散或被捡走）。")
+            return
+        async for _r in self._rein_claim(event, row):
+            yield _r
+
+    @filter.command(CMD_REIN_FORCE, "强闯轮回路")
+    async def handle_rein_force(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        ref = (arg or "").replace("*", " ").strip().split()
+        if not ref:
+            yield event.plain_result(f"用法：{CMD_REIN_FORCE} 编号或序号")
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        world = calamity.ensure(await self.db.get_calamity())
+        ctrl = rein_mod.controller_of(world)
+        if not ctrl:
+            yield event.plain_result("轮回路无人执掌，直接 #捡取纳戒 即可。")
+            return
+        if str(ctrl.get("uid")) == doc.uid:
+            yield event.plain_result("轮回路就在你手里。")
+            return
+        row = rein_mod.pick(world, ref[0], time.time())
+        if not row:
+            yield event.plain_result("没有这枚遗落纳戒。")
+            return
+        chance = rein_mod.force_chance(ctrl, doc)
+        if random.Random(f"{doc.uid}:force:{time.time_ns()}").random() >= chance:
+            hp_cur, _hp_max = self._hp_pair(doc)
+            loss = max(1, int(hp_cur * 0.2))
+            d = doc.model_copy(deep=True)
+            d.ext["hp"] = max(1, hp_cur - loss)
+            await self.db.save_player(d.model_dump())
+            yield event.plain_result(
+                f"【强闯失败】{ctrl.get('name')}的权柄压下，你被轮回之力反噬，气血 -{loss:,}"
+                f"（成功率 {chance:.0%}）。")
+            return
+        yield event.plain_result(f"【强闯成功】你自{ctrl.get('name')}掌中撕开一线缺口（成功率 {chance:.0%}）。")
+        async for _r in self._rein_claim(event, row):
+            yield _r
 
     # ---- W7-4：养成深度（灵根觉醒 / 寿元救援 / 帝兵铭文 / 职业产线 / 道法卡） ----
 
