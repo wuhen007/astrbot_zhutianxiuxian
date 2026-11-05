@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, equipment, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, equipment, extras, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -77,6 +77,22 @@ CMD_FASHAN_GUARD_STOP = "#结束法身镇守永恒未知之地"
 CMD_GUARD = "#镇守永恒未知之地"
 CMD_GUARD_STOP = "#结束镇守永恒未知之地"
 CMD_GUARD_STATUS = "#永恒镇守状态"
+
+# W6-3：help.json 里「有文案无玩法」的指令，统一由 handle_extras 分发
+CMD_EXTRA_MAIN = "#基础帮助"
+EXTRA_ALIASES = {
+    "#修仙扩展", "#修仙管理", "#宗门管理", "#师徒帮助", "#小世界帮助",
+    "#职业帮助", "#诸天帮助", "#活动帮助", "#三周目帮助", "#无尽轮回帮助",
+    "#灵根帮助", "#查看日志", "#传音给作者",
+    "#命格图鉴", "#合成图鉴", "#兑换码图鉴", "#成就图鉴",
+    "#位面天骄图鉴", "#更新公告", "#公告网页",
+    "#练气境界", "#炼体境界", "#我的练气", "#查看时代",
+    "#修仙助手", "#打散雷劫",
+    "#天骄列表", "#天骄状态", "#讨伐天骄",
+    "#灵市帮助", "#副本掉落", "#去", "#探索仙府",
+    "#禁地", "#仙境", "#下界八域", "#九天十地",
+    "#镇守仙境", "#献祭魂与血",
+}
 CMD_LINGSHI = "#灵市"
 CMD_LS_BUY = "#买入"
 CMD_LS_SELL = "#卖出"
@@ -2672,6 +2688,33 @@ class ZhutianPlugin(Star):
         if ok:
             await self.db.save_player(doc.model_dump())
         yield event.plain_result(msg)
+
+    @filter.command(CMD_EXTRA_MAIN, alias=EXTRA_ALIASES)
+    async def handle_extras(self, event: AstrMessageEvent, arg: str = ""):
+        """W6-3：补齐 help.json 里有指令无玩法的条目（帮助页/图鉴/境界/天骄/副本）。"""
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        raw = (event.get_message_str() or "").strip()
+        cmd = raw.split()[0] if raw else CMD_EXTRA_MAIN
+        try:
+            text, changed, items = extras.dispatch(
+                cmd, doc, arg, self.content.table, self._help_groups(),
+                self._stats(doc), random.Random(f"{doc.uid}:extras:{time.time_ns()}"),
+                time.time())
+        except Exception as exc:
+            logger.error(f"[zhutian] extras {cmd} 失败: {exc}")
+            yield event.plain_result(f"指令处理失败：{exc}")
+            return
+        if changed:
+            async with self.db.transaction():
+                await self.db.save_player(doc.model_dump())
+                if items:
+                    await self.db.add_items(doc.uid, items)
+        yield event.plain_result(text)
 
     # ---- W6-2：法身四分支（时间长河 / 界海 / 圣墟 / 镇守） ----
 

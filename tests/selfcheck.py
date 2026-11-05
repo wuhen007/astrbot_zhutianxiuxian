@@ -3304,6 +3304,38 @@ async def main():
     assert fs.start_guard(fb, n6 + 7200, "self")[0]          # 结束后可手动重开
     print("fashan branches & guard ok")
 
+    # 20. W6-3 帮助/图鉴/境界/天骄/副本 补缺
+    from core import extras as ex
+    from types import SimpleNamespace
+
+    groups20 = [{"title": "基础修炼", "lines": [("#修仙签到", "每日签到")]},
+                {"title": "宗门", "lines": [("#创建宗门 名字", "创建")]}]
+    st20 = SimpleNamespace(atk=10 ** 9, defense=10 ** 9, hp=10 ** 9, bao=0.5)
+    d20 = PlayerDoc(uid="w6x", realm_index=10, physique_index=3, stones=100_000,
+                    exp=500_000, ext={"hp": 1000, "hp_max": 100_000, "base_hp": 100_000,
+                                      "spirit_fail_ts": n6})
+    c20 = store.table
+    def run20(cmd, arg="", now=n6):
+        return ex.dispatch(cmd, d20, arg, c20, groups20, st20, _random.Random(7), now)
+    assert "基础修炼" in run20("#基础帮助")[0]
+    assert "命格" in run20("#命格图鉴")[0]
+    assert "境界（共" in run20("#练气境界")[0]
+    assert "我的练气" in run20("#我的练气")[0]
+    assert "建议顺序" in run20("#修仙助手")[0]
+    assert run20("#打散雷劫")[1] and "spirit_fail_ts" not in d20.ext
+    assert "青冥剑子" in run20("#天骄列表")[0]
+    assert run20("#讨伐天骄", "青冥剑子")[1]
+    assert "青冥剑子" in (d20.ext.get("tianjiao_defeated") or [])
+    assert "禁地（" in run20("#禁地")[0]
+    first20 = c20("item/副本/禁地列表")[0]["name"]
+    assert "掉落" in run20("#副本掉落", first20)[0]
+    assert d20.ext.get("last_dungeon") == first20
+    assert first20 in run20("#去")[0]
+    assert run20("#镇守仙境")[1]
+    assert run20("#镇守仙境", now=n6 + 7200)[1] and d20.exp > 500_000
+    assert run20("#献祭魂与血")[1] and d20.ext["hp"] == 100_000
+    print("extras help/catalog/tianjiao/dungeon ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 
