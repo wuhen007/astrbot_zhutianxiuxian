@@ -478,6 +478,26 @@ def repay(state: dict, doc: PlayerDoc, amount: int | None = None) -> tuple[bool,
                   f"剩余本金 {loan['principal']:,}、利息 {loan['interest']:,}。")
 
 
+def portfolio(state: dict, doc: PlayerDoc) -> dict:
+    """榜单口径（原版 A:75-97）：净盈利 = 已实现 + 浮盈 - 消息支出 - 已付利息；
+    投入 = 累计买入 + 消息支出；收益率 = 净盈利 / 投入 ×100。
+    """
+    acc = account_of(doc)
+    value = cost = 0
+    for sid, h in acc["holdings"].items():
+        s = find_stock(state, sid)
+        price = int(s["price"]) if s and s.get("delistedAt") is None else 0
+        value += int(h["shares"]) * price
+        cost += int(h["cost"])
+    intel = int(acc.get("intelCost", 0) or 0)
+    finance = int(acc.get("financeCost", 0) or 0)
+    profit = int(acc["realized"]) + (value - cost) - intel - finance
+    invested = int(acc["invested"]) + intel
+    return {"name": doc.name or doc.uid[:8], "profit": profit, "invested": invested,
+            "rate": (profit / invested * 100) if invested > 0 else 0.0,
+            "value": value, "realized": int(acc["realized"])}
+
+
 def text(state: dict, doc: PlayerDoc | None = None) -> str:
     lines = ["--- 万界灵市 ---",
              f"行情时段：{'开市' if trading_open(state['slot']) else '休市（8 点后开市）'}"]

@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, dibing, equipment, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, equipment, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -66,6 +66,17 @@ CMD_FASHAN_EXPLORE = "#法身探索"
 CMD_FASHAN_ADDICT = "#法身沉迷"
 CMD_FASHAN_CLAIM = "#法身沉迷收获"
 CMD_FASHAN_HEAL = "#法身疗伤"
+CMD_FASHAN_RIVER = "#法身遨游时间长河"
+CMD_FASHAN_RIVER_ADDICT = "#法身沉迷时间长河"
+CMD_FASHAN_JIEHAI = "#法身探索界海"
+CMD_FASHAN_JIEHAI_ADDICT = "#法身沉迷界海"
+CMD_FASHAN_SHENGXU = "#法身探索圣墟"
+CMD_FASHAN_SHENGXU_ADDICT = "#法身沉迷圣墟"
+CMD_FASHAN_GUARD = "#法身镇守永恒未知之地"
+CMD_FASHAN_GUARD_STOP = "#结束法身镇守永恒未知之地"
+CMD_GUARD = "#镇守永恒未知之地"
+CMD_GUARD_STOP = "#结束镇守永恒未知之地"
+CMD_GUARD_STATUS = "#永恒镇守状态"
 CMD_LINGSHI = "#灵市"
 CMD_LS_BUY = "#买入"
 CMD_LS_SELL = "#卖出"
@@ -76,6 +87,7 @@ CMD_LS_CHAT = "#交谈"
 CMD_LS_LOAN = "#借款"
 CMD_LS_REPAY = "#还款"
 CMD_LS_RANK = "#灵市收益榜"
+CMD_LS_RANK_PROFIT = "#灵市排行榜"
 CMD_LS_PEOPLE = "#灵市人物"
 CMD_LS_AUDIT = "#灵市查账"
 CMD_LS_FOLLOWUP = "#灵市追问"
@@ -122,6 +134,9 @@ CMD_LINGGEN = "#灵根"
 CMD_LINGGEN_MY = "#我的灵根"
 CMD_TIANDAO = "#天道赐福"
 CMD_LOTTERY = "#每日抽奖"
+CMD_DAOFA_OPEN = "#开通道法仙术"
+CMD_DAOFA_GIFT = "#道法赐福"
+CMD_DAOFA_STATUS = "#道法仙术状态"
 CMD_TASK_GET = "#获取每日任务"
 CMD_TASK_MY = "#我的任务"
 CMD_TASK_SUBMIT = "#提交每日任务"
@@ -1203,8 +1218,11 @@ class ZhutianPlugin(Star):
         ok, msg, d = cultivate.sign_in(
             doc, int(self._val("SIGN_REWARD_MIN", 100)), int(self._val("SIGN_REWARD_MAX", 500)),
             time.time(), _random.Random(f"{doc.uid}:{int(time.time() // 86400)}"),
-            reward_mult=mingge.multiplier(doc, "签到奖励倍率"),     # 命格（W4-2）
+            reward_mult=mingge.multiplier(doc, "签到奖励倍率")
+            * (2 if daofa.active(doc, time.time()) else 1),     # 命格（W4-2）+ 道法仙术签到翻倍
         )
+        if daofa.active(doc, time.time()):
+            msg += "\n【道法仙术】签到奖励 ×2"
         if ok:
             lost, dead = lifespan.daily_decay(d, time.time())   # 寿元流逝（W2-2）
             if dead:
@@ -1226,7 +1244,8 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         ok, msg, d, items = blessing.tiandao_gift(
-            doc, time.time(), mingge.multiplier(doc, "签到奖励倍率"))
+            doc, time.time(), mingge.multiplier(doc, "签到奖励倍率"),
+            daofa=daofa.active(doc, time.time()))
         if ok:
             async with self.db.transaction():
                 await self.db.save_player(d.model_dump())
@@ -1240,7 +1259,8 @@ class ZhutianPlugin(Star):
             return
         import random as _random
         ok, msg, d, items = blessing.lottery(
-            doc, count, _random.Random(f"{doc.uid}:lottery:{time.time_ns()}"))
+            doc, count, _random.Random(f"{doc.uid}:lottery:{time.time_ns()}"),
+            per_draw=2 if daofa.active(doc, time.time()) else 1)
         if ok:
             async with self.db.transaction():
                 await self.db.save_player(d.model_dump())
@@ -1266,6 +1286,52 @@ class ZhutianPlugin(Star):
         m = _re.match(r"^#每日抽奖\*(\d+)$", (event.get_message_str() or "").strip())
         async for r in self._lottery_run(event, int(m.group(1)) if m else 1):
             yield r
+
+    @filter.command(CMD_DAOFA_OPEN)
+    async def handle_daofa_open(self, event: AstrMessageEvent):
+        """管理员开通/续期道法仙术 30 天（原版 AdminSuper.js:596）。"""
+        if not self._allowed(event):
+            return
+        if not event.is_admin:
+            yield event.plain_result("此权柄唯管理员可执。")
+            return
+        target, terr = await self._target_doc(event)
+        if terr:
+            yield event.plain_result(terr)
+            return
+        dt = target.model_copy(deep=True)
+        ok, msg = daofa.open_for(dt, time.time())
+        if ok:
+            await self.db.save_player(dt.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_DAOFA_GIFT)
+    async def handle_daofa_gift(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, d, items = daofa.gift(
+            doc, time.time(), mingge.multiplier(doc, "签到奖励倍率"))
+        if ok:
+            async with self.db.transaction():
+                await self.db.save_player(d.model_dump())
+                await self.db.add_items(doc.uid, items)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_DAOFA_STATUS)
+    async def handle_daofa_status(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        daofa.expire_if_needed(doc, time.time())
+        await self.db.save_player(doc.model_dump())
+        yield event.plain_result(daofa.status_text(doc, time.time()))
 
     @filter.command(CMD_CLOSED, "闭关修炼")
     async def handle_closed(self, event: AstrMessageEvent, minutes: str = ""):
@@ -2452,33 +2518,46 @@ class ZhutianPlugin(Star):
         g = await self._market()
         yield event.plain_result(market.debt_text(g, doc))
 
-    @filter.command(CMD_LS_RANK, "灵市收益榜")
-    async def handle_ls_rank(self, event: AstrMessageEvent):
-        if not self._allowed(event):
-            return
+    async def _market_rank(self, event, by_rate: bool):
+        """原版双榜：排行榜按净盈利，收益榜按收益率；投入门槛 10 万。"""
         g = await self._market()
+        from .core.player import PlayerDoc as _PD
         rows = []
         for uid in await self.db.all_player_uids():
             raw = await self.db.get_player(uid)
             if not raw:
                 continue
-            from .core.player import PlayerDoc as _PD
             d = _PD(**raw)
-            acc = market.account_of(d)
-            if not acc["holdings"] and not acc["realized"]:
+            if not d.ext.get("market"):
                 continue
-            value = sum(h["shares"] * (market.find_stock(g, sid)["price"]
-                                       if market.find_stock(g, sid) else 0)
-                        for sid, h in acc["holdings"].items())
-            rows.append((d.name or uid[:8], acc["realized"], value))
-        rows.sort(key=lambda x: x[1] + x[2], reverse=True)
+            p = market.portfolio(g, d)
+            if p["invested"] >= 100_000:
+                rows.append(p)
+        rows.sort(key=lambda x: (x["rate"], x["profit"]) if by_rate
+                  else (x["profit"], x["rate"]), reverse=True)
+        title = "灵市收益榜（收益率）" if by_rate else "灵市排行榜（净盈利）"
         if not rows:
-            yield event.plain_result("灵市还没有商人开户。#买入 即可上榜。")
+            yield event.plain_result(f"{title}：暂无累计投入 ≥10 万的商人。")
             return
-        lines = ["--- 灵市收益榜 ---"]
-        for i, (name, realized, value) in enumerate(rows[:10], 1):
-            lines.append(f"{i}. {name}：已实现 {realized:+,}｜持仓市值 {value:,}")
+        lines = [f"--- {title} ---"]
+        for i, p in enumerate(rows[:15], 1):
+            lines.append(f"{i}. {p['name']}：净盈利 {p['profit']:+,}"
+                         f"｜收益率 {p['rate']:+.2f}%｜投入 {p['invested']:,}")
         yield event.plain_result("\n".join(lines))
+
+    @filter.command(CMD_LS_RANK, "灵市收益榜")
+    async def handle_ls_rank(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        async for r in self._market_rank(event, True):
+            yield r
+
+    @filter.command(CMD_LS_RANK_PROFIT)
+    async def handle_ls_rank_profit(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        async for r in self._market_rank(event, False):
+            yield r
 
     # ---- W6-1：独立法身（不占真身状态） ----
 
@@ -2487,6 +2566,17 @@ class ZhutianPlugin(Star):
         if err:
             return None, err
         return doc, None
+
+    async def _fashan_run(self, event, fn):
+        """fn(doc) -> (ok, msg)；成功后落库（法身状态全在 ext["fashan"]）。"""
+        doc, err = await self._fashan_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = fn(doc)
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
 
     @filter.command(CMD_FASHAN_CREATE)
     async def handle_fashan_create(self, event: AstrMessageEvent):
@@ -2509,7 +2599,9 @@ class ZhutianPlugin(Star):
         if err:
             yield event.plain_result(err)
             return
-        yield event.plain_result(fashan.status_text(doc, time.time()))
+        msg = fashan.status_text(doc, time.time())
+        await self.db.save_player(doc.model_dump())   # status_text 内含镇守懒结算
+        yield event.plain_result(msg)
 
     @filter.command(CMD_FASHAN_TRAVEL)
     async def handle_fashan_travel(self, event: AstrMessageEvent, target: str = ""):
@@ -2579,6 +2671,104 @@ class ZhutianPlugin(Star):
         ok, msg = fashan.heal(doc)
         if ok:
             await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    # ---- W6-2：法身四分支（时间长河 / 界海 / 圣墟 / 镇守） ----
+
+    @filter.command(CMD_FASHAN_RIVER)
+    async def handle_fashan_river(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        now = time.time()
+        async for r in self._fashan_run(event, lambda d: fashan.begin_river(d, now)):
+            yield r
+
+    @filter.command(CMD_FASHAN_RIVER_ADDICT)
+    async def handle_fashan_river_addict(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        yield event.plain_result("时间长河仅开放单次出发（#法身遨游时间长河），不开放沉迷。")
+
+    @filter.command(CMD_FASHAN_JIEHAI)
+    async def handle_fashan_jiehai(self, event: AstrMessageEvent, target: str = ""):
+        if not self._allowed(event):
+            return
+        now = time.time()
+        site = (target or "").strip()
+        async for r in self._fashan_run(event, lambda d: fashan.begin_jiehai(d, site, now)):
+            yield r
+
+    @filter.command(CMD_FASHAN_JIEHAI_ADDICT)
+    async def handle_fashan_jiehai_addict(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        yield event.plain_result("界海仅开放单次探索（#法身探索界海 接引古殿/终极古地），不开放沉迷。")
+
+    @filter.command(CMD_FASHAN_SHENGXU)
+    async def handle_fashan_shengxu(self, event: AstrMessageEvent, target: str = ""):
+        if not self._allowed(event):
+            return
+        now = time.time()
+        site = (target or "").strip()
+        async for r in self._fashan_run(event, lambda d: fashan.begin_shengxu(d, site, 1, now)):
+            yield r
+
+    @filter.command(CMD_FASHAN_SHENGXU_ADDICT)
+    async def handle_fashan_shengxu_addict(self, event: AstrMessageEvent, target: str = ""):
+        if not self._allowed(event):
+            return
+        parts = (target or "").replace("*", " ").split()
+        if not parts:
+            yield event.plain_result("格式：#法身沉迷圣墟 位面*次数（1~12）")
+            return
+        site = parts[0]
+        count = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 1
+        now = time.time()
+        async for r in self._fashan_run(event, lambda d: fashan.begin_shengxu(d, site, count, now)):
+            yield r
+
+    @filter.command(CMD_FASHAN_GUARD)
+    async def handle_fashan_guard(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        now = time.time()
+        async for r in self._fashan_run(event, lambda d: fashan.start_guard(d, now, "fashan")):
+            yield r
+
+    @filter.command(CMD_GUARD)
+    async def handle_guard(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        now = time.time()
+        async for r in self._fashan_run(event, lambda d: fashan.start_guard(d, now, "self")):
+            yield r
+
+    @filter.command(CMD_FASHAN_GUARD_STOP)
+    async def handle_fashan_guard_stop(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        now = time.time()
+        async for r in self._fashan_run(event, lambda d: fashan.stop_guard(d, now)):
+            yield r
+
+    @filter.command(CMD_GUARD_STOP)
+    async def handle_guard_stop(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        now = time.time()
+        async for r in self._fashan_run(event, lambda d: fashan.stop_guard(d, now)):
+            yield r
+
+    @filter.command(CMD_GUARD_STATUS)
+    async def handle_guard_status(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._fashan_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        msg = fashan.guard_text(doc, time.time())
+        await self.db.save_player(doc.model_dump())
         yield event.plain_result(msg)
 
     # ---- 世界 Boss / 疗伤 ----

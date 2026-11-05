@@ -44,7 +44,8 @@ def day_key(now: float) -> str:
     return time.strftime("%Y-%m-%d", time.gmtime(now + 8 * 3600))
 
 
-def tiandao_gift(doc: PlayerDoc, now: float, mult: float = 1.0) -> tuple[bool, str, PlayerDoc, dict[str, int]]:
+def tiandao_gift(doc: PlayerDoc, now: float, mult: float = 1.0,
+                 daofa: bool = False) -> tuple[bool, str, PlayerDoc, dict[str, int]]:
     """天道赐福：境界达标、每日一次，按境界与命格倍率发道具。
 
     返回 (是否成功, 文案, 新档案, 物品)。
@@ -69,6 +70,9 @@ def tiandao_gift(doc: PlayerDoc, now: float, mult: float = 1.0) -> tuple[bool, s
         got["侠客令"] = 3
     elif job == "唤魔者":
         got["唤魔令"] = 3
+    if daofa:   # 原版 UserStart.js:770-776 道法仙术额外四类
+        for name in ("秘境之匙", "打工券", "九阶玄元丹", "九阶淬体丹"):
+            got[name] = got.get(name, 0) + count
 
     lines = ["天道赐福：", f"秘境之匙 ×{count}｜打工券 ×{count}"]
     if level_id > 41:
@@ -77,13 +81,16 @@ def tiandao_gift(doc: PlayerDoc, now: float, mult: float = 1.0) -> tuple[bool, s
         lines.append(f"神域令牌 ×{count}（万界之上）")
     if job in ("侠客", "唤魔者"):
         lines.append(f"职业【{job}】额外 {'侠客令' if job == '侠客' else '唤魔令'} ×3")
+    if daofa:
+        lines.append("【道法仙术】额外 秘境之匙/打工券/九阶玄元丹/九阶淬体丹 各 ×" + str(count))
     if float(mult or 1.0) != 1.0:
         lines.append(f"【命格】签到奖励倍率 ×{mult} 生效")
     return True, "\n".join(lines), d, got
 
 
-def lottery(doc: PlayerDoc, count: int, rng: random.Random) -> tuple[bool, str, PlayerDoc, dict[str, int]]:
-    """每日抽奖：消耗抽奖次数，奖池 41 项等概率；支持 *N 连抽（上限 50）。
+def lottery(doc: PlayerDoc, count: int, rng: random.Random,
+            per_draw: int = 1) -> tuple[bool, str, PlayerDoc, dict[str, int]]:
+    """每日抽奖：奖池 41 项等概率；per_draw=2 为道法仙术权益（每次抽 2 份，只扣 1 次券）。
 
     返回 (是否成功, 文案, 新档案, 物品)。
     """
@@ -98,10 +105,10 @@ def lottery(doc: PlayerDoc, count: int, rng: random.Random) -> tuple[bool, str, 
     d = doc.model_copy(deep=True)
     d.ext["lottery_tickets"] = tickets - count
     got: dict[str, int] = {}
-    for _ in range(count):
+    for _ in range(count * max(1, int(per_draw))):
         name, qty = LOTTERY_POOL[int(rng.random() * len(LOTTERY_POOL))]
         got[name] = got.get(name, 0) + qty
-    lines = [f"每日抽奖 ×{count}："] + [f"· {n} ×{q}" for n, q in got.items()]
+    lines = [f"每日抽奖 ×{count}" + ("（道法仙术双份）" if per_draw > 1 else "") + "："] + [f"· {n} ×{q}" for n, q in got.items()]
     lines.append(f"剩余抽奖次数：{d.ext['lottery_tickets']}")
     return True, "\n".join(lines), d, got
 

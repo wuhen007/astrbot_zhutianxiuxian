@@ -3256,6 +3256,54 @@ async def main():
     assert ok and fs.state_of(f6)["state"] == "空闲" and f6.exp > 0
     print("fashan ok")
 
+    # 19. W6-2 道法订阅 / 双榜 / 法身四分支
+    from core import daofa as df
+
+    n6 = 1_800_000_000.0
+    sub = PlayerDoc(uid="w6sub", realm_index=25, physique_index=5, ext={})
+    assert not df.active(sub, n6)
+    assert df.open_for(sub, n6)[0] and df.active(sub, n6)
+    assert not df.active(sub, n6 + 31 * 86400)
+    sub2 = PlayerDoc(uid="w6sub2", realm_index=25, physique_index=5, ext={})
+    df.open_for(sub2, n6)
+    ok, _m, nd9, gift9 = df.gift(sub2, n6, 1.0)
+    assert ok and gift9.get("遣龙令", 0) >= 2 and nd9.exp > 0
+    assert not df.gift(nd9, n6, 1.0)[0]
+    d7 = PlayerDoc(uid="w6d7", realm_index=25, ext={
+        "daofaxianshu": 2, "daofaxianshu_endtime": (n6 + 86400) * 1000, "daofa_days": 6})
+    ok, _m, d7b, it7 = df.gift(d7, n6, 1.0)
+    assert ok and d7b.ext["daofa_days"] == 1 and it7.get("超越宝盒") == 5
+    one = bl.lottery(bl.grant_tickets(PlayerDoc(uid="a", ext={})), 1, _random.Random(5))[3]
+    two = bl.lottery(bl.grant_tickets(PlayerDoc(uid="a", ext={})), 1,
+                     _random.Random(5), per_draw=2)[3]
+    assert sum(two.values()) > sum(one.values())
+    print("daofa subscription ok")
+
+    pg = mk.create_market(n6, seed=88)
+    pp = PlayerDoc(uid="w6p", stones=500_000, ext={})
+    assert mk.buy(pg, pp, pg["stocks"][0], 10, n6)[0]
+    pf = mk.portfolio(pg, pp)
+    assert pf["invested"] >= 100_000 and "rate" in pf and pf["profit"] == 0
+    print("market dual rank ok")
+
+    fb = PlayerDoc(uid="w6fb", realm_index=50, exp=20_000_000, stones=50_000_000,
+                   ext={"xueqi": 20_000_000, "era_points": 5})
+    assert fs.create(fb, n6)[0] and fs.era_of(fb) == 5
+    assert fs.begin_river(fb, n6)[0]
+    assert fs.settle(fb, n6 + 16 * 60, _random.Random(11))[0]
+    era_after_river = fs.era_of(fb)
+    assert era_after_river > 5 and fs.state_of(fb)["state"] == "空闲"
+    assert not fs.begin_jiehai(fb, "接引古殿", n6)[0]        # 位面硬校验
+    assert fs.travel(fb, "界海", n6)[0] and fs.begin_jiehai(fb, "接引古殿", n6)[0]
+    assert fs.settle(fb, n6 + 31 * 60, _random.Random(12))[0]
+    assert fs.travel(fb, "小阴间", n6)[0] and fs.begin_shengxu(fb, "小阴间", 2, n6)[0]
+    assert fs.settle(fb, n6 + 7 * 60, _random.Random(13))[0]
+    assert fs.start_guard(fb, n6, "fashan")[0]
+    assert fs.guard_tick(fb, n6 + 7200) == 20
+    assert fs.stop_guard(fb, n6 + 7200)[0]
+    assert fs.start_guard(fb, n6 + 7200, "self")[0]          # 结束后可手动重开
+    print("fashan branches & guard ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 
