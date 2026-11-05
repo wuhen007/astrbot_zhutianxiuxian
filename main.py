@@ -57,6 +57,13 @@ CMD_PROF_ALLOC = "#分配功法感悟"
 CMD_SHOUYUAN = "#寿元"
 CMD_MINGGE = "#我的命格"
 CMD_MINGGE_REROLL = "#改命"
+CMD_MINGGE_EXPAND = "#命宫拓碑"
+CMD_MINGGE_EXTRACT = "#抽取命格词条"
+CMD_LOCK = "#锁定"
+CMD_UNLOCK = "#解锁"
+CMD_LOCK_LIST = "#我的锁定"
+CMD_REVIVE_SET = "#复活设置"
+CMD_REVIVE_GO = "#复活发动"
 CMD_RIVER = "#遨游时间长河"
 CMD_RIVER_INFO = "#时间长河"
 CMD_FASHAN_CREATE = "#凝聚无上法身"
@@ -1100,6 +1107,10 @@ class ZhutianPlugin(Star):
                 (CMD_SHOUYUAN, "寿元（每日签到流逝，耗尽轮回转世）"),
                 (CMD_MINGGE, "命格（出生判定词条，战斗/突破/签到/渡劫生效）"),
                 (CMD_MINGGE_REROLL, "改命（10 万灵石重演天机，可洗负面）"),
+                (CMD_MINGGE_EXPAND, "命宫拓碑×1 扩命格槽（上限 3）"),
+                (CMD_MINGGE_EXTRACT, "轮回命签×1 抽附加命格词条"),
+                (f"{CMD_LOCK} 物品名 / {CMD_UNLOCK} 物品名 / {CMD_LOCK_LIST}", "锁定纳戒物品防误卖"),
+                (f"{CMD_REVIVE_SET} 自动|手动", "渡劫复活模式（手动需 60 秒内 #复活发动）"),
                 (CMD_RIVER, "遨游时间长河（45 重+，30 分 CD：三帝法身/悟道/拾遗/传道）"),
                 (CMD_RIVER_INFO, "岁月沉淀与传道进度"),
             ]},
@@ -1555,6 +1566,10 @@ class ZhutianPlugin(Star):
         lack = f"纳戒中「{item_name}」只有 {held} 件，不足 {qty}。"
 
         if mode == "sell":
+            if item_name in items.locked_of(doc):
+                yield event.plain_result(
+                    f"「{item_name}」已锁定，先发 {CMD_UNLOCK} {item_name} 再出售（正常使用不受影响）。")
+                return
             if held < qty:
                 yield event.plain_result(lack)
                 return
@@ -1569,13 +1584,17 @@ class ZhutianPlugin(Star):
             yield event.plain_result(msg)
             return
 
-        # use：先查库存，再算效果（纯函数），最后事务内扣减+落盘
-        if held < qty:
-            yield event.plain_result(lack)
+        # use：道心果按需服用（W7-1，道心 500 满值不浪费），其余原样
+        actual_qty, note = items.daoxin_qty(doc, item, qty)
+        if actual_qty <= 0:
+            yield event.plain_result(note)
+            return
+        if held < actual_qty:
+            yield event.plain_result(f"纳戒中「{item_name}」只有 {held} 件，不足 {actual_qty}。")
             return
         import random as _random
         ok, msg, d, consume = items.use_item(
-            doc, item, qty, self._stats(doc).hp,
+            doc, item, actual_qty, self._stats(doc).hp,
             linggen_table=self.linggen_table,
             rng=_random.Random(f"{doc.uid}:{time.time()}"),
             now=time.time(),
@@ -1584,10 +1603,10 @@ class ZhutianPlugin(Star):
             yield event.plain_result(msg)
             return
         async with self.db.transaction():
-            if not await self.db.remove_item(doc.uid, item_name, qty):
+            if not await self.db.remove_item(doc.uid, item_name, actual_qty):
                 raise RuntimeError("INSUFFICIENT")
             await self.db.save_player(d.model_dump())
-        yield event.plain_result(msg)
+        yield event.plain_result((note + "\n" if note else "") + msg)
 
     @filter.command(CMD_BUY, "购买物品")
     async def handle_buy(self, event: AstrMessageEvent, item_name: str = "", qty: int = 1):
@@ -2142,13 +2161,58 @@ class ZhutianPlugin(Star):
         if msg:
             yield event.plain_result(msg)
             return
+        exp_before, hp_before = int(doc.exp), float(doc.ext.get("hp", 1) or 1)
         ok, text = trib.trib_run(doc, st, _random.Random(f"{doc.uid}:trib:{int(time.time())}"))
         if ok:
             lifespan.grant(doc, lifespan.TRIB_BONUS)
             text += f"\n※ 天劫洗身，寿元 +{lifespan.TRIB_BONUS}（现 {int(doc.ext['shouyuan']):,}）"
+        else:
+            # W7-1：已掌握复活功法时，自动/手动抵消本次失败损耗（CD 仍保留）
+            names = [str(x.get("name")) for x in (self.content.table("item/技能组/复活技能") or [])
+                     if isinstance(x, dict)]
+            learned = trib.revival_skills(doc, names)
+            if learned:
+                if trib.revive_mode(doc) == "自动":
+                    text += "\n" + trib.apply_revive(doc, exp_before, hp_before) + f"（发动【{learned[0]}】）"
+                else:
+                    trib.arm_revive(doc, exp_before, hp_before, time.time())
+                    text += (f"\n※ 已掌握【{learned[0]}】，复活模式为手动——"
+                             f"{trib.REVIVE_WINDOW} 秒内发 {CMD_REVIVE_GO} 可抵消本次损耗。")
         await self.db.save_player(doc.model_dump())
         async for r in self._smart(event, text, "渡劫"):
             yield r
+
+    @filter.command(CMD_REVIVE_SET)
+    async def handle_revive_set(self, event: AstrMessageEvent, mode: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        d = doc.model_copy(deep=True)
+        ok, msg = trib.set_revive_mode(d, mode)
+        if ok:
+            await self.db.save_player(d.model_dump())
+        else:
+            names = [str(x.get("name")) for x in (self.content.table("item/技能组/复活技能") or [])
+                     if isinstance(x, dict)]
+            learned = trib.revival_skills(doc, names)
+            msg += f"\n已掌握复活功法：{'、'.join(learned) or '暂无（可去功法楼参悟）'}"
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_REVIVE_GO)
+    async def handle_revive_go(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        d = doc.model_copy(deep=True)
+        ok, msg = trib.consume_revive(d, time.time())
+        await self.db.save_player(d.model_dump())   # 过期时也需要清掉 pending
+        yield event.plain_result(msg)
 
     @filter.command(CMD_ASCEND, "登仙")
     async def handle_ascend(self, event: AstrMessageEvent):
@@ -2305,6 +2369,92 @@ class ZhutianPlugin(Star):
         if ok:
             await self.db.save_player(doc.model_dump())
         yield event.plain_result(msg)
+
+    @filter.command(CMD_MINGGE_EXPAND)
+    async def handle_mingge_expand(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        if int(inv.get(mingge.SLOT_ITEM, 0) or 0) < 1:
+            yield event.plain_result(f"拓碑需【{mingge.SLOT_ITEM}】×1（当前 0）。")
+            return
+        d = doc.model_copy(deep=True)
+        ok, msg = mingge.expand_slot(d)
+        if ok:
+            async with self.db.transaction():
+                if not await self.db.remove_item(doc.uid, mingge.SLOT_ITEM, 1):
+                    raise RuntimeError("INSUFFICIENT")
+                await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_MINGGE_EXTRACT)
+    async def handle_mingge_extract(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        if int(inv.get(mingge.EXTRACT_ITEM, 0) or 0) < 1:
+            yield event.plain_result(f"抽词条需【{mingge.EXTRACT_ITEM}】×1（当前 0）。")
+            return
+        import random as _random
+        d = doc.model_copy(deep=True)
+        mingge.ensure(d, self.content, _random.Random(f"{doc.uid}:mingge:extract"))
+        ok, msg, _ = mingge.extract(d, self.content, _random.Random(f"{doc.uid}:extract:{time.time_ns()}"))
+        if ok:
+            async with self.db.transaction():
+                if not await self.db.remove_item(doc.uid, mingge.EXTRACT_ITEM, 1):
+                    raise RuntimeError("INSUFFICIENT")
+                await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_LOCK)
+    async def handle_lock(self, event: AstrMessageEvent, item_name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        d = doc.model_copy(deep=True)
+        ok, msg = items.set_lock(d, item_name, True)
+        if ok:
+            await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_UNLOCK)
+    async def handle_unlock(self, event: AstrMessageEvent, item_name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        d = doc.model_copy(deep=True)
+        ok, msg = items.set_lock(d, item_name, False)
+        if ok:
+            await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_LOCK_LIST)
+    async def handle_lock_list(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        names = sorted(items.locked_of(doc))
+        lines = ["--- 锁定物品 ---", f"共 {len(names)} 件（出售会被拦下，正常使用不受影响）"]
+        lines += [f"· {n}" for n in names] or ["（暂无）"]
+        lines.append(f"指令：{CMD_LOCK} 物品名｜{CMD_UNLOCK} 物品名")
+        yield event.plain_result("\n".join(lines))
 
     @filter.command(CMD_SHOUYUAN, "寿元")
     async def handle_shouyuan(self, event: AstrMessageEvent):
@@ -7623,6 +7773,7 @@ class ZhutianPlugin(Star):
         d = doc.model_copy(deep=True)
         d.stones += int(rec2.get("stones", 0) or 0)
         d.exp += int(rec2.get("exp", 0) or 0)
+        d.ext["xueqi"] = int(d.ext.get("xueqi", 0) or 0) + int(rec2.get("xueqi_gained", 0) or 0)
         d.ext["hp"] = max(0, int(hp_left))
         d.ext.pop("addiction", None)
         d.state = "空闲"

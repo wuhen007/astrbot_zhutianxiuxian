@@ -3405,6 +3405,72 @@ async def main():
     assert "掉落预览" in ex.tianjiao_status(dc, "青冥剑子", c21)
     print("W7-0 ⑤ assistant/realm/tianjiao real data ok")
 
+    # 22. W7-1 四个小机制：丹药稀有度/道心果、命格扩槽、锁定+复活、沉迷 11 字段
+    from core import items as it22, mingge as mg22, trib as tb22, addict as ad22, secret as sc22
+
+    # ① 丹药：稀有度 1-10 消费 + 道心果按需服用 + 500 上限钳制
+    d22 = PlayerDoc(uid="w7pill2", realm_index=5, ext={"daoxin": 495})
+    fruit = {"name": "凡品道心果", "class": "丹药", "type": "道心", "道心": 3, "稀有度": 3}
+    assert it22.rarity_of({"稀有度": 99}) == 10 and it22.rarity_of({}) == 1
+    need, note = it22.daoxin_qty(d22, fruit, 10)
+    assert need == 2 and "只取 2 颗" in note          # (500-495)/3 → 2 颗，余 8 颗不扣
+    ok22, msg22, d22b, use22 = it22.use_item(d22, fruit, need, now=n6)
+    assert ok22 and use22 and d22b.ext["daoxin"] == 500 and "稀有度 3/10" in msg22
+    assert it22.daoxin_qty(d22b, fruit, 1)[0] == 0     # 已满：不消耗物品
+    assert it22.daoxin_qty(d22, {"name": "寿命丹", "type": "寿命", "shouyuan": 10}, 7)[0] == 7
+    print("W7-1 ① daoxin/rarity ok")
+
+    # ② 命格：拓碑 1→3 槽、轮回命签抽取、主+附加 effects 合并
+    d22m = PlayerDoc(uid="w7mg", realm_index=5, ext={
+        "mingge": {"name": "主命", "effects": {"攻击加成": 0.1, "签到奖励倍率": 1.2}}})
+    assert mg22.slots_of(d22m) == 1
+    assert mg22.expand_slot(d22m)[0] and mg22.slots_of(d22m) == 2
+    ok22, _msg22, got22 = mg22.extract(d22m, store, _random.Random(3))
+    assert ok22 and got22 and len(mg22.extra_of(d22m)) == 1
+    d22m.ext["mingge_extra"] = [{"name": "副命", "effects": {"攻击加成": 0.05, "签到奖励倍率": 1.5}}]
+    assert abs(mg22.bonus(d22m, "攻击加成") - 0.15) < 1e-9          # 加法
+    assert abs(mg22.multiplier(d22m, "签到奖励倍率") - 1.8) < 1e-9   # 乘法
+    mg22.expand_slot(d22m)
+    assert mg22.slots_of(d22m) == 3 and not mg22.expand_slot(d22m)[0]
+    d22m.ext["mingge_extra"] = [{"name": "a"}, {"name": "b"}]
+    assert not mg22.extract(d22m, store, _random.Random(4))[0]        # 满槽拒绝
+    assert "命宫：" in mg22.text(d22m)
+    print("W7-1 ② mingge slots/extract/merge ok")
+
+    # ③ 物品锁定 + 渡劫复活设置（自动/手动 60 秒窗口）
+    d22l = PlayerDoc(uid="w7lock", realm_index=5, ext={})
+    assert it22.set_lock(d22l, "诸天镜", True)[0] and "诸天镜" in it22.locked_of(d22l)
+    assert not it22.set_lock(d22l, "诸天镜", True)[0]                  # 重复锁定
+    assert it22.set_lock(d22l, "诸天镜", False)[0] and not it22.locked_of(d22l)
+    d22r = PlayerDoc(uid="w7rev", realm_index=40, exp=100_000,
+                     ext={"hp": 9999, "gongfa": ["凰劫再生术"]})
+    assert tb22.revive_mode(d22r) == "自动"
+    assert tb22.revival_skills(d22r, ["凰劫再生术"]) == ["凰劫再生术"]
+    assert tb22.set_revive_mode(d22r, "手动")[0] and tb22.revive_mode(d22r) == "手动"
+    tb22.arm_revive(d22r, 100_000, 9999, n6)
+    d22r.exp, d22r.ext["hp"] = 75_000, 1
+    assert tb22.consume_revive(d22r, n6 + 30)[0] and d22r.exp == 100_000 and d22r.ext["hp"] == 9999
+    tb22.arm_revive(d22r, 100_000, 9999, n6)
+    d22r.exp = 75_000
+    ok22, msg22 = tb22.consume_revive(d22r, n6 + 61)
+    assert not ok22 and "已过" in msg22 and "pending_revive" not in d22r.ext
+    print("W7-1 ③ lock/revival ok")
+
+    # ④ 沉迷：原版 11 字段 + 逐轮累加 + 完整结算面板
+    place22 = next(iter(sc22.PLACES))
+    rec22 = ad22.make(place22, 2, n6)
+    for k in ("location", "location_type", "total_count", "settled_count", "death_count",
+              "xiuwei_gained", "xueqi_gained", "items_gained", "status", "start_time", "end_time"):
+        assert k in rec22, k
+    rec22b, _hp22 = ad22.simulate(rec22, (10 ** 9, 10 ** 9, 10 ** 9), 10 ** 9, 0.5,
+                                  [], _random.Random(5))
+    assert rec22b["settled_count"] == rec22b["done"] > 0
+    assert rec22b["xueqi_gained"] == rec22b["xiuwei_gained"] == rec22b["exp"]
+    assert isinstance(rec22b["items_gained"], dict)
+    txt22 = ad22.summary_text(rec22b)
+    assert "类型：秘境" in txt22 and "血气：" in txt22 and "起止：" in txt22
+    print("W7-1 ④ addict 11 fields ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

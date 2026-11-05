@@ -7,8 +7,8 @@
 
 本移植接入消费点：战斗三维+暴击（_pvp_battle）、境界突破成功率（#突破）、
 签到奖励倍率（#修仙签到）、渡劫修为减少（#渡劫）。
-shortcut：附加命格、速度/生命本源/心神/悟道/采集炼丹等其余消费点登记未接
-（见《珠天修仙-python-port后续推进计划》W2 段）。
+W7-1：补命宫拓碑扩槽（≤3）、轮回命签抽取附加词条、主+附加 effects 合并。
+shortcut：速度/生命本源/心神/悟道/采集炼丹等其余消费点仍未接。
 """
 
 from __future__ import annotations
@@ -21,6 +21,10 @@ from .player import PlayerDoc
 RARITY_WEIGHTS = {1: 70, 2: 25, 3: 5}
 NEGATIVE_CHANCE = 0.12
 REROLL_COST = 100_000          # #改命 灵石（原版无重抽通道，自定）
+MAX_SLOTS = 3                  # 原版「命宫拓碑」最多 3 条命格
+SLOT_ITEM = "命宫拓碑"
+EXTRACT_ITEM = "轮回命签"
+_MULT_KEYS = {"签到奖励倍率"}   # 乘法合并；其余数值字段按加法
 
 _CONSUMED_KEYS = {
     "攻击加成": 1.0, "防御加成": 1.0, "生命加成": 1.0,
@@ -74,9 +78,71 @@ def ensure(doc: PlayerDoc, content: Any, rng: random.Random) -> dict:
     return cur
 
 
+def slots_of(doc: PlayerDoc) -> int:
+    """当前命格槽位数（默认 1，命宫拓碑最多扩到 3）。"""
+    try:
+        return min(MAX_SLOTS, max(1, int(doc.ext.get("mingge_slots", 1) or 1)))
+    except (TypeError, ValueError):
+        return 1
+
+
+def extra_of(doc: PlayerDoc) -> list[dict]:
+    """附加命格（最多 slots-1 条）。"""
+    v = doc.ext.get("mingge_extra")
+    rows = [dict(x) for x in v if isinstance(x, dict)] if isinstance(v, list) else []
+    return rows[:max(0, slots_of(doc) - 1)]
+
+
 def effects_of(doc: PlayerDoc) -> dict:
-    """效果合并（单命格直取；接口留附加命格扩展）。"""
-    return dict(identity_of(doc).get("effects") or {})
+    """主命格 + 附加命格合并（数值加法 / 倍率乘法 / bool 或）。"""
+    out: dict = {}
+    for m in [identity_of(doc), *extra_of(doc)]:
+        for k, v in (m.get("effects") or {}).items():
+            if k not in out:
+                out[k] = v
+                continue
+            a = out[k]
+            if isinstance(a, bool) or isinstance(v, bool):
+                out[k] = bool(a) or bool(v)
+            elif k in _MULT_KEYS:
+                try:
+                    out[k] = float(a) * float(v)
+                except (TypeError, ValueError):
+                    out[k] = v
+            else:
+                try:
+                    out[k] = float(a) + float(v)
+                except (TypeError, ValueError):
+                    out[k] = v
+    return out
+
+
+def expand_slot(doc: PlayerDoc) -> tuple[bool, str]:
+    """命宫拓碑：扩 1 槽（消耗道具由 handler 扣）。"""
+    cur = slots_of(doc)
+    if cur >= MAX_SLOTS:
+        return False, f"命宫已拓至 {MAX_SLOTS} 碑，再无余位。"
+    doc.ext["mingge_slots"] = cur + 1
+    return True, (f"【命宫拓碑】碑文再开一页，命格槽位 {cur} → {cur + 1}（上限 {MAX_SLOTS}）。"
+                  f"消耗【{SLOT_ITEM}】×1，可用【{EXTRACT_ITEM}】抽取附加词条。")
+
+
+def extract(doc: PlayerDoc, content: Any, rng: random.Random) -> tuple[bool, str, dict | None]:
+    """轮回命签抽一条词条进附加槽（消耗道具由 handler 扣）。"""
+    slots = slots_of(doc)
+    if len(extra_of(doc)) >= slots - 1:
+        return False, (f"附加命格已满（{max(0, slots - 1)}/{max(0, slots - 1)}）。"
+                       f"先用【{SLOT_ITEM}】拓碑或 #改命 换主命格。"), None
+    got = roll(content, rng)
+    if not got:
+        return False, "命格天机暂不可测（词条表缺失）。", None
+    rows = list(extra_of(doc))
+    rows.append(got)
+    doc.ext["mingge_extra"] = rows
+    neg = "（此命有缺）" if got.get("isNegative") else ""
+    return True, (f"【轮回命签】命轮一转，得附加命格【{got.get('name')}】{neg}\n"
+                  f"{got.get('desc', '')}\n"
+                  f"当前 {len(rows)}/{slots - 1} 个附加槽已用，效果与主命格合并生效。"), got
 
 
 def bonus(doc: PlayerDoc, key: str) -> float:
@@ -123,10 +189,15 @@ def text(doc: PlayerDoc) -> str:
     eff = m.get("effects") or {}
     eff_txt = "、".join(f"{k} {'+' if not isinstance(v, bool) else ''}{v:g}"
                         if not isinstance(v, bool) else k for k, v in eff.items())
-    return "\n".join([
-        "--- 命格 ---",
-        f"【{m.get('name')}】（{neg}｜{m.get('category', '')}）",
-        str(m.get("desc") or ""),
-        f"效果：{eff_txt or '无'}",
-        f"改命：#改命（{REROLL_COST:,} 灵石重演天机）",
-    ])
+    slots = slots_of(doc)
+    extras = extra_of(doc)
+    lines = ["--- 命格 ---",
+             f"命宫：{slots}/{MAX_SLOTS} 槽（主 1 + 附加 {len(extras)}/{max(0, slots - 1)}）",
+             f"主命格【{m.get('name')}】（{neg}｜{m.get('category', '')}）",
+             str(m.get("desc") or ""),
+             f"总效果：{'、'.join(f'{k} {v:g}' if not isinstance(v, bool) else k for k, v in effects_of(doc).items()) or '无'}"]
+    for i, e in enumerate(extras, 1):
+        lines.append(f"· 附加 {i}【{e.get('name')}】{'⚠负面' if e.get('isNegative') else ''}")
+    lines.append(f"改命：#改命（{REROLL_COST:,} 灵石）｜拓碑：#命宫拓碑（{SLOT_ITEM}×1）"
+                 f"｜抽词条：#抽取命格词条（{EXTRACT_ITEM}×1）")
+    return "\n".join(lines)

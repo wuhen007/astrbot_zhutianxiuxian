@@ -6,6 +6,65 @@ import math
 import time
 from typing import Any
 
+# W7-1：原版「道心果按品阶加道心、上限 500、按需服用不浪费」；数据表已有 6 种道心果。
+DAOXIN_CAP = 500
+RARITY_LABELS = {1: "凡", 2: "凡", 3: "玄", 4: "玄", 5: "灵",
+                 6: "灵", 7: "仙", 8: "圣", 9: "圣", 10: "帝"}
+
+
+def rarity_of(item: dict[str, Any]) -> int:
+    """稀有度 1-10，钳制后返回（数据表已有字段，此前零消费）。"""
+    try:
+        return min(10, max(1, int(float(item.get("稀有度") or 1))))
+    except (TypeError, ValueError):
+        return 1
+
+
+def daoxin_qty(doc, item: dict[str, Any], qty: int) -> tuple[int, str]:
+    """道心果按需服用：返回 (实际服用颗数, 提示)。非道心丹药原样返回。
+
+    道心近满时只取需要的几颗，剩余留在纳戒；已满则返回 0（调用方不扣物品）。
+    """
+    try:
+        per = int(float(item.get("道心") or 0))
+    except (TypeError, ValueError):
+        per = 0
+    if per <= 0 or str(item.get("type") or "") != "道心":
+        return max(1, int(qty)), ""
+    cur = int(doc.ext.get("daoxin", 0) or 0)
+    if cur >= DAOXIN_CAP:
+        return 0, f"道心已圆满（{cur}/{DAOXIN_CAP}），不必再服【{item.get('name', '道心果')}】。"
+    need = min(max(1, int(qty)), max(1, math.ceil((DAOXIN_CAP - cur) / per)))
+    note = (f"道心将满，只取 {need} 颗（余 {int(qty) - need} 颗留在纳戒）。"
+            if need < int(qty) else "")
+    return need, note
+
+
+def locked_of(doc) -> set[str]:
+    v = doc.ext.get("locked_items")
+    return {str(x) for x in v} if isinstance(v, (list, tuple, set)) else set()
+
+
+def set_lock(doc, name: str, on: bool) -> tuple[bool, str]:
+    """#锁定 / #解锁：纳戒物品防误卖（锁定不阻止正常使用）。"""
+    name = (name or "").strip()
+    if not name:
+        return False, "格式：#锁定 物品名 / #解锁 物品名"
+    cur = locked_of(doc)
+    if on:
+        if name in cur:
+            return False, f"「{name}」已在锁定名单。"
+        cur.add(name)
+        verb = "锁定"
+    else:
+        if name not in cur:
+            return False, f"「{name}」不在锁定名单。"
+        cur.discard(name)
+        verb = "解锁"
+    doc.ext["locked_items"] = sorted(cur)
+    return True, (f"已{verb}「{name}」——{'出售时会被拦下，正常使用不受影响' if on else '可正常出售'}。"
+                  f"当前锁定 {len(cur)} 件。")
+
 
 def item_buy_price(item: dict[str, Any], markup: float) -> int:
     return max(1, math.ceil(float(item.get("出售价", 0)) * markup))
@@ -193,9 +252,11 @@ def use_item(
         d.ext["buffs"] = buffs2
         parts.append(f"幸运 +{float(item['xingyun']):g}：接下来 {10 * qty} 次冒险生效")
     if float(item.get("道心") or 0) > 0:
-        add = int(float(item["道心"])) * qty
-        d.ext["daoxin"] = int(d.ext.get("daoxin", 0) or 0) + add
-        parts.append(f"道心 +{add}（累计 {d.ext['daoxin']}）")
+        per = int(float(item["道心"]))
+        before = int(d.ext.get("daoxin", 0) or 0)
+        after = min(DAOXIN_CAP, before + per * qty)
+        d.ext["daoxin"] = after
+        parts.append(f"道心 +{after - before}（累计 {after}/{DAOXIN_CAP}）")
 
     # 7) 寿元类丹药（W7-0）：数据表 shouyuan 字段 / type=寿命
     try:
@@ -221,5 +282,7 @@ def use_item(
             return False, f"「{name}」无需使用，气血正满。", doc, False
         return False, f"「{name}」暂时无法直接使用。", doc, False
 
-    msg = f"服下「{name}」×{qty}：" + "；".join(parts) + "。"
+    rarity_note = (f"【{RARITY_LABELS.get(rarity_of(item), '凡')}品·稀有度 {rarity_of(item)}/10】"
+                   if item.get("class") == "丹药" else "")
+    msg = f"服下「{name}」{rarity_note}×{qty}：" + "；".join(parts) + "。"
     return True, msg, d, True

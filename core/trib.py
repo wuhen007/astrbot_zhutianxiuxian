@@ -12,7 +12,8 @@
   炉火纯青 500 / 登峰造极 750 / 出神入化 1000），档位加成 trigger/combat/numeric。
   感悟值：战斗每场 +2（原版功法感悟值）；`#分配功法感悟 功法名*数量` 1:1 转熟练度。
 
-shortcut：虚实转化率减免、打散雷劫（#打散雷劫 的肉身劫分支）、悟道减免未复刻。
+W7-1：补 #复活设置（自动/手动）、已学复活功法抵消渡劫失败损耗、手动 60 秒窗口。
+shortcut：虚实转化率减免、打散雷劫（肉身劫分支）、悟道减免、原版逐本功法优先级选择未复刻。
 """
 
 from __future__ import annotations
@@ -185,6 +186,61 @@ def trib_run(doc: PlayerDoc, stats: Any, rng: random.Random) -> tuple[bool, str]
                    f"雷抗 {x:.1f}｜需渡 {rounds} 道雷劫｜成功率 {prob:.0%}\n"
                    f"雷劫轰落，肉身崩碎、元神重创——渡劫失败！\n"
                    f"修为 -{cost:,}，气血归一，元神 30 分钟后方可再战。")
+
+
+# ---------------------------------------------------------------- 渡劫复活设置（W7-1）
+# 原版 zhetiandujie.js:180,284-309：渡劫濒死时按已掌握复活功法发动；
+# 自动=直接发动，手动=60 秒内由玩家选择。本移植简化为「任一已学复活功法即可」，
+# 不做逐本优先级列表（已写进 shortcut）。
+REVIVE_WINDOW = 60
+
+
+def revive_mode(doc: PlayerDoc) -> str:
+    return "手动" if str(doc.ext.get("trib_revive_mode") or "") == "手动" else "自动"
+
+
+def set_revive_mode(doc: PlayerDoc, mode: str) -> tuple[bool, str]:
+    m = (mode or "").strip()
+    if m not in ("自动", "手动"):
+        learned = revival_skills(doc, ())
+        return False, (f"当前复活模式：{revive_mode(doc)}\n"
+                       f"用法：#复活设置 自动 / #复活设置 手动")
+    doc.ext["trib_revive_mode"] = m
+    return True, (f"复活模式已设为【{m}】：" +
+                  ("渡劫失败时自动发动已掌握的复活功法，抵消修为与气血损耗。" if m == "自动"
+                   else "渡劫失败后 60 秒内发 #复活发动 才会抵消损耗，逾期作废。"))
+
+
+def revival_skills(doc: PlayerDoc, names) -> list[str]:
+    """已学功法 ∩ 复活功法表。names 为空时返回已学功法（仅用于展示）。"""
+    learned = {str(x) for x in (doc.ext.get("gongfa") or [])}
+    allowed = {str(n) for n in names}
+    return sorted(learned & allowed) if allowed else sorted(learned)
+
+
+def apply_revive(doc: PlayerDoc, exp_before: int, hp_before: float) -> str:
+    """复活功法抵消本次渡劫失败的修为/气血损耗（CD 保留，避免反复刷）。"""
+    doc.exp = max(0, int(exp_before))
+    doc.ext["hp"] = float(hp_before)
+    doc.ext.pop("pending_revive", None)
+    return "【复活功法】一缕真灵不灭，肉身重聚——修为与气血尽数复归（元神 CD 仍在）。"
+
+
+def arm_revive(doc: PlayerDoc, exp_before: int, hp_before: float, now: float) -> None:
+    doc.ext["pending_revive"] = {
+        "exp": int(exp_before), "hp": float(hp_before),
+        "deadline": float(now) + REVIVE_WINDOW,
+    }
+
+
+def consume_revive(doc: PlayerDoc, now: float) -> tuple[bool, str]:
+    p = doc.ext.get("pending_revive")
+    if not isinstance(p, dict):
+        return False, "当前没有待发动的复活（渡劫失败且为手动模式时才会出现）。"
+    if float(now) > float(p.get("deadline", 0) or 0):
+        doc.ext.pop("pending_revive", None)
+        return False, f"复活时机已过（{REVIVE_WINDOW} 秒窗口），本次损耗无法挽回。"
+    return True, apply_revive(doc, p.get("exp", 0), p.get("hp", 1))
 
 
 def ascend_check(doc: PlayerDoc, table: list[dict]) -> str | None:
