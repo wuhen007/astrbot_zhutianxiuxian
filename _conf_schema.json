@@ -78,6 +78,18 @@
         "type": "bool",
         "default": true,
         "hint": "开=关键面板出图（需 Playwright 环境），失败自动回退纯文本"
+      },
+      "ERA_TICK_HOURS": {
+        "description": "时代历法：每多少小时推进一次",
+        "type": "float",
+        "default": 2.0,
+        "hint": "原版 cron 为每 2 小时；与 ERA_YEARS_PER_TICK 一起决定一个时代（1 万年）持续多久"
+      },
+      "ERA_YEARS_PER_TICK": {
+        "description": "时代历法：每次推进多少年",
+        "type": "int",
+        "default": 1000,
+        "hint": "默认 2 小时 1000 年 → 一个时代约 20 小时；调小可让时代更替更快"
       }
     }
   }
