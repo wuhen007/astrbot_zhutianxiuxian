@@ -8448,8 +8448,7 @@ class ZhutianPlugin(Star):
         penalty = calamity.karma_penalty(doc)
         lines = [
             "--- 业力与位面青睐 ---",
-            f"业力：{karma}｜突破成功率 {penalty:.0%}"
-            f"（每 {100} 点 -10%，上限 -30%）",
+            f"业力：{karma}｜突破成功率 {penalty:.0%}（每 100 点 -10%，上限 -30%）",
             f"位面青睐：{favor}｜悟道时满 {calamity.PLANE_FAVOR_WUDAO_COST} 点自动消耗，换 +20% 感悟",
             "业力来源：天魔炼化灾厄残躯 +50；消减：伏诛域外灾厄 -5~10、镇压魔主 -20",
             "青睐来源：伏诛域外灾厄 +5~20、镇压魔主 +50（#遨游时间长河 遇悟道时消耗）",
