@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -433,6 +433,14 @@ CMD_MEM_ADV = "#命途行进"
 CMD_MEM_JOURNEY = "#逐火之旅"
 CMD_MEM_TITAN = "#泰坦试炼"
 CMD_MEM_FACTORS = "#记忆因子"
+# W8-B2a：内景地（第二仓库）
+CMD_IW_OPEN = "#开启内景地"
+CMD_IW_PANEL = "#我的内景地"
+CMD_IW_UPGRADE = "#升级内景地"
+CMD_IW_PUT = "#存入内景地"
+CMD_IW_TAKE = "#取出内景地"
+CMD_IW_PUT_ALL = "#一键存入内景地"
+CMD_IW_TAKE_ALL = "#一键取出内景地"
 # W7-4：养成深度（灵根觉醒 / 寿元救援 / 帝兵铭文 / 职业产线 / 道法卡）
 CMD_LG_AWAKEN = "#灵根觉醒"
 CMD_RESCUE = "#轮回救人"
@@ -798,6 +806,11 @@ class ZhutianPlugin(Star):
                 hp=int(st.hp * mult), bao=st.bao, set_lines=st.set_lines,
             )
         return st
+
+    def _cls_of(self, name: str) -> str:
+        """物品类别（内景地占格按类别算）。"""
+        row = self.item_index.get(str(name or ""))
+        return str((row or {}).get("class") or "")
 
     def _hp_pair(self, doc: PlayerDoc) -> tuple[int, int]:
         """(当前气血, 上限)。ext 缺失视为满血；上限缩小时自动钳制。"""
@@ -10786,6 +10799,148 @@ class ZhutianPlugin(Star):
             await self.db.save_player(doc.model_dump())
         tail = "\n".join(log[-4:])
         async for r in self._smart(event, f"{tail}\n{msg}", "泰坦试炼"):
+            yield r
+
+    # ---- W8-B2a：内景地（第二仓库，原版 neijingdi.js 1019） ----
+
+    @filter.command(CMD_IW_OPEN, alias={"#开辟内景地"})
+    async def handle_iw_open(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = iw_mod.open_world(doc)
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, msg, "开启内景地"):
+            yield r
+
+    @filter.command(CMD_IW_PANEL, alias={"#查看内景地"})
+    async def handle_iw_panel(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, iw_mod.panel(doc, self._cls_of), "我的内景地"):
+            yield r
+
+    @filter.command(CMD_IW_UPGRADE, alias={"#升级内景地空间"})
+    async def handle_iw_upgrade(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = iw_mod.upgrade(doc)
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, msg, "升级内景地"):
+            yield r
+
+    @filter.command(CMD_IW_PUT, "存入内景地")
+    async def handle_iw_put(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        parts = (arg or "").replace("*", " ").split()
+        if not parts:
+            yield event.plain_result(f"用法：{CMD_IW_PUT} 物品 [数量|全部]")
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        have = int(inv.get(parts[0], 0) or 0)
+        if have <= 0:
+            yield event.plain_result(f"纳戒里没有【{parts[0]}】。")
+            return
+        qty = have if (len(parts) > 1 and parts[1] in ("全部", "all")) else \
+            (int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 1)
+        ok, msg, real = iw_mod.deposit(doc, inv, parts[0], qty, self._cls_of)
+        if not ok or real <= 0:
+            yield event.plain_result(msg if not ok else "内景地容量不足，未存入。")
+            return
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            await self.db.remove_item(doc.uid, parts[0], real)
+        async for r in self._smart(event, msg, "存入内景地"):
+            yield r
+
+    @filter.command(CMD_IW_TAKE, "取出内景地")
+    async def handle_iw_take(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        parts = (arg or "").replace("*", " ").split()
+        if not parts:
+            yield event.plain_result(f"用法：{CMD_IW_TAKE} 物品 [数量|全部]")
+            return
+        st = iw_mod.state_of(doc)
+        if st is None:
+            yield event.plain_result("尚未开辟内景地（#开启内景地）。")
+            return
+        have = int(st["items"].get(parts[0], 0) or 0)
+        if have <= 0:
+            yield event.plain_result(f"内景地中没有【{parts[0]}】。")
+            return
+        qty = have if (len(parts) > 1 and parts[1] in ("全部", "all")) else \
+            (int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 1)
+        ok, msg, real = iw_mod.withdraw(doc, parts[0], qty, self._cls_of)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            await self.db.add_items(doc.uid, {parts[0]: real})
+        async for r in self._smart(event, msg, "取出内景地"):
+            yield r
+
+    @filter.command(CMD_IW_PUT_ALL, "一键存入内景地")
+    async def handle_iw_put_all(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        ok, msg, moved = iw_mod.deposit_all(doc, inv, self._cls_of)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            for name, qty in moved.items():
+                await self.db.remove_item(doc.uid, name, qty)
+        async for r in self._smart(event, msg, "一键存入"):
+            yield r
+
+    @filter.command(CMD_IW_TAKE_ALL, "一键取出内景地")
+    async def handle_iw_take_all(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        cls = (arg or "").replace("*", " ").strip().split()
+        cls = cls[0] if cls else ""
+        ok, msg, moved = iw_mod.withdraw_all(doc, cls, self._cls_of)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            await self.db.add_items(doc.uid, moved)
+        async for r in self._smart(event, msg, "一键取出"):
             yield r
 
     # ---- W7-4：养成深度（灵根觉醒 / 寿元救援 / 帝兵铭文 / 职业产线 / 道法卡） ----

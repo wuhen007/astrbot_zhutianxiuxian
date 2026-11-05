@@ -4390,6 +4390,50 @@ async def main():
     assert mm34.equivalent_level(d34) == 25
     print("W8-B5 memory path ok")
 
+    # ================= W8-B2a 内景地（第二仓库） =================
+    from core import inner_world as iw35
+    CLS35 = {"长剑": "装备", "回春丹": "丹药", "青鸾": "仙宠"}
+    cls35 = lambda n: CLS35.get(n, "")
+    d35 = PlayerDoc(uid="w8iw", stones=6_000_000, ext={})
+    # ① 开启：灵石门槛 / 1 级 500 格
+    poor35 = PlayerDoc(uid="w8iw0", stones=0, ext={})
+    assert not iw35.open_world(poor35)[0]
+    ok35, msg35 = iw35.open_world(d35)
+    assert ok35 and d35.stones == 1_000_000
+    st35 = iw35.state_of(d35)
+    assert st35["level"] == 1 and iw35.capacity(st35) == 500
+    # ② 占格权重：装备 2 / 仙宠 3 / 丹药 0.5
+    assert iw35.weight_of("装备") == 2 and iw35.weight_of("仙宠") == 3
+    assert iw35.weight_of("丹药") == 0.5 and iw35.weight_of("怪东西") == 1
+    # ③ 存入：容量不足时按剩余格数缩量，返回实存数量
+    ok35, msg35, real35 = iw35.deposit(d35, {"长剑": 300}, "长剑", 300, cls35)
+    assert ok35 and real35 == 250                    # 500 格 ÷ 2
+    assert iw35.used(iw35.state_of(d35), cls35) == 500
+    assert not iw35.deposit(d35, {"回春丹": 5}, "回春丹", 5, cls35)[0]   # 已满
+    # ④ 升级：等级 × 50 万，容量 +500
+    ok35, msg35 = iw35.upgrade(d35)
+    assert ok35 and d35.stones == 500_000
+    assert iw35.state_of(d35)["level"] == 2 and iw35.capacity(iw35.state_of(d35)) == 1000
+    # ⑤ 取出：部分取出 / 取空后删除键
+    ok35, msg35, real35 = iw35.withdraw(d35, "长剑", 100, cls35)
+    assert ok35 and real35 == 100
+    assert iw35.used(iw35.state_of(d35), cls35) == 300
+    ok35, _m, real35 = iw35.withdraw(d35, "长剑", 999, cls35)
+    assert real35 == 150 and "长剑" not in iw35.state_of(d35)["items"]
+    # ⑥ 一键存入：按占格从小到大装，装满即止
+    ok35, msg35, moved35 = iw35.deposit_all(
+        d35, {"长剑": 5, "回春丹": 4, "青鸾": 1}, cls35)
+    assert ok35 and moved35 == {"长剑": 5, "回春丹": 4, "青鸾": 1}
+    assert iw35.used(iw35.state_of(d35), cls35) == 10 + 2 + 3
+    # ⑦ 一键取出：按类别筛选
+    ok35, msg35, moved35 = iw35.withdraw_all(d35, "装备", cls35)
+    assert ok35 and moved35 == {"长剑": 5}
+    assert "长剑" not in iw35.state_of(d35)["items"]
+    assert "回春丹" in iw35.state_of(d35)["items"]
+    # ⑧ 未开启时的提示
+    assert "未开" in iw35.panel(PlayerDoc(uid="w8iw2", ext={}), cls35)
+    print("W8-B2a inner world storage ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 
