@@ -4269,6 +4269,66 @@ async def main():
     assert rein32.force_chance({"realm": 50}, PlayerDoc(uid="c", realm_index=0, ext={})) == 0.10
     print("W8-A4 reincarnation ok")
 
+    # ================= W8-B1a 灵根觉醒·体质线 =================
+    from core import bloodline as bl33
+    from core import authority as au33
+    tbl33 = store.table("item/灵根列表")
+    d33 = PlayerDoc(uid="w8blood", realm_index=7,
+                    ext={"linggen": {"type": "圣体", "name": "荒古圣体", "awaken": 2}})
+    # ① 体质线识别 + 指令线与体质不符拒绝
+    assert bl33.line_of(d33) == "圣体"
+    ok33, msg33 = bl33.awaken(d33, tbl33, "霸体")
+    assert not ok33 and "不能走" in msg33
+    # ② 境界门槛 / 秘境完成度门槛
+    assert not bl33.awaken(d33, tbl33, "圣体")[0]        # 秘境 0
+    st33 = bl33.state_of(d33)
+    st33["secret"]["轮海"] = 50
+    st33["secret"]["道宫"] = 50
+    bl33.set_state(d33, st33)
+    low33 = PlayerDoc(uid="w8blood0", realm_index=5,
+                      ext={"linggen": {"type": "圣体", "name": "荒古圣体"}})
+    st33b = bl33.state_of(low33)
+    st33b["secret"].update({"轮海": 60, "道宫": 60})
+    bl33.set_state(low33, st33b)
+    assert not bl33.awaken(low33, tbl33, "圣体")[0]      # 第 6 境，未到 7
+    # ③ 小成：替换灵根快照、保留通用觉醒档、阶段 +1
+    ok33, msg33 = bl33.awaken(d33, tbl33, "圣体")
+    assert ok33 and "小成·荒古圣体" in msg33
+    assert d33.ext["linggen"]["name"] == "小成·荒古圣体"
+    assert d33.ext["linggen"]["awaken"] == 2              # W7-4 档位不被清零
+    assert bl33.state_of(d33)["stage"] == 1
+    # ④ 大成：需第 15 境 + 四处圆满
+    assert not bl33.awaken(d33, tbl33, "圣体")[0]
+    d33.realm_index = 15
+    assert not bl33.awaken(d33, tbl33, "圣体")[0]         # 只两处 50
+    st33 = bl33.state_of(d33)
+    for k in bl33.SECRETS:
+        st33["secret"][k] = 100
+    bl33.set_state(d33, st33)
+    ok33, msg33 = bl33.awaken(d33, tbl33, "圣体")
+    assert ok33 and d33.ext["linggen"]["name"] == "大成·荒古圣体"
+    assert bl33.state_of(d33)["stage"] == 2
+    assert not bl33.awaken(d33, tbl33, "圣体")[0]         # 已圆满
+    # ⑤ 打磨：补最低一处、上限 100
+    d33b = PlayerDoc(uid="w8grind", ext={})
+    st33c = bl33.state_of(d33b)
+    st33c["secret"] = {"轮海": 10, "道宫": 4, "四极": 30, "化龙": 60}
+    bl33.set_state(d33b, st33c)
+    assert bl33.grind(d33b) == "道宫"
+    assert bl33.state_of(d33b)["secret"]["道宫"] == 4 + bl33.GRIND_PER_RUN
+    st33c = bl33.state_of(d33b)
+    st33c["secret"] = {k: 100 for k in bl33.SECRETS}
+    bl33.set_state(d33b, st33c)
+    assert bl33.grind(d33b) == ""                          # 全满不再增长
+    # ⑥ 第三轨注册制：register_track 后并入 authority_of 的 max 链
+    base33 = PlayerDoc(uid="w8track", realm_index=10, physique_index=8, ext={})
+    assert au33.authority_of(base33) == 10
+    au33.register_track(lambda d: 40)
+    assert au33.extra_levels(base33) == [40]
+    assert au33.authority_of(base33) == 40
+    assert au33.authority_of(PlayerDoc(uid="w8track2", realm_index=50, ext={})) == 50
+    print("W8-B1a bloodline awaken ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -420,6 +420,11 @@ CMD_REIN_NEAR = "#附近纳戒"
 CMD_REIN_LOOK = "#查询纳戒"
 CMD_REIN_PICK = "#捡取纳戒"
 CMD_REIN_FORCE = "#强闯轮回路"
+# W8-B1a：灵根觉醒·体质线
+CMD_SG_AWAKE = "#圣体觉醒"
+CMD_BT_AWAKE = "#霸体觉醒"
+CMD_YT_AWAKE = "#妖体觉醒"
+CMD_BLOOD = "#我的血脉"
 # W7-4：养成深度（灵根觉醒 / 寿元救援 / 帝兵铭文 / 职业产线 / 道法卡）
 CMD_LG_AWAKEN = "#灵根觉醒"
 CMD_RESCUE = "#轮回救人"
@@ -10603,6 +10608,51 @@ class ZhutianPlugin(Star):
         async for _r in self._rein_claim(event, row):
             yield _r
 
+    # ---- W8-B1a：灵根觉醒·体质线（原版 linggenjuexing.js 1250） ----
+
+    @filter.command(CMD_BLOOD, "我的血脉")
+    async def handle_blood(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, bloodline.status_text(doc), "我的血脉"):
+            yield r
+
+    async def _awaken_blood(self, event: AstrMessageEvent, expect: str):
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = bloodline.awaken(doc, self.content.table("item/灵根列表") or [], expect)
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, msg, "体质觉醒"):
+            yield r
+
+    @filter.command(CMD_SG_AWAKE, "圣体觉醒")
+    async def handle_sg_awake(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        async for r in self._awaken_blood(event, "圣体"):
+            yield r
+
+    @filter.command(CMD_BT_AWAKE, "霸体觉醒")
+    async def handle_bt_awake(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        async for r in self._awaken_blood(event, "霸体"):
+            yield r
+
+    @filter.command(CMD_YT_AWAKE, "妖体觉醒")
+    async def handle_yt_awake(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        async for r in self._awaken_blood(event, "妖体"):
+            yield r
+
     # ---- W7-4：养成深度（灵根觉醒 / 寿元救援 / 帝兵铭文 / 职业产线 / 道法卡） ----
 
     @filter.command(CMD_LG_AWAKEN, "灵根觉醒")
@@ -11819,14 +11869,18 @@ class ZhutianPlugin(Star):
             yield event.plain_result(f"{flavor}\n{text}")
             return
         d.state = "秘境中"
+        grown = bloodline.grind(d)          # W8-B1a：每次成功寻宝打磨一处秘境
         if drop_items:
             async with self.db.transaction():
                 await self.db.save_player(d.model_dump())
                 await self.db.add_items(doc.uid, drop_items)
         else:
             await self.db.save_player(d.model_dump())
+        tail_grow = (f"\n（{grown}秘境 +{bloodline.GRIND_PER_RUN}%，#我的血脉 查看）"
+                     if grown else "")
         yield event.plain_result(
             f"{flavor}\n第 {sess.floor} 层 · 本次已获 {sess.stones} 灵石 · 气血 {me.hp}/{st.hp}"
+            f"{tail_grow}"
         )
 
     @filter.command(CMD_FLEE, "秘境撤离")
