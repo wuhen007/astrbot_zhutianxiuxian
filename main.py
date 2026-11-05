@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, equipment, era as era_mod, extras, faction, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -298,6 +298,10 @@ CMD_PLANE_CLUE = "#求购位面线索"
 CMD_PLANE_EXPLORE = "#探索位面线索"
 CMD_PLANE_TRAVEL = "#穿梭"
 CMD_PLANE_ARRIVE = "#抵达"
+# W7-5b：维度壁垒
+CMD_PLANE_MARK = "#刻画坐标"
+CMD_PLANE_DESTROY = "#毁灭位面"
+CMD_PLANE_REPAIR = "#修复位面"
 CMD_RIFT = "#裂界副本"
 CMD_RIFT_ENTER = "#进入裂界"
 CMD_RIFT_STABLE = "#裂界稳阵"
@@ -970,6 +974,9 @@ class ZhutianPlugin(Star):
                 (CMD_PLANE, "诸天星路：当前位置/记忆坐标/11 位面航程"),
                 (f"{CMD_PLANE_MAP} [位面]", "位面方图（区域/地点/未探灰化）"),
                 (f"{CMD_PLANE_GO} x,y", "界内移动（首次抵达地点得灵石+修为）"),
+                (f"{CMD_PLANE_MARK} 位面 x,y", "刻画坐标锚点（30 万灵石，之后可直达）"),
+                (CMD_PLANE_DESTROY, "管理员：抹除位面（记录来源，界门永闭）"),
+                (CMD_PLANE_REPAIR, "管理员：修复毁灭位面"),
                 (f"{CMD_PLANE_REMEMBER} 位面", f"记坐标（星图×1，或灵石 {plane.STAR_MAP_ALT_COST:,}）"),
                 (CMD_PLANE_KNOWN, "坐标记忆与地点探索度"),
                 (f"{CMD_PLANE_CLUE} 位面", f"求购线索（{plane.CLUE_COST:,} 灵石）"),
@@ -7946,6 +7953,12 @@ class ZhutianPlugin(Star):
             await self.db.save_player(d.model_dump())
         return d, msg
 
+    async def _dead_planes(self) -> dict:
+        """全服位面毁灭记录（存于 calamity_state，W7-5b）。"""
+        state = calamity.ensure(await self.db.get_calamity())
+        rows = state.get("destroyed_planes")
+        return dict(rows) if isinstance(rows, dict) else {}
+
     @filter.command(CMD_PLANE, "诸天星路")
     async def handle_plane(self, event: AstrMessageEvent):
         if not self._allowed(event):
@@ -7955,7 +7968,8 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         doc, arrived = await self._plane_sync(doc)
-        text = plane.plane_text(doc, self._plane_data(), self._realm_names(), time.time())
+        text = plane.plane_text(doc, self._plane_data(), self._realm_names(),
+                                time.time(), await self._dead_planes())
         if arrived:
             text = arrived + "\n\n" + text
         async for r in self._smart(event, text, "诸天星路"):
@@ -8121,13 +8135,87 @@ class ZhutianPlugin(Star):
             yield event.plain_result(f"格式：{CMD_PLANE_TRAVEL} 位面名（如 {CMD_PLANE_TRAVEL} 仙界）")
             return
         doc, arrived = await self._plane_sync(doc)
-        ok, msg = plane.begin_travel(doc, raw, self._plane_data(), time.time())
+        ok, msg = plane.begin_travel(doc, raw, self._plane_data(), time.time(),
+                                     await self._dead_planes())
         if not ok:
             yield event.plain_result((arrived + "\n" if arrived else "") + msg)
             return
         await self.db.save_player(doc.model_dump())
         async for r in self._smart(event, (arrived + "\n" if arrived else "") + msg, "穿梭位面"):
             yield r
+
+    @filter.command(CMD_PLANE_MARK, "刻画坐标")
+    async def handle_plane_mark(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        parts = (event.get_message_str() or "").strip().replace("，", ",").split()
+        if len(parts) < 3 or "," not in parts[2]:
+            yield event.plain_result(f"格式：{CMD_PLANE_MARK} 位面 x,y（如 {CMD_PLANE_MARK} 上苍之上 500,600）")
+            return
+        try:
+            x, y = (int(v) for v in parts[2].split(",", 1))
+        except ValueError:
+            yield event.plain_result("坐标须为整数，例如 500,600。")
+            return
+        ok, msg = plane.mark_coordinate(doc, parts[1], x, y, time.time())
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_PLANE_DESTROY, "毁灭位面")
+    async def handle_plane_destroy(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not event.is_admin:
+            yield event.plain_result("此权柄唯管理员可执。")
+            return
+        parts = (event.get_message_str() or "").strip().split()
+        if len(parts) < 2:
+            yield event.plain_result(f"格式：{CMD_PLANE_DESTROY} 位面名 [来源]")
+            return
+        name = parts[1]
+        source = parts[2] if len(parts) > 2 else "管理员抹除"
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if name not in plane.LEVELS:
+            yield event.plain_result(f"没有「{name}」这个位面。")
+            return
+        async with self.db.transaction():
+            state = calamity.ensure(await self.db.get_calamity())
+            state.setdefault("destroyed_planes", {})[name] = {
+                "source": source, "at": time.time(), "by": doc.name or doc.uid}
+            await self.db.save_calamity(state)
+        yield event.plain_result(f"【位面毁灭】{name} 已崩灭（来源：{source}），界门封闭，任何人不得进入。")
+
+    @filter.command(CMD_PLANE_REPAIR, "修复位面")
+    async def handle_plane_repair(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not event.is_admin:
+            yield event.plain_result("此权柄唯管理员可执。")
+            return
+        parts = (event.get_message_str() or "").strip().split()
+        if len(parts) < 2:
+            yield event.plain_result(f"格式：{CMD_PLANE_REPAIR} 位面名")
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if parts[1] not in await self._dead_planes():
+            yield event.plain_result(f"「{parts[1]}」并未毁灭，无需修复。")
+            return
+        async with self.db.transaction():
+            state = calamity.ensure(await self.db.get_calamity())
+            state.setdefault("destroyed_planes", {}).pop(parts[1], None)
+            await self.db.save_calamity(state)
+        yield event.plain_result(f"【界门重开】{parts[1]} 位面自毁灭中复苏，可再度进入。")
 
     @filter.command(CMD_PLANE_ARRIVE, "抵达")
     async def handle_plane_arrive(self, event: AstrMessageEvent):
@@ -10397,6 +10485,18 @@ class ZhutianPlugin(Star):
         d.state = "空闲"
         d.state_start = 0.0
         d.ext.pop("explore", None)
+        dungeon_note = ""
+        if sess.dungeon:
+            found = dungeon.find(sess.dungeon, self.content.table)
+            if found:
+                exp_g, shou_g = dungeon.rewards_of(found[0], sess.floor)
+                if exp_g:
+                    d.exp += exp_g
+                if shou_g:
+                    lifespan.grant(d, shou_g)
+                if exp_g or shou_g:
+                    dungeon_note = (f"副本额外：修为 +{exp_g:,}"
+                                    + (f"｜寿元 +{shou_g:,}" if shou_g else ""))
         fund_note = ""
         async with self.db.transaction():
             await self.db.save_player(d.model_dump())
@@ -10416,6 +10516,8 @@ class ZhutianPlugin(Star):
             lines.append("物品：" + "、".join(f"{n}×{q}" for n, q in sess.items.items()))
         else:
             lines.append("物品：无")
+        if dungeon_note:
+            lines.append(dungeon_note)
         if fund_note:
             lines.append(fund_note.strip())
         return "\n".join(lines)
@@ -10471,10 +10573,24 @@ class ZhutianPlugin(Star):
             yield event.plain_result(f"道友正在「{doc.state}」中，无法分心。")
             return
         name = (place or "").strip()
-        if name not in secret.PLACES:
-            yield event.plain_result(f"格式：{CMD_ENTER} 名字（可选：{' / '.join(secret.PLACES)}）")
-            return
-        gate = secret.PLACES[name][0]
+        drow: dict = {}
+        kind = ""
+        fee = 0
+        if name in secret.PLACES:
+            gate = secret.PLACES[name][0]
+            desc = secret.PLACES[name][2]
+        else:
+            found = dungeon.find(name, self.content.table)
+            if not found:
+                yield event.plain_result(
+                    f"格式：{CMD_ENTER} 名字（可选：{' / '.join(secret.PLACES)}；"
+                    f"或 #禁地 / #仙境 / #下界八域 / #九天十地 里的地名）")
+                return
+            drow, kind = found
+            gate = dungeon.gate_of(drow.get("Price", 0))
+            fee = dungeon.fee_of(drow.get("Price", 0))
+            desc = (f"{drow.get('Grade') or kind}｜门票 {fee:,} 灵石｜"
+                    f"掉落 {len(dungeon.pool_of(drow))} 种")
         if doc.realm_index < gate:
             table = self.content.table(doc.realm_table)
             need = table[min(gate, len(table) - 1)]["level"]
@@ -10484,13 +10600,21 @@ class ZhutianPlugin(Star):
         if hp_cur <= hp_max * 0.3:
             yield event.plain_result("气血太虚，先疗伤再进秘境。")
             return
+        if fee and int(doc.stones) < fee:
+            yield event.plain_result(f"进入【{name}】需门票 {fee:,} 灵石（当前 {int(doc.stones):,}）。")
+            return
         d = doc.model_copy(deep=True)
         d.state = "秘境中"
-        sess = secret.Session(place=name)
-        d.ext["explore"] = {"place": sess.place, "floor": 0, "stones": 0, "items": {}, "log": []}
+        if fee:
+            d.stones -= fee
+        sess = secret.Session(place=name,
+                              factor=dungeon.factor_of(drow.get("Price", 0)) if drow else 0.0,
+                              dungeon=name if drow else "")
+        d.ext["explore"] = {"place": sess.place, "floor": 0, "stones": 0, "items": {}, "log": [],
+                            "factor": sess.factor, "dungeon": sess.dungeon}
         await self.db.save_player(d.model_dump())
         yield event.plain_result(
-            f"道友降临【{name}】。{secret.PLACES[name][2]}\n"
+            f"道友降临【{name}】。{desc}\n"
             f"发「{CMD_SEARCH}」寻宝，发「{CMD_FLEE}」携带收获撤离。"
         )
 
@@ -10553,8 +10677,13 @@ class ZhutianPlugin(Star):
                               f"你在{enemy}的攻势落下前被挪出秘境，收获未失，气血尽复。")
             return None
 
+        pool = self.drop_pool
+        if sess.dungeon:
+            found = dungeon.find(sess.dungeon, self.content.table)
+            if found:
+                pool = dungeon.pool_of(found[0]) or pool
         sess, me, flavor, fled = secret.explore(
-            sess, base, me, self.drop_pool, rng, sect_mode=bool(sess.sect_name), me_fighter=me_fighter,
+            sess, base, me, pool, rng, sect_mode=bool(sess.sect_name), me_fighter=me_fighter,
             treasure_bonus=mingge.bonus(doc, "寻宝加成"),
             buff=_buff, protect=_protect,
             loot_rates=era_mod.seal_rates(await self._era_state()),

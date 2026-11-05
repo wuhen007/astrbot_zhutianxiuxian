@@ -332,7 +332,7 @@ def dungeon_list(kind: str, content: Callable[[str], Any]) -> str:
     for r in rows:
         lines.append(f"· {r.get('name', '?')}｜价 {int(r.get('Price', 0) or 0):,}"
                      f"｜极品 {','.join(r.get('Best') or []) or '—'}")
-    lines.append("掉落查询：#副本掉落 地点名；进入探索：#降临秘境 名字（本移植 4 处秘境）")
+    lines.append("掉落查询：#副本掉落 地点名；进入：#降临秘境 地点名（表内地点均可进，另有 4 处程序化秘境）")
     return "\n".join(lines)
 
 

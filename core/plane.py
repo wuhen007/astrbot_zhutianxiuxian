@@ -36,6 +36,29 @@ GATES: dict[str, int] = {
     "太初星墟": 34, "小阴间": 36, "大阴间": 39, "仙界": 41, "仙域": 46, "阳间": 49,
 }
 
+# ---------------------------------------------------------------- W7-5b 维度壁垒
+# 原版 model/weimianTravel.js:128-162：高维位面无方图，靠「破界强度」而非境界进入
+HIGH_DIMENSIONS: dict[str, dict] = {
+    "上苍之上": {"layer": 1, "power": 50, "desc": "界壁之上的第一重天，仙帝方可凭权柄触及。"},
+    "超维宇宙": {"layer": 2, "power": 30, "desc": "维度褶皱里的残破宇宙，到处是别处的碎片。"},
+    "厄土高原": {"layer": 3, "power": 60, "desc": "诡异源头盘踞之地，业力深重者反被吸引。"},
+    "永恒未知之地": {"layer": 3, "power": 65, "desc": "时间失去意义，进入者多不再回来。"},
+    "百维真界": {"layer": 4, "power": 80, "desc": "百重维度叠成的真界，一沙一世界。"},
+    "原初宇宙海": {"layer": 5, "power": 90, "desc": "万物未分之前的宇宙海，混沌翻涌。"},
+    "千维宙古界": {"layer": 6, "power": 100, "desc": "千维交织的宙古之界，神纹如网。"},
+    "万维梵宇界": {"layer": 7, "power": 120, "desc": "万维梵唱，一花一梵宇。"},
+    "神维丝线海": {"layer": 8, "power": 150, "desc": "维度之丝汇成的海，尽头通向不可名状。"},
+}
+BREAKING_POWER: dict[int, int] = {20: 30, 21: 65, 22: 80, 23: 100, 24: 120, 25: 150}
+EMPEROR_FREE_TRAVEL: frozenset[str] = frozenset(
+    set(PLANES) | {"上苍之上", "永恒未知之地", "厄土高原"})
+MARK_COST = 300_000              # #刻画坐标：原版 3 亿 ÷1000
+
+# 高维位面并入可旅行表：层级即壁垒重数，境界门槛交由破界强度判定
+PLANES = PLANES + tuple(HIGH_DIMENSIONS)
+LEVELS.update({name: float(cfg["layer"] + 7) for name, cfg in HIGH_DIMENSIONS.items()})
+GATES.update({name: 10 ** 9 for name in HIGH_DIMENSIONS})
+
 BASE_MIN_PER_LEVEL = 15
 REDUCE_MAX = 0.6
 EXP_PER_LEVEL = 800_000
@@ -61,6 +84,8 @@ def state_of(doc: Any) -> dict:
     st.setdefault("discovered", {})
     st.setdefault("clue_day", "")
     st.setdefault("travel", None)
+    st.setdefault("marks", {})        # 已刻画坐标：位面 → {x,y,at}
+    st.setdefault("destroyed", {})    # 位面毁灭记录：位面 → {source,at}
     ext["plane"] = st
     return st
 
@@ -149,6 +174,95 @@ def _meets(doc: Any, gate: int) -> bool:
     return meets(doc, gate)
 
 
+# ---------------------------------------------------------------- W7-5b 维度壁垒 / 刻画 / 毁灭
+
+def dim_tier(doc: Any) -> int:
+    """双轨权柄 → 原版 0-25 破界档（63 境折 25 档，区别于 authority_21 的 0-21 映射）。"""
+    from .authority import authority_of
+    return min(25, authority_of(doc) * 25 // 63)
+
+
+def breaking_power(doc: Any) -> int:
+    return BREAKING_POWER.get(dim_tier(doc), 0)
+
+
+def is_high_dim(name: str) -> bool:
+    return name in HIGH_DIMENSIONS
+
+
+def emperor_free_travel(doc: Any, src: str, target: str) -> bool:
+    """仙帝（21 档+）可在诸天与三处界壁间自由通行，无视破界强度。"""
+    return (dim_tier(doc) >= 21 and src in EMPEROR_FREE_TRAVEL
+            and target in EMPEROR_FREE_TRAVEL)
+
+
+def destroyed_of(st: Mapping, plane: str) -> dict | None:
+    row = (st.get("destroyed") or {}).get(plane)
+    return dict(row) if isinstance(row, Mapping) else None
+
+
+def destroy_plane(st: dict, plane: str, source: str, now: float) -> bool:
+    if plane not in LEVELS:
+        return False
+    st.setdefault("destroyed", {})[plane] = {"source": str(source or "未知"), "at": float(now)}
+    return True
+
+
+def repair_plane(st: dict, plane: str) -> bool:
+    rows = st.get("destroyed")
+    if not isinstance(rows, dict) or plane not in rows:
+        return False
+    rows.pop(plane, None)
+    return True
+
+
+def barrier_check(doc: Any, src: str, target: str,
+                  destroyed: Mapping | None = None) -> tuple[bool, str]:
+    """进入目标位面前的维度判定：毁灭记录 → 高维壁垒 → 仙帝通行。
+
+    destroyed：全服毁灭记录（存 calamity_state，由调用方读出来传进来）。
+    """
+    st = state_of(doc)
+    rows = destroyed if isinstance(destroyed, Mapping) else (st.get("destroyed") or {})
+    row = rows.get(target)
+    dead = dict(row) if isinstance(row, Mapping) else None
+    if dead:
+        return False, (f"【{target}】已毁灭（{dead.get('source')}），界门永闭，"
+                       f"唯有管理员 #修复位面 可重开。")
+    if target not in HIGH_DIMENSIONS:
+        return True, ""
+    if emperor_free_travel(doc, src, target):
+        return True, ""
+    cfg = HIGH_DIMENSIONS[target]
+    power = breaking_power(doc)
+    if power < cfg["power"]:
+        return False, (f"【维度壁垒】{target} 藏在第 {cfg['layer']} 重界壁之后，"
+                       f"需破界强度 {cfg['power']}（当前 {power}，权柄 {dim_tier(doc)}/25）。\n"
+                       f"{cfg['desc']}")
+    return True, ""
+
+
+def mark_coordinate(doc: Any, plane: str, x: int, y: int, now: float) -> tuple[bool, str]:
+    """#刻画坐标：把一处坐标锚点刻进神魂，之后可据此穿梭（原版已刻画坐标）。"""
+    plane = (plane or "").strip()
+    if plane not in LEVELS:
+        return False, f"没有「{plane}」这个位面。"
+    if not (0 <= int(x) <= 999 and 0 <= int(y) <= 999):
+        return False, "坐标需在 0-999 之间。"
+    st = state_of(doc)
+    if plane in (st.get("marks") or {}):
+        return False, f"【{plane}】的坐标已刻画过（{st['marks'][plane]['x']}, {st['marks'][plane]['y']}）。"
+    if int(doc.stones) < MARK_COST:
+        return False, f"刻画坐标需 {MARK_COST:,} 灵石（当前 {int(doc.stones):,}）。"
+    doc.stones -= MARK_COST
+    st.setdefault("marks", {})[plane] = {"x": int(x), "y": int(y), "at": float(now)}
+    known = known_of(st)
+    if plane not in known:
+        st["known"] = known + [plane]
+    return True, (f"你以神识在魂海中刻下【{plane}】（{x}, {y}）的坐标锚点，"
+                  f"此后可直接朝此处穿梭（耗 {MARK_COST:,} 灵石）。")
+
+
 def quote(doc: Any, target: str) -> dict:
     """返回 {distance, minutes, exp, xueqi, gate, ok, reason}。"""
     src = current(state_of(doc))
@@ -160,7 +274,9 @@ def quote(doc: Any, target: str) -> dict:
     return {
         "ok": True, "reason": "", "distance": distance, "minutes": minutes,
         "exp": int(distance * EXP_PER_LEVEL), "xueqi": int(distance * XUEQI_PER_LEVEL),
-        "gate": gate, "enough_realm": _meets(doc, gate),
+        "gate": gate,
+        # 高维位面不看境界，改由 barrier_check 的破界强度判定
+        "enough_realm": True if target in HIGH_DIMENSIONS else _meets(doc, gate),
     }
 
 
@@ -175,13 +291,17 @@ def travel_state(st: Mapping, now: float) -> dict | None:
     return out
 
 
-def begin_travel(doc: Any, target: str, data: Mapping, now: float) -> tuple[bool, str]:
+def begin_travel(doc: Any, target: str, data: Mapping, now: float,
+                 destroyed: Mapping | None = None) -> tuple[bool, str]:
     st = state_of(doc)
     src = current(st)
     if target not in LEVELS:
         return False, f"没有「{target}」这个位面。可选：{'、'.join(PLANES)}"
     if target == src:
         return False, f"你已在【{src}】。"
+    ok_barrier, why = barrier_check(doc, src, target, destroyed)
+    if not ok_barrier:
+        return False, why
     if getattr(doc, "state", "空闲") != "空闲":
         return False, f"道友正在「{doc.state}」中，无法分神穿梭。"
     q = quote(doc, target)
@@ -326,7 +446,8 @@ def _gate_label(gate: int, realm_names: Sequence[str]) -> str:
     return f"{name}（{gate}境）"
 
 
-def plane_text(doc: Any, data: Mapping, realm_names: Sequence[str], now: float) -> str:
+def plane_text(doc: Any, data: Mapping, realm_names: Sequence[str], now: float,
+               destroyed: Mapping | None = None) -> str:
     st = state_of(doc)
     plane = current(st)
     coord = coord_of(st, plane)
@@ -337,6 +458,13 @@ def plane_text(doc: Any, data: Mapping, realm_names: Sequence[str], now: float) 
     if chain:
         lines.append(f"所在：{chain_names(chain)}")
     lines.append(f"记忆坐标：{'、'.join(known)}（{len(known)}/{len(PLANES)}）")
+    lines.append(f"破界强度：{breaking_power(doc)}（权柄 {dim_tier(doc)}/25）")
+    marks = st.get("marks") or {}
+    if marks:
+        lines.append("已刻画坐标：" + "、".join(f"{k}({v.get('x')},{v.get('y')})" for k, v in marks.items()))
+    dead = destroyed if isinstance(destroyed, Mapping) else (st.get("destroyed") or {})
+    if dead:
+        lines.append("已毁灭位面：" + "、".join(f"{k}（{v.get('source')}）" for k, v in dead.items()))
     tr = travel_state(st, now)
     if tr:
         lines.append(f"行程：{tr.get('from')} → {tr.get('to')}，"
@@ -347,6 +475,16 @@ def plane_text(doc: Any, data: Mapping, realm_names: Sequence[str], now: float) 
     lines.append("")
     for p in PLANES:
         q = quote(doc, p)
+        if p in HIGH_DIMENSIONS:
+            cfg = HIGH_DIMENSIONS[p]
+            if (destroyed if isinstance(destroyed, Mapping) else {}).get(p) or destroyed_of(st, p):
+                mark = "✖ 已毁灭"
+            elif emperor_free_travel(doc, plane, p) or breaking_power(doc) >= cfg["power"]:
+                mark = f"✔ 破界 {breaking_power(doc)}/{cfg['power']}｜第 {cfg['layer']} 重"
+            else:
+                mark = f"✖ 需破界 {cfg['power']}（现 {breaking_power(doc)}）"
+            lines.append(f"· {p}（壁垒 {cfg['layer']} 重）{mark}")
+            continue
         if p == plane:
             mark = "● 当前"
         elif not q["enough_realm"]:
@@ -358,6 +496,7 @@ def plane_text(doc: Any, data: Mapping, realm_names: Sequence[str], now: float) 
         lines.append(f"· {p}（Lv{LEVELS[p]:g}）{mark}")
     lines.append("")
     lines.append("记忆：#记坐标 位面｜#求购位面线索 位面｜#探索位面线索｜#穿梭 位面")
+    lines.append("高维：#刻画坐标 位面 x,y 可越过「坐标未知」，但仍受维度壁垒限制")
     return "\n".join(lines)
 
 

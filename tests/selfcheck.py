@@ -3865,6 +3865,70 @@ async def main():
     assert cal26.KARMA_REWARD_RANGE == (5, 10) and cal26.FAVOR_REWARD_RANGE == (5, 20)
     print("W7-5c ③ overlord revival ok")
 
+    # 27. W7-5b 维度壁垒 / 刻画坐标 / 位面毁灭 / 副本查询接真
+    from core import plane as pl27, dungeon as dg27
+
+    # ① 破界强度：权柄 20→30、25→150；壁垒按表判定
+    low27 = PlayerDoc(uid="w7p1", realm_index=52,
+                      ext={"plane": {"current": "凡间", "known": ["凡间"]}})
+    assert pl27.dim_tier(low27) == 20 and pl27.breaking_power(low27) == 30
+    assert pl27.barrier_check(low27, "凡间", "超维宇宙")[0]          # 需 30 → 通过
+    ok27, msg27 = pl27.barrier_check(low27, "凡间", "上苍之上")       # 需 50 → 拒绝
+    assert not ok27 and "维度壁垒" in msg27 and "破界强度 50" in msg27
+    high27 = PlayerDoc(uid="w7p2", realm_index=63, exp=10 ** 9,
+                       ext={"plane": {"current": "凡间", "known": ["凡间"]},
+                            "xueqi": 10 ** 9})
+    assert pl27.dim_tier(high27) == 25 and pl27.breaking_power(high27) == 150
+    assert pl27.barrier_check(high27, "凡间", "神维丝线海")[0]       # 需 150 → 通过
+    assert pl27.emperor_free_travel(high27, "仙界", "上苍之上")
+    assert not pl27.emperor_free_travel(low27, "仙界", "上苍之上")
+    print("W7-5b ① dimension barrier ok")
+
+    # ② 穿戴壁垒参与真实穿梭：坐标已知也会被界壁拦下
+    low27.ext["plane"]["known"] = ["凡间", "上苍之上"]
+    ok27, msg27 = pl27.begin_travel(low27, "上苍之上", {}, n6, {})
+    assert not ok27 and "维度壁垒" in msg27
+    high27.ext["plane"]["known"] = ["凡间", "神维丝线海"]
+    ok27, msg27 = pl27.begin_travel(high27, "神维丝线海", {}, n6, {})
+    assert ok27 and "神维丝线海" in msg27, msg27
+    print("W7-5b ② barrier gates travel ok")
+
+    # ③ 刻画坐标：付费、进记忆、重复拒绝；毁灭记录封界、修复后重开
+    d27 = PlayerDoc(uid="w7mark", stones=1_000_000, ext={})
+    ok27, msg27 = pl27.mark_coordinate(d27, "上苍之上", 500, 600, n6)
+    assert ok27 and d27.stones == 1_000_000 - pl27.MARK_COST
+    st27 = pl27.state_of(d27)
+    assert st27["marks"]["上苍之上"] == {"x": 500, "y": 600, "at": n6}
+    assert "上苍之上" in pl27.known_of(st27)
+    assert not pl27.mark_coordinate(d27, "上苍之上", 1, 1, n6)[0]
+    assert not pl27.mark_coordinate(d27, "不存在的位面", 1, 1, n6)[0]
+    dead27 = {"仙界": {"source": "黑暗动乱", "at": n6}}
+    ok27, msg27 = pl27.barrier_check(high27, "凡间", "仙界", dead27)
+    assert not ok27 and "已毁灭" in msg27 and "黑暗动乱" in msg27
+    st27b = pl27.state_of(PlayerDoc(uid="w7dead", ext={}))
+    assert pl27.destroy_plane(st27b, "仙界", "诡异大祭", n6)
+    assert pl27.destroyed_of(st27b, "仙界")["source"] == "诡异大祭"
+    assert pl27.repair_plane(st27b, "仙界") and not pl27.destroyed_of(st27b, "仙界")
+    print("W7-5b ③ marks & plane destruction ok")
+
+    # ④ 副本查询接真：五张表可查、门槛/门票/系数/掉落池/结算折算
+    hit27 = dg27.find("灭仙洞", store.table)
+    assert hit27 and hit27[1] == "禁地"
+    row27 = hit27[0]
+    assert dg27.gate_of(200_000) == 12 and dg27.gate_of(572_000_000) == 50
+    assert dg27.fee_of(200_000) == 5_000 and dg27.fee_of(10 ** 8) == 2_000_000
+    assert dg27.factor_of(200_000) == 1.02 and dg27.factor_of(5 * 10 ** 8) == 3.2
+    pool27 = dg27.pool_of(row27)
+    assert pool27 and all(isinstance(x.get("稀有度"), int) for x in pool27)
+    names27 = [x["name"] for x in pool27]
+    assert len(names27) == len(set(names27))
+    assert dg27.find("仙界矿场", store.table)[1] == "仙境"
+    assert dg27.find("不存在的地方", store.table) is None
+    full27 = dg27.rewards_of(row27, 10)
+    assert full27 == (int(row27["experience"]), int(row27["shouyuan"]))
+    assert dg27.rewards_of(row27, 5)[0] == int(row27["experience"]) // 2
+    print("W7-5b ④ dungeon tables wired ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

@@ -71,6 +71,7 @@ class Session:
     factor: float = 0.0
     sect_name: str = ""    # 非空 = 宗门秘境（每 5 层守关 Boss）
     boss_kills: int = 0    # 本会话击杀守关 Boss 数（结算时宗门基金加成）
+    dungeon: str = ""      # 非空 = 表驱动副本（W7-5b，掉落池/系数来自副本地表）
 
 
 def place_factor(name: str) -> float:

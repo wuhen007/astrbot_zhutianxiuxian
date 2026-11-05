@@ -92,6 +92,7 @@ def default_state() -> dict[str, Any]:
         "next_spawn": OVERLORD_BASE_KILLS,
         "overlord": None,
         "report": None,
+        "destroyed_planes": {},      # W7-5b：全服位面毁灭记录 {位面: {source, at}}
         "era": {
             "index": 0,
             "years": 0,
@@ -168,6 +169,8 @@ def ensure(value: Mapping | None) -> dict[str, Any]:
         state.setdefault(key, default)
     if not isinstance(state.get("calamities"), list):
         state["calamities"] = []
+    if not isinstance(state.get("destroyed_planes"), dict):
+        state["destroyed_planes"] = {}
     if not isinstance(state.get("era"), dict):
         state["era"] = base["era"]
     era = state["era"]
