@@ -128,7 +128,7 @@ def create_market(now: float, seed: int | None = None) -> dict:
             item,
             cash=100_000_000 if item["style"] == "operator" else 20_000_000,
             holdings={s["id"]: {"shares": 100 + index * 20, "cost": (100 + index * 20) * 10000} for s in STOCKS},
-            realized=0, fees=0, plan=None,
+            realized=0, fees=0, plan=None, trades=[],
         ))
     state = {"version": 1, "slot": slot, "rng": rng.s, "stocks": stocks, "npcs": npcs, "news": []}
     add_news(state, "万界灵市开张。初始每张一万灵石；消息与邀约皆含交易对手的立场。")
@@ -137,7 +137,7 @@ def create_market(now: float, seed: int | None = None) -> dict:
 
 def add_news(state: dict, text: str, stock_id: str | None = None, speaker: str | None = None) -> None:
     state["news"].append({"slot": state["slot"], "text": text, "stockId": stock_id, "speaker": speaker})
-    state["news"] = state["news"][-40:]
+    state["news"] = state["news"][-80:]
 
 
 def _limits(stock: dict) -> tuple[int, int]:
@@ -170,6 +170,10 @@ def _npc_trade(state: dict, npc: dict, stock: dict, side: str, wanted: int, rng:
         hold["cost"] -= avg * shares
         hold["shares"] -= shares
     npc["fees"] += fee
+    npc.setdefault("trades", []).append(
+        {"slot": state["slot"], "stockId": stock["id"], "side": side,
+         "shares": shares, "price": price})
+    npc["trades"] = npc["trades"][-8:]
     stock["volume"] += shares
     stock["netVolume"] += shares if side == "buy" else -shares
     return shares if side == "buy" else -shares
@@ -310,6 +314,13 @@ def account_of(doc: PlayerDoc) -> dict:
         acc = {"version": 1, "holdings": {}, "invested": 0, "realized": 0, "fees": 0,
                "last_trade": 0.0, "loan": None}
         doc.ext["market"] = acc
+    # W6-1 社交/债务扩展键；旧档缺键时补齐，不覆盖已有值
+    acc.setdefault("intelCost", 0)      # 打听/查账累计支出
+    acc.setdefault("financeCost", 0)    # 已付利息
+    acc.setdefault("contacts", {})      # npcId -> {favor, verified, wrong}
+    acc.setdefault("tips", [])          # 打听/查账记录（追问核验用）
+    acc.setdefault("chats", {})         # npcId -> {slot, message}，同报价时段缓存
+    acc.setdefault("trades", [])        # 本人最近成交
     return acc
 
 
@@ -324,6 +335,9 @@ def buy(state: dict, doc: PlayerDoc, stock: dict, shares: int, now: float) -> tu
     if shares <= 0 or shares > 100_000:
         return False, "买入张数须在 1~100000 之间。"
     acc = account_of(doc)
+    ds = debt_status(state, doc)
+    if ds["overdue"] or ds["insolvent"]:
+        return False, "【钱万三】逾期或资不抵债，暂停新买入（#还款 后可恢复）。"
     if now - float(acc.get("last_trade") or 0) < TRADE_CD:
         return False, f"交易过于频繁，{TRADE_CD} 秒冷却。"
     price = int(stock["price"])
@@ -386,27 +400,82 @@ def take_loan(state: dict, doc: PlayerDoc, amount: int, now: float) -> tuple[boo
     if amount > net_worth * LOAN_ASSET_MULT:
         return False, f"借款不得超过身家（{net_worth:,}）的 2 倍。"
     doc.stones += amount
-    acc["loan"] = {"principal": amount, "startSlot": state["slot"], "dueSlot": state["slot"] + LOAN_TERM_TICKS}
+    acc["loan"] = {"principal": amount, "initialPrincipal": amount,
+                   "interest": 0, "interestCharged": 0,
+                   "startSlot": state["slot"], "dueSlot": state["slot"] + LOAN_TERM_TICKS}
     return True, (f"【钱万三】拍板借你 {amount:,} 灵石——日息 {LOAN_DAILY_BPS}bps，"
                   f"7 天内连本带息 #还款，逾期利滚利，莫怪商号无情。")
 
 
-def repay(state: dict, doc: PlayerDoc) -> tuple[bool, str]:
+def accrue_loan(state: dict, doc: PlayerDoc) -> None:
+    """按经过的 slot 计单利（离线同样计息，息不生息，封顶本金）。"""
+    acc = account_of(doc)
+    loan = acc.get("loan")
+    if not loan:
+        return
+    cap = int(loan.get("initialPrincipal", loan["principal"]))
+    days = max(0, min(state["slot"], loan["dueSlot"]) - loan["startSlot"]) / 144
+    total = min(cap, int(cap * LOAN_DAILY_BPS / 10000 * days))
+    loan["interest"] = max(0, total - int(loan.get("interestCharged", 0)))
+
+
+def debt_status(state: dict, doc: PlayerDoc) -> dict:
+    """原版 debtStatus：逾期 / 资不抵债判定（buy 前置检查）。"""
+    acc = account_of(doc)
+    loan = acc.get("loan")
+    if not loan:
+        return {"has": False, "overdue": False, "insolvent": False, "debt": 0,
+                "net": int(doc.stones), "principal": 0, "interest": 0}
+    accrue_loan(state, doc)
+    principal = int(loan["principal"])
+    interest = int(loan["interest"])
+    debt = principal + interest
+    liquidation = 0
+    for sid, h in acc["holdings"].items():
+        s = find_stock(state, sid)
+        if s and s.get("delistedAt") is None:
+            liquidation += int(h["shares"]) * int(s["price"])
+    net = int(doc.stones) + liquidation - debt
+    return {"has": True, "overdue": state["slot"] > loan["dueSlot"],
+            "insolvent": net < 0, "debt": debt, "net": net,
+            "principal": principal, "interest": interest}
+
+
+def repay(state: dict, doc: PlayerDoc, amount: int | None = None) -> tuple[bool, str]:
+    """还款：不传 amount = 全额结清（沿用本移植 1.5 倍逾期罚息）；
+    传 amount = 部分还款，先息后本（原版 M:445-458）。
+    """
     acc = account_of(doc)
     loan = acc.get("loan")
     if not loan:
         return False, "你没有未结清的借款。"
-    days = max(0, (min(state["slot"], loan["dueSlot"]) - loan["startSlot"])) / 144
-    owed = int(loan["principal"] * (1 + LOAN_DAILY_BPS / 10000 * days))
+    accrue_loan(state, doc)
+    principal, interest = int(loan["principal"]), int(loan["interest"])
+    debt = principal + interest
     overdue = state["slot"] > loan["dueSlot"]
-    if overdue:
-        owed = int(owed * 1.5)
-    if doc.stones < owed:
-        return False, f"还款需 {owed:,} 灵石（本金 {loan['principal']:,} + 利息），当前 {doc.stones:,}。"
-    doc.stones -= owed
-    acc["loan"] = None
-    return True, (f"还清 {owed:,} 灵石（{'逾期罚息 1.5 倍' if overdue else '按期'}）。"
-                  f"【钱万三】笑道：「好信誉，下次再来。」")
+    if amount is None:
+        owed = int(debt * 1.5) if overdue else debt
+        if doc.stones < owed:
+            return False, f"还款需 {owed:,} 灵石（本金 {principal:,} + 利息 {interest:,}），当前 {doc.stones:,}。"
+        doc.stones -= owed
+        acc["loan"] = None
+        return True, (f"还清 {owed:,} 灵石（{'逾期罚息 1.5 倍' if overdue else '按期'}）。"
+                      f"【钱万三】笑道：「好信誉，下次再来。」")
+    pay = min(int(amount), int(doc.stones), debt)
+    if pay < 1:
+        return False, "还款数量须为正，或灵石不足。"
+    ip = min(pay, interest)
+    pp = pay - ip
+    loan["interest"] = interest - ip
+    loan["interestCharged"] = int(loan.get("interestCharged", 0)) + ip
+    loan["principal"] = max(0, principal - pp)
+    doc.stones -= pay
+    acc["financeCost"] = int(acc.get("financeCost", 0)) + ip
+    if loan["principal"] <= 0 and loan["interest"] <= 0:
+        acc["loan"] = None
+        return True, f"已还清 {pay:,} 灵石（先息后本），【钱万三】收起借据。"
+    return True, (f"还款 {pay:,} 灵石（先息 {ip:,} / 后本 {pp:,}）。"
+                  f"剩余本金 {loan['principal']:,}、利息 {loan['interest']:,}。")
 
 
 def text(state: dict, doc: PlayerDoc | None = None) -> str:
@@ -428,7 +497,8 @@ def text(state: dict, doc: PlayerDoc | None = None) -> str:
         if acc.get("loan"):
             lines.append("⚠ 你有未结清借款（#还款）。")
     lines.append("交易：#买入 名称*张数｜#卖出 名称*张数（-1 清仓）｜#我的灵票｜#灵票走势 名称")
-    lines.append("情报：#打听（1000 灵石）｜#交谈 人物名｜#借款 数量｜#还款｜#灵市收益榜")
+    lines.append("情报：#灵市人物｜#打听 人物名 商会｜#灵市查账 人物名｜#灵市追问 人物名｜#灵市消息")
+    lines.append("钱庄：#借款 数量｜#还款 数量/全部｜#灵市债务｜榜单：#灵市收益榜")
     return "\n".join(lines)
 
 
@@ -468,30 +538,189 @@ def trend_text(state: dict, value: str) -> str:
     return "\n".join(lines)
 
 
-def tip(state: dict, doc: PlayerDoc) -> tuple[bool, str]:
-    """#打听：花 1000 灵石向百晓消息贩买一条倾向线索。"""
+def find_npc(value: str) -> dict | None:
+    return next((n for n in NPCS if n["name"] == (value or "").strip()
+                 or n["id"] == (value or "").strip()), None)
+
+
+def tip(state: dict, doc: PlayerDoc, npc_name: str | None = None,
+        stock_name: str | None = None) -> tuple[bool, str]:
+    """#打听 / #灵市打听：1000 灵石买倾向线索，留档供 #灵市追问 30 分钟后核验。
+
+    shortcut: 原版 adverse 立场欺骗的完整文案省略，改为 favor 决定 60%~70% 命中率。
+    """
     if doc.stones < TIP_COST:
         return False, f"打听完需 {TIP_COST:,} 灵石茶水费。"
-    doc.stones -= TIP_COST
-    rng = random.Random(f"{doc.uid}:tip:{state['slot']}")
-    npc = rng.choice(NPCS)
-    stock = rng.choice([s for s in state["stocks"] if s.get("delistedAt") is None])
-    lean = "看多" if (stock["changeBps"] < 0 and npc["style"] == "contrarian") or \
-                     (stock["changeBps"] > 0 and npc["style"] in ("momentum", "retail")) else "看空"
+    npc = find_npc(npc_name) if npc_name else None
+    if npc_name and not npc:
+        return False, f"灵市没有「{npc_name}」这位人物（#灵市人物 查名单）。"
+    stock = find_stock(state, stock_name) if stock_name else None
+    if stock_name and (not stock or stock.get("delistedAt") is not None):
+        return False, f"「{stock_name}」已摘牌或不存在，打听无门。"
+    tag = f"{npc['id'] if npc else ''}:{stock['id'] if stock else ''}"
+    rng = random.Random(f"{doc.uid}:tip:{state['slot']}:{tag}")
+    npc = npc or rng.choice(NPCS)
+    stock = stock or rng.choice([s for s in state["stocks"] if s.get("delistedAt") is None])
+    bull = (stock["changeBps"] < 0 and npc["style"] == "contrarian") or \
+           (stock["changeBps"] > 0 and npc["style"] in ("momentum", "retail"))
+    direction = 1 if bull else -1
+    favor = int(account_of(doc)["contacts"].get(npc["id"], {}).get("favor", 0) or 0)
+    if rng.random() >= 0.60 + favor / 1000:   # 熟悉度把命中率从 60% 提到 70%
+        direction = -direction
+    lean = "看多" if direction > 0 else "看空"
     hint = rng.choice(CHAT_LINES[npc["style"]])
+    acc = account_of(doc)
+    doc.stones -= TIP_COST
+    acc["intelCost"] = int(acc.get("intelCost", 0) or 0) + TIP_COST
+    acc["tips"].append({"id": f"{state['slot']}:{npc['id']}:{len(acc['tips'])}",
+                        "at": state["slot"] * TICK_MS, "npcId": npc["id"],
+                        "stockId": stock["id"], "price": int(stock["price"]),
+                        "direction": direction, "resolved": False, "kind": "tip",
+                        "message": lean})
+    acc["tips"] = acc["tips"][-40:]
     return True, (f"【{npc['name']}·{npc['title']}】压低声音：\n"
                   f"「{stock['name']}嘛……老夫近来{lean}。」\n"
                   f"「{hint}」\n"
-                  f"（茶水费 {TIP_COST:,} 灵石；消息真假，概不保证）")
+                  f"（茶水费 {TIP_COST:,} 灵石；30 分钟后 #灵市追问 {npc['name']} 可核验）")
 
 
-def chat(state: dict, name: str) -> str:
-    npc = next((n for n in NPCS if n["name"] == name.strip() or n["id"] == name.strip()), None)
+def chat(state: dict, name: str, doc: PlayerDoc | None = None) -> str:
+    npc = find_npc(name)
     if not npc:
         return f"灵市没有「{name}」这位人物。可选：{'、'.join(n['name'] for n in NPCS)}"
     rng = random.Random(f"chat:{state['slot']}:{name}")
     line = rng.choice(CHAT_LINES[npc["style"]])
     stock = rng.choice([s for s in state["stocks"] if s.get("delistedAt") is None])
+    note = ""
+    if doc is not None:
+        acc = account_of(doc)
+        c = acc["contacts"].setdefault(npc["id"], {"favor": 0, "verified": 0, "wrong": 0})
+        cache = acc["chats"].get(npc["id"])
+        if cache and cache.get("slot") == state["slot"]:
+            note = f"\n（熟悉度 {c['favor']}/100；同一报价时段重复交谈不涨好感）"
+        else:
+            c["favor"] = min(100, int(c["favor"]) + 1)
+            acc["chats"][npc["id"]] = {"slot": state["slot"], "message": line}
+            note = f"\n（熟悉度 +1 → {c['favor']}/100）"
     return (f"【{npc['name']}·{npc['title']}】\n"
             f"「{line}」\n"
-            f"（此人近来常在{stock['name']}进出，风格：{npc['style']}）")
+            f"（此人近来常在{stock['name']}进出，风格：{npc['style']}）" + note)
+
+
+# ---------------------------------------------------------------- W6-1 社交 / 查账 / 追问 / 债务
+
+def people_text(state: dict, doc: PlayerDoc) -> str:
+    """#灵市人物：8 位 NPC 与熟悉度、兑现记录。"""
+    acc = account_of(doc)
+    lines = ["--- 灵市人物 ---"]
+    for n in NPCS:
+        c = acc["contacts"].get(n["id"], {})
+        lines.append(f"· {n['name']}（{n['title']}·{n['style']}）｜熟悉度 {int(c.get('favor', 0))}/100"
+                     f"｜兑现 {int(c.get('verified', 0))} / 未兑现 {int(c.get('wrong', 0))}")
+    lines.append("交谈：#交谈 人物名｜打听：#打听 人物名 商会｜核验：#灵市追问 人物名")
+    return "\n".join(lines)
+
+
+def audit(state: dict, doc: PlayerDoc, npc_name: str,
+          stock_name: str | None = None) -> tuple[bool, str]:
+    """#灵市查账：5000 灵石查 NPC 真实成交（同一报价时段同一人只收一次费）。"""
+    npc = find_npc(npc_name)
+    if not npc:
+        return False, f"灵市没有「{npc_name}」这位人物（#灵市人物 查名单）。"
+    stock = find_stock(state, stock_name) if stock_name else None
+    acc = account_of(doc)
+    cache_id = f"{state['slot']}:{npc['id']}:audit"
+    cached = any(t.get("cacheId") == cache_id for t in acc["tips"])
+    fee = 0 if cached else AUDIT_COST
+    if fee and doc.stones < fee:
+        return False, f"查账需 {fee:,} 灵石，当前 {doc.stones:,}。"
+    if fee:
+        doc.stones -= fee
+        acc["intelCost"] = int(acc.get("intelCost", 0) or 0) + fee
+        acc["tips"].append({"id": cache_id, "at": state["slot"] * TICK_MS,
+                            "npcId": npc["id"], "stockId": (stock or {}).get("id", ""),
+                            "resolved": True, "kind": "audit", "cacheId": cache_id})
+        acc["tips"] = acc["tips"][-40:]
+    ns = next((n for n in state["npcs"] if n["id"] == npc["id"]), {})
+    trades = [t for t in ns.get("trades", [])
+              if not stock or t["stockId"] == stock["id"]][-4:]
+    lines = [f"--- 查账 · {npc['name']} ---",
+             f"（查账费 {fee:,} 灵石{'，本时段已付免收' if cached else ''}；只披露已发生成交，不含下一步计划）"]
+    if trades:
+        for t in trades:
+            nm = next((s["name"] for s in state["stocks"] if s["id"] == t["stockId"]), t["stockId"])
+            lines.append(f"· 第 {t['slot']} tick｜{nm}｜{'买' if t['side'] == 'buy' else '卖'}"
+                         f" {t['shares']:,} 张 @ {t['price']:,}")
+    else:
+        lines.append("· 暂无成交记录。")
+    hold = (ns.get("holdings", {}).get(stock["id"], {}) if stock else {})
+    if stock:
+        lines.append(f"· 当前持有【{stock['name']}】{int(hold.get('shares', 0)):,} 张")
+    lines.append(f"· 可用灵石 {int(ns.get('cash', 0)):,}｜历史已实现盈亏 {int(ns.get('realized', 0)):+,}")
+    return True, "\n".join(lines)
+
+
+def followup(state: dict, doc: PlayerDoc, npc_name: str) -> tuple[bool, str]:
+    """#灵市追问：满 30 分钟且未核验的打听，按首个开市报价核验方向。"""
+    npc = find_npc(npc_name)
+    if not npc:
+        return False, f"灵市没有「{npc_name}」这位人物。"
+    acc = account_of(doc)
+    now_ms = state["slot"] * TICK_MS
+    pend = [t for t in acc["tips"] if t.get("npcId") == npc["id"]
+            and t.get("kind") == "tip" and not t.get("resolved")
+            and now_ms - float(t.get("at", 0)) >= 30 * 60 * 1000]
+    if not pend:
+        return False, "尚无满 30 分钟且未核验的消息（打听后等 3 个 tick 再追问）。"
+    t = pend[0]
+    t["resolved"] = True
+    stock = next((s for s in state["stocks"] if s["id"] == t["stockId"]), None)
+    ref_slot = -(-int(t["at"] + 30 * 60 * 1000) // TICK_MS)   # ceil
+    point = next((h for h in (stock or {}).get("history", []) if h["slot"] >= ref_slot), None)
+    if stock and stock.get("delistedAt") is not None:
+        point = {"price": 0, "slot": ref_slot}
+    c = acc["contacts"].setdefault(npc["id"], {"favor": 0, "verified": 0, "wrong": 0})
+    if point is None:
+        return True, "历史已超出保存范围（160 tick），本条结案但不计兑现。"
+    correct = (int(point["price"]) - int(t["price"])) * int(t["direction"]) > 0
+    if correct:
+        c["verified"] = int(c["verified"]) + 1
+        c["favor"] = min(100, int(c["favor"]) + 1)
+        verdict = "兑现（熟悉度 +1）"
+    else:
+        c["wrong"] = int(c["wrong"]) + 1
+        c["favor"] = max(0, int(c["favor"]) - 3)
+        verdict = "未兑现（熟悉度 -3）"
+    return True, (f"追问【{npc['name']}】：当时报价 {int(t['price']):,} → 核验价 {int(point['price']):,}，"
+                  f"方向「{'看多' if t['direction'] > 0 else '看空'}」{verdict}。")
+
+
+def news_text(state: dict) -> str:
+    """#灵市消息：最近 10 条商会风声（全服共享，容量 80）。"""
+    news = state["news"][-10:]
+    if not news:
+        return "灵市暂无风声。"
+    lines = ["--- 灵市消息 ---"]
+    for n in news:
+        stamp = time.strftime("%m-%d %H:%M", time.gmtime(n["slot"] * TICK_MS / 1000 + 8 * 3600))
+        lines.append(f"· [{stamp}] {n['text']}")
+    return "\n".join(lines)
+
+
+def debt_text(state: dict, doc: PlayerDoc) -> str:
+    """#灵市债务：借据四态与催债文案（原版 debtStatus）。"""
+    ds = debt_status(state, doc)
+    if not ds["has"]:
+        return "【钱万三】账上干净，无欠款。"
+    lines = ["--- 灵市债务 ---",
+             f"本金 {ds['principal']:,}｜未付利息 {ds['interest']:,}｜合计 {ds['debt']:,}",
+             f"净资产（含持仓市值）{ds['net']:+,}"]
+    if ds["insolvent"]:
+        lines.append("【钱万三】收起笑容：「资不抵债，先还钱再谈别的。」")
+    elif ds["overdue"]:
+        lines.append("【钱万三】叩了叩借据：「期限已过，先把账结了。」")
+    else:
+        lines.append("【钱万三】笑道：「借据尚在期内，按时还便是。」")
+    lines.append("逾期或资不抵债时暂停新买入；仍可卖出、还款、继续修炼。")
+    lines.append("还款：#还款 全部 / #还款 数量（部分还款先息后本）")
+    return "\n".join(lines)

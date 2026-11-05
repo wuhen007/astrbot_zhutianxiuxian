@@ -278,3 +278,103 @@ def physique_text(doc: PlayerDoc, table: list[dict]) -> str:
         lines.append("已至炼体顶点。")
     lines.append(f"突破：#炼体突破（原版语义：血气支付，失败气血逆冲）")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------- 一键/幸运（W6-1，对齐原版 Level.js）
+
+ONE_KEY_MAX_ROUNDS = 64       # 防呆轮数；原版无硬上限，本移植以境界表长度为界
+TRIB_GATE_REALM = 40          # 无妄真劫境：一键到此为止，后续走 #渡劫 / #登仙
+
+
+def one_key_break(
+    doc: PlayerDoc,
+    level_table: list[dict],
+    success_rate: float,
+    fail_penalty: float,
+    rng: random.Random,
+    luck: bool = False,
+    grass: int = 0,
+) -> tuple[str, PlayerDoc, int]:
+    """一键突破（原版 OneKeyLevelUp 直译）。
+
+    shortcut: 原版时代系数、仙道潜力、体质减免、仙宠掉落、战报长图未移植；
+    仅保留累计制循环、幸运草 p+(1-p)*0.5、终止条件与统计输出。
+    返回 (文案, 新档案, 幸运草消耗)。
+    """
+    d = doc.model_copy(deep=True)
+    start = int(d.realm_index)
+    win = fail = used = 0
+    reason = "已达单次轮数上限"
+    for _ in range(ONE_KEY_MAX_ROUNDS):
+        if int(d.realm_index) >= TRIB_GATE_REALM:
+            reason = "已至无妄真劫境，须先 #渡劫"
+            break
+        if luck and used >= grass:
+            reason = "幸运草用尽"
+            break
+        rate = min(0.99, success_rate + ((1 - success_rate) * 0.5 if luck else 0.0))
+        allowed, msg, nd = breakthrough(d, level_table, rate, fail_penalty, rng)
+        if not allowed:
+            reason = msg.split("\n")[0]
+            break
+        if int(nd.realm_index) > int(d.realm_index):
+            win += 1
+        else:
+            fail += 1
+        d = nd
+        if luck:
+            used += 1
+    lines = ["--- 一键突破 ---",
+             f"境界：第 {start + 1} 境 → 第 {int(d.realm_index) + 1} 境",
+             f"成功 {win} 次｜失败 {fail} 次"]
+    if luck:
+        lines.append(f"幸运草消耗 {used} 株")
+    lines.append(f"结束原因：{reason}")
+    return "\n".join(lines), d, used
+
+
+def one_key_body(
+    doc: PlayerDoc,
+    table: list[dict],
+    rng: random.Random,
+    luck: bool = False,
+    grass: int = 0,
+    cost_scale: float = BODY_COST_SCALE,
+) -> tuple[str, PlayerDoc, int]:
+    """一键破体（原版 OneKeyMaxUp 直译）。返回 (文案, 新档案, 幸运草消耗)。
+
+    shortcut: 同 one_key_break；失败分档沿用 body_breakthrough 的 40/20/10/0%。
+    """
+    d = doc.model_copy(deep=True)
+    start = int(d.physique_index)
+    win = fail = used = 0
+    reason = "已达单次轮数上限"
+    for _ in range(ONE_KEY_MAX_ROUNDS):
+        idx = int(d.physique_index)
+        if idx >= len(table) - 1:
+            reason = "肉身已至顶点"
+            break
+        if luck and used >= grass:
+            reason = "幸运草用尽"
+            break
+        xueqi = float(d.ext.get("xueqi", 0) or 0)
+        need = int(float(table[idx].get("exp", 0) or 0) * cost_scale + 0.999)
+        if xueqi < need:
+            reason = "血气不足"
+            break
+        good, _msg, cost = body_breakthrough(d, table, xueqi, rng, luck=luck)
+        if cost:
+            d.ext["xueqi"] = max(0.0, xueqi - cost)
+        if int(d.physique_index) > idx:
+            win += 1
+        else:
+            fail += 1
+        if luck:
+            used += 1
+    lines = ["--- 一键破体 ---",
+             f"炼体：第 {start + 1} 重 → 第 {int(d.physique_index) + 1} 重",
+             f"成功 {win} 次｜失败 {fail} 次"]
+    if luck:
+        lines.append(f"幸运草消耗 {used} 株")
+    lines.append(f"结束原因：{reason}")
+    return "\n".join(lines), d, used

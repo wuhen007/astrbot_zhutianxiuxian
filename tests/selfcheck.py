@@ -3204,6 +3204,58 @@ async def main():
     await render_mod.shutdown()
     print("render ok")
 
+    # 18. W6-1 补齐玩法：幸运/一键、赐福抽奖、灵市社交、独立法身
+    from core import blessing as bl, cultivate as cv, fashan as fs, market as mk
+
+    lv6 = store.table("Level/练气境界")
+    blv6 = store.table("Level/炼体境界")
+    u6 = PlayerDoc(uid="w6", realm_index=0, exp=10 ** 9, ext={"xueqi": 10 ** 9})
+    txt6, u6b, used6 = cv.one_key_break(u6, lv6, 1.0, 0.3, _random.Random(1))
+    assert u6b.realm_index > u6.realm_index and "结束原因" in txt6 and used6 == 0
+    _t, u6c, used6b = cv.one_key_body(u6b, blv6, _random.Random(2), luck=True, grass=3)
+    assert u6c.physique_index >= u6b.physique_index and used6b <= 3
+    assert not bl.tiandao_gift(u6, 1_800_000_000.0, 1.0)[0]      # 境界门槛
+    hi6 = PlayerDoc(uid="w6hi", realm_index=25, ext={"occupation": "侠客"})
+    ok, _m, nd6, gift6 = bl.tiandao_gift(hi6, 1_800_000_000.0, 1.0)
+    assert ok and gift6["秘境之匙"] >= 2 and not bl.tiandao_gift(nd6, 1_800_000_000.0, 1.0)[0]
+    assert len(bl.LOTTERY_POOL) == 41
+    ok, _m, td6, lot6 = bl.lottery(bl.grant_tickets(hi6), 2, _random.Random(3))
+    assert ok and td6.ext["lottery_tickets"] == 1 and lot6
+    print("breakthrough & blessing & lottery ok")
+
+    g6 = mk.create_market(1_800_000_000.0, seed=77)
+    p6 = PlayerDoc(uid="w6m", stones=1_000_000, ext={})
+    contacts6 = mk.account_of(p6)["contacts"]
+    mk.chat(g6, "墨九", p6)
+    assert contacts6["mo"]["favor"] == 1
+    mk.chat(g6, "墨九", p6)                                     # 同报价时段不重复涨好感
+    assert contacts6["mo"]["favor"] == 1
+    assert mk.tip(g6, p6, "墨九", "丹鼎阁")[0] and len(mk.account_of(p6)["tips"]) == 1
+    assert mk.audit(g6, p6, "墨九", "丹鼎阁")[0]
+    assert p6.stones == 1_000_000 - 1000 - 5000
+    assert mk.audit(g6, p6, "墨九", "丹鼎阁")[0]                   # 本时段免二次费
+    assert p6.stones == 1_000_000 - 1000 - 5000
+    mk.advance(g6, 1_800_000_000.0 + 4 * mk.TICK_MS / 1000)
+    ok, msg6 = mk.followup(g6, p6, "墨九")
+    assert ok and ("兑现" in msg6 or "结案" in msg6)
+    assert mk.take_loan(g6, p6, 100_000, 1_800_000_000.0)[0]
+    assert mk.repay(g6, p6, 10_000)[0] and mk.account_of(p6)["loan"] is not None
+    assert mk.debt_text(g6, p6).startswith("--- 灵市债务 ---")
+    assert mk.news_text(g6).startswith("--- 灵市消息 ---")
+    print("market social & debt ok")
+
+    f6 = PlayerDoc(uid="w6f", realm_index=45, exp=20_000_000, stones=10_000_000,
+                   ext={"xueqi": 20_000_000})
+    assert not fs.create(PlayerDoc(uid="low", realm_index=1), 1_800_000_000.0)[0]
+    ok, _m = fs.create(f6, 1_800_000_000.0)
+    assert ok and fs.state_of(f6)["plane"] == "仙界"
+    assert not fs.begin(f6, "遮天位面", 1, 1_800_000_000.0)[0]     # 法身位置硬校验
+    assert fs.begin(f6, "仙界", 1, 1_800_000_000.0)[0]
+    assert f6.state == "空闲"                                      # 不占真身状态
+    ok, _m = fs.settle(f6, 1_800_000_000.0 + 200, _random.Random(4))
+    assert ok and fs.state_of(f6)["state"] == "空闲" and f6.exp > 0
+    print("fashan ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 
