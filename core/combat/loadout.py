@@ -14,6 +14,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from .. import trib
+from . import skills
 from .engine import Fighter
 
 
@@ -86,6 +88,29 @@ def equip_skill_pool(f: Fighter, doc: Any, tables: Mapping[str, Any] | None) -> 
         f.tags["heal_skills"] = heal_pool
 
 
+def apply_proficiency(f: Fighter, doc: Any) -> None:
+    """功法熟练度三乘区（W7-0）：combat 开场三维、trigger 技能触发率、
+    numeric 出手伤害乘区（此前 numeric 定义了却零消费，PvE 也完全没接）。
+
+    PvP / PvE 统一在 build_fighter 内装配，避免两条战斗路径口径不一致。
+    """
+    name, trigger, combat, numeric = trib.best_stage(doc)
+    if combat > 1.0:
+        f.atk = max(1, int(f.atk * combat))
+        f.defense = max(1, int(f.defense * combat))
+        f.hp_max = max(1, int(f.hp_max * combat))
+        f.hp = min(f.hp_max, max(1, int(f.hp * combat)))
+    if trigger > 1.0 and isinstance(f.tags.get("atk_skills"), list):
+        for sk in f.tags["atk_skills"]:
+            sk["pr"] = min(0.95, float(sk.get("pr", 0) or 0) * trigger)
+    if numeric > 1.0:
+        f.effects["dmg_dealt_mult"] = (float(f.eff("dmg_dealt_mult", 1.0))
+                                      * min(1.10, numeric))
+    if name in ("融会贯通", "炉火纯青", "登峰造极", "出神入化"):
+        f.skills = (*f.skills, "prof_echo")
+    f.tags["prof_stage"] = name
+
+
 def build_fighter(
     doc: Any, name: str, atk: int, defense: int, hp: int, bao: float,
     item_lookup: Mapping[str, Any],
@@ -129,4 +154,9 @@ def build_fighter(
         }
         f.tags["battle_skills"] = [str(s.get("name")) for s in battle_skills]
     equip_skill_pool(f, doc, skill_tables)
+    skills.ensure_builtin()
+    apply_proficiency(f, doc)   # W7-0：三乘区 + 档位共鸣，PvP/PvE 同源
+    if (int(getattr(doc, "realm_index", 0) or 0) >= 10
+            and int(getattr(doc, "physique_index", 0) or 0) >= 10):
+        f.skills = (*f.skills, "dual_echo")
     return f

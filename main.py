@@ -1578,6 +1578,7 @@ class ZhutianPlugin(Star):
             doc, item, qty, self._stats(doc).hp,
             linggen_table=self.linggen_table,
             rng=_random.Random(f"{doc.uid}:{time.time()}"),
+            now=time.time(),
         )
         if not ok or not consume:
             yield event.plain_result(msg)
@@ -1882,17 +1883,8 @@ class ZhutianPlugin(Star):
                            base_rows=_base_rows(doc, table_a), skill_tables=_skill_tables())
         fb = build_fighter(foe, name_b, sb.atk, sb.defense, sb.hp, sb.bao, lookup,
                            base_rows=_base_rows(foe, table_b), skill_tables=_skill_tables())
-        # 功法熟练度档位（W2-1）：combat 乘开场三维、trigger 乘技能触发率
-        for f_, d_ in ((fa, doc), (fb, foe)):
-            stg = trib.best_stage(d_)
-            if stg[2] > 1.0:
-                f_.atk = max(1, int(f_.atk * stg[2]))
-                f_.defense = max(1, int(f_.defense * stg[2]))
-                f_.hp_max = max(1, int(f_.hp_max * stg[2]))
-                f_.hp = min(f_.hp_max, max(1, int(f_.hp * stg[2])))
-            if stg[1] > 1.0 and isinstance(f_.tags.get("atk_skills"), list):
-                for sk in f_.tags["atk_skills"]:
-                    sk["pr"] = min(0.95, float(sk.get("pr", 0) or 0) * stg[1])
+        # 功法熟练度三乘区（combat/trigger/numeric）已在 build_fighter →
+        # apply_proficiency 内统一装配（W7-0：PvE 同源，勿在此重复乘）。
         # 命格加成（W2-3）：攻击/防御/生命加成 + 暴击加成
         for f_, d_ in ((fa, doc), (fb, foe)):
             atk_b = mingge.bonus(d_, "攻击加成")
@@ -2704,7 +2696,7 @@ class ZhutianPlugin(Star):
             text, changed, items = extras.dispatch(
                 cmd, doc, arg, self.content.table, self._help_groups(),
                 self._stats(doc), random.Random(f"{doc.uid}:extras:{time.time_ns()}"),
-                time.time())
+                time.time(), daily=await self.db.get_daily_task(doc.uid))
         except Exception as exc:
             logger.error(f"[zhutian] extras {cmd} 失败: {exc}")
             yield event.plain_result(f"指令处理失败：{exc}")

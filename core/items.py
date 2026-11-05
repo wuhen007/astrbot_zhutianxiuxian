@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import time
 from typing import Any
 
 
@@ -62,6 +63,7 @@ def use_item(
     max_hp: int = 0,
     linggen_table: list[dict[str, Any]] | None = None,
     rng: Any = None,
+    now: float | None = None,
 ) -> tuple[bool, str, Any, bool]:
     """使用物品。返回 (ok, msg, doc, 是否消耗)。
 
@@ -72,6 +74,7 @@ def use_item(
     - linggen / type=天资洗炼  天资洗炼：重摇灵根（如 天命轮回丹、神心丹）
     - type=闭关/凝仙/炼神/仙缘/神赐/魔道值/入魔  品质丹 buff（ext["buffs"]，次数消耗制）
     - potential/heart/wudao/xingyun/道心  直投累计字段
+    - shouyuan / type=寿命  增寿丹药（W7-0：同日耐药递减，见 lifespan.grant_pill）
     """
     if qty < 1:
         return False, "至少使用 1 件。", doc, False
@@ -193,6 +196,25 @@ def use_item(
         add = int(float(item["道心"])) * qty
         d.ext["daoxin"] = int(d.ext.get("daoxin", 0) or 0) + add
         parts.append(f"道心 +{add}（累计 {d.ext['daoxin']}）")
+
+    # 7) 寿元类丹药（W7-0）：数据表 shouyuan 字段 / type=寿命
+    try:
+        sy = float(item.get("shouyuan") or 0)
+    except (TypeError, ValueError):
+        sy = 0.0
+    if sy > 0 or t == "寿命":
+        from . import lifespan as _lp
+
+        base = int(sy) if sy > 0 else 10
+        gained, note = _lp.grant_pill(
+            d, base * qty, now if now is not None else time.time())
+        if gained <= 0:
+            if parts:
+                parts.append(note)
+            else:
+                return False, note, doc, False   # 药力饱和：不消耗物品
+        else:
+            parts.append(note)
 
     if not parts:
         if hp_field > 1 or 0 < hpp_field <= 1:

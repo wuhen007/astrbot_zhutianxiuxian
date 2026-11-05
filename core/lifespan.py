@@ -105,6 +105,32 @@ def grant(doc: PlayerDoc, amount: int) -> int:
     return doc.ext["shouyuan"]
 
 
+# W7-0：丹药表的 shouyuan 字段此前零消费（寿命丹服下不增寿），补上真实结算。
+PILL_DAILY_CAP = 4                       # 每自然日最多生效的枚数
+PILL_DECAY = (1.0, 0.5, 0.25, 0.125)   # 同日第 n 枚药力递减（抗药性）
+
+
+def grant_pill(doc: PlayerDoc, base: int, now: float) -> tuple[int, str]:
+    """服用增寿丹药：同日药力递减、超过上限不再生效。
+
+    返回 (实际增寿, 说明)。增寿为 0 时调用方应拒绝消耗物品，避免白吃。
+    """
+    day = day_key(now)
+    if doc.ext.get("pill_day") != day:
+        doc.ext["pill_day"] = day
+        doc.ext["pill_taken"] = 0
+    n = int(doc.ext.get("pill_taken", 0) or 0)
+    if n >= PILL_DAILY_CAP:
+        return 0, (f"今日药力已饱和（每日上限 {PILL_DAILY_CAP} 枚），"
+                   f"再服也是暴殄天物，明日再来吧。")
+    factor = PILL_DECAY[min(n, len(PILL_DECAY) - 1)]
+    gained = max(1, int(int(base) * factor))
+    doc.ext["pill_taken"] = n + 1
+    cur = grant(doc, gained)
+    return gained, (f"寿元 +{gained:,} 年（今日第 {n + 1} 枚，药力 ×{factor:g}，"
+                    f"现共 {cur:,} 年）")
+
+
 def text(doc: PlayerDoc) -> str:
     cur = shouyuan_of(doc)
     t = _type_of(doc)

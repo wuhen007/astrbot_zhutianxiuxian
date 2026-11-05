@@ -3336,6 +3336,75 @@ async def main():
     assert run20("#献祭魂与血")[1] and d20.ext["hp"] == 100_000
     print("extras help/catalog/tianjiao/dungeon ok")
 
+    # 21. W7-0：4 处机制断链 + 展示层空壳转正（每组一条断言防回潮）
+    from core import lifespan as lf, extras as ex
+    from core.combat import skills as csk
+    from core.combat.engine import Fighter, run_1v1
+    from core.combat.loadout import build_fighter
+
+    c21 = store.table
+    st21 = SimpleNamespace(atk=1_000, defense=1_000, hp=10_000, bao=0.1)
+
+    # ① 寿命丹：数据表 shouyuan 字段终于被消费；同日耐药递减；饱和不消耗
+    dp = PlayerDoc(uid="w7pill", realm_index=5, stones=0, exp=0, ext={})
+    pill = {"name": "寿命丹", "class": "丹药", "type": "寿命", "shouyuan": 10}
+    okp, msgp, dp, usep = items_mod.use_item(dp, pill, 1, now=n6)
+    assert okp and usep and "寿元 +10" in msgp and lf.shouyuan_of(dp) == 3010
+    for expect_note, expect_total in (("药力 ×0.5", 3015), ("药力 ×0.25", 3017),
+                                      ("药力 ×0.125", 3018)):
+        okp, msgp, dp2, usep = items_mod.use_item(dp, pill, 1, now=n6)
+        assert okp and expect_note in msgp and lf.shouyuan_of(dp2) == expect_total
+        dp = dp2
+    okp, msgp, _, usep = items_mod.use_item(dp, pill, 1, now=n6)
+    assert not okp and not usep and "饱和" in msgp
+    # 次日重置
+    assert lf.grant_pill(dp, 10, n6 + 86400)[0] == 10
+    print("W7-0 ① pill shouyuan ok")
+
+    # ② 功法 numeric 乘区 + combat/trigger + PvE 同源装填
+    dq = PlayerDoc(uid="w7prof", realm_index=10, physique_index=10,
+                   ext={"gongfa": ["测试功法"], "prof": {"测试功法": 1000}})
+    fq = build_fighter(dq, "甲", 1_000, 1_000, 10_000, 0.1, {})
+    assert abs(float(fq.effects.get("dmg_dealt_mult", 1.0)) - 1.10) < 1e-9
+    assert fq.atk > 1_000 and fq.tags["prof_stage"] == "出神入化"
+    # ③ 技能装配链路：build_fighter 挂 id + 注册表有内置项 + on_turn 真被触发
+    assert "prof_echo" in fq.skills and "dual_echo" in fq.skills
+    assert csk.get("prof_echo") is not None
+    csk.clear()
+    csk.ensure_builtin()
+    assert csk.get("prof_echo") is not None      # clear() 后幂等恢复
+    fa = Fighter("甲", 100, 10, 500, 500, skills=("prof_echo", "dual_echo"))
+    fb = Fighter("乙", 10, 10, 500, 500)
+    res21 = run_1v1(fa, fb, _random.Random(3), max_rounds=3)
+    assert any("功法共鸣" in x for x in res21.log)
+    assert any("双轨共鸣" in x for x in res21.log)
+    print("W7-0 ②③ prof numeric + skill hook ok")
+
+    # ④ 两张图鉴表补齐 + 分页 + 真实已获得收集态
+    dc = PlayerDoc(uid="w7cat", realm_index=1, ext={})
+    assert "共 5 条" in ex.catalog("#位面天骄图鉴", c21, doc=dc)
+    dc.ext["tianjiao_defeated"] = ["青冥剑子"]
+    assert "✅已获得" in ex.catalog("#位面天骄图鉴", c21, doc=dc)
+    assert "未开放兑换码兑换" in ex.catalog("#兑换码图鉴", c21, doc=dc)
+    pg1 = ex.catalog("#命格图鉴", c21, page=1, doc=dc)
+    pg4 = ex.catalog("#命格图鉴", c21, page=4, doc=dc)
+    assert "第 1/4 页" in pg1 and "第 4/4 页" in pg4 and pg1 != pg4
+    print("W7-0 ④ catalog tables/pagination/collection ok")
+
+    # ⑤ 空壳转正：助手读真实档、境界查询带真实门槛、我的练气带实际三维
+    dd = PlayerDoc(uid="w7assist", realm_index=2, stones=0, exp=0,
+                   ext={"shouyuan": 50})
+    base21 = ex.dispatch("#修仙助手", dd, "", c21, [], st21, _random.Random(1), n6)[0]
+    assert "寿元 50" in base21 and "寿元将尽" in base21 and "今日未接" in base21
+    with_task = ex.dispatch("#修仙助手", dd, "", c21, [], st21, _random.Random(1), n6,
+                            daily={"w1": 2, "w2": 2, "w3": 2, "renwu": 1, "level": 3})[0]
+    assert "Lv3" in with_task and "领取每日奖励" in with_task and with_task != base21
+    assert "需累计修为" in ex.realm_list(dd, c21)
+    assert "需血气" in ex.realm_list(dd, c21, body=True)
+    assert "实际三维" in ex.my_realm(dd, c21, st21)
+    assert "掉落预览" in ex.tianjiao_status(dc, "青冥剑子", c21)
+    print("W7-0 ⑤ assistant/realm/tianjiao real data ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 
