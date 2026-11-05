@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, equipment, extras, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, equipment, era as era_mod, extras, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -93,7 +93,7 @@ EXTRA_ALIASES = {
     "#灵根帮助", "#查看日志", "#传音给作者",
     "#命格图鉴", "#合成图鉴", "#兑换码图鉴", "#成就图鉴",
     "#位面天骄图鉴", "#更新公告", "#公告网页",
-    "#练气境界", "#炼体境界", "#我的练气", "#查看时代",
+    "#练气境界", "#炼体境界", "#我的练气",
     "#修仙助手", "#打散雷劫",
     "#天骄列表", "#天骄状态", "#讨伐天骄",
     "#灵市帮助", "#副本掉落", "#去", "#探索仙府",
@@ -342,6 +342,14 @@ CMD_ERA_NEXT = "#下一千年"
 CMD_ERA_LOSSES = "#查看损失"
 CMD_ERA_CHARM = "#使用星宇护身符"
 CMD_ERA_EVENTS = "#位面大事件"
+# W7-2 时代系统（五时代轮转；与上面的「灾厄纪元」是两条并行线，见 core/era.py）
+CMD_ERA_SHOW = "#查看时代"
+CMD_ERA_ADVANCE = "#下一个时代"
+CMD_ERA_SET = "#设置时代"
+CMD_ERA_RESHAPE = "#重塑天地大道"
+CMD_ERA_SEAL = "#禁仙六封"
+CMD_ERA_UNSEAL = "#解除禁仙六封"
+ERA_RESHAPE_REALM = 41   # 地仙：原版门槛是准仙帝(权威20)，本移植境界表不同，取渡劫飞升后的第一境
 CMD_DARK_OPEN = "#开启黑暗动乱"
 CMD_DARK_CLOSE = "#关闭黑暗动乱"
 CMD_DARK_STATUS = "#禁区至尊状态"
@@ -942,6 +950,14 @@ class ZhutianPlugin(Star):
                 (CMD_RIFT_OUT, "撤离并结算界源+修为+血气"),
                 (f"{CMD_RIFT_EXCHANGE} 名字", "界源兑换（星图/宝盒/无尽秘钥等）"),
             ]},
+            {"title": "时代与天地法则", "lines": [
+                (f"{CMD_ERA_SHOW} / #时代", "五时代轮转：突破成功率/消耗系数/秘境出金率/纪元进度"),
+                (CMD_ERA_ADVANCE, "管理员跨越一个时代"),
+                (CMD_ERA_SET, "管理员拨动世界历法：#设置时代 0-4 [年份]"),
+                (f"{CMD_ERA_RESHAPE} 低级 中级 高级", "地仙以上改写秘境三档出金率"),
+                (f"{CMD_ERA_SEAL} @玩家", "源天师 100 万源石镇人入神源（黄金大世自解）"),
+                (f"{CMD_ERA_UNSEAL} @玩家", "源天师/管理员破封"),
+            ]},
             {"title": "千年灾劫", "lines": [
                 (CMD_ERA_STATUS, "纪元/灾难状态/域外灾厄与魔主一览"),
                 (CMD_CALAMITY_LIST, "域外灾厄列表（战斗与领奖状态）"),
@@ -1369,6 +1385,10 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         max_minutes = int(self._val("CULTIVATE_MAX_MINUTES", 7200))
+        blocked = era_mod.seal_block(doc, await self._era_state(), "闭关")
+        if blocked:
+            yield event.plain_result(blocked)
+            return
         planned: int | None = None
         arg = (minutes or "").strip()
         if arg:
@@ -1638,12 +1658,19 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         import random as _random
+        st = await self._era_state()
+        blocked = era_mod.seal_block(doc, st, "突破")
+        if blocked:
+            yield event.plain_result(blocked)
+            return
+        rate_bonus, cost_factor = era_mod.qi_mods(st)
         mg_rate = mingge.bonus(doc, "境界突破成功率")     # 命格·破障通玄（W2-3）
         ok, msg, d = cultivate.breakthrough(
             doc, self.content.table(doc.realm_table),
             min(0.99, float(self._val("BREAKTHROUGH_SUCCESS_RATE", 1.0)) + mg_rate),
             float(self._val("BREAKTHROUGH_FAIL_PENALTY", 0.3)),
             _random.Random(f"{doc.uid}:{doc.realm_index}:{int(time.time())}"),
+            cost_factor=cost_factor, rate_bonus=rate_bonus,
         )
         if ok and d.realm_index != doc.realm_index or ok and d.exp != doc.exp:
             await self.db.save_player(d.model_dump())
@@ -1664,6 +1691,16 @@ class ZhutianPlugin(Star):
             return
         inv = await self.db.get_inventory(doc.uid)
         grass = int(inv.get("幸运草", 0) or 0)
+        st = await self._era_state()
+        blocked = era_mod.seal_block(doc, st, "突破")
+        if blocked:
+            yield event.plain_result(blocked)
+            return
+        if body:
+            rate_bonus, cost_factor = era_mod.body_mods(st)
+        else:
+            rate_bonus, cost_factor = era_mod.qi_mods(st)
+        note = self._era_note(st, body=body)
         no_grass = False
         if luck and grass < 1:
             if one_key:
@@ -1675,14 +1712,19 @@ class ZhutianPlugin(Star):
         if body:
             table = self.content.table("Level/炼体境界")
             if one_key:
-                msg, d, used = cultivate.one_key_body(doc, table, rng, luck=luck, grass=grass if luck else 0)
+                msg, d, used = cultivate.one_key_body(
+                    doc, table, rng, luck=luck, grass=grass if luck else 0,
+                    cost_factor=cost_factor, rate_bonus=rate_bonus, era_note=note)
             else:
                 xueqi = float(doc.ext.get("xueqi", 0) or 0)
-                _good, msg, cost = cultivate.body_breakthrough(doc, table, xueqi, rng, luck=luck)
+                _good, msg, cost = cultivate.body_breakthrough(
+                    doc, table, xueqi, rng, luck=luck,
+                    cost_factor=cost_factor, rate_bonus=rate_bonus)
                 d = doc
                 if cost:
                     d.ext["xueqi"] = max(0.0, xueqi - cost)
                 used = 1 if luck else 0
+                msg = f"{note}\n{msg}"
         else:
             rate = min(0.99, float(self._val("BREAKTHROUGH_SUCCESS_RATE", 1.0))
                        + mingge.bonus(doc, "境界突破成功率"))
@@ -1690,13 +1732,16 @@ class ZhutianPlugin(Star):
             if one_key:
                 msg, d, used = cultivate.one_key_break(
                     doc, self.content.table(doc.realm_table), rate, penalty, rng,
-                    luck=luck, grass=grass if luck else 0)
+                    luck=luck, grass=grass if luck else 0,
+                    cost_factor=cost_factor, rate_bonus=rate_bonus, era_note=note)
             else:
                 if luck:
                     rate = min(0.99, rate + (1 - rate) * 0.5)
                 _ok, msg, d = cultivate.breakthrough(
-                    doc, self.content.table(doc.realm_table), rate, penalty, rng)
+                    doc, self.content.table(doc.realm_table), rate, penalty, rng,
+                    cost_factor=cost_factor, rate_bonus=rate_bonus)
                 used = 1 if luck else 0
+                msg = f"{note}\n{msg}"
         async with self.db.transaction():
             if used:
                 await self.db.remove_item(doc.uid, "幸运草", used)
@@ -2846,7 +2891,8 @@ class ZhutianPlugin(Star):
             text, changed, items = extras.dispatch(
                 cmd, doc, arg, self.content.table, self._help_groups(),
                 self._stats(doc), random.Random(f"{doc.uid}:extras:{time.time_ns()}"),
-                time.time(), daily=await self.db.get_daily_task(doc.uid))
+                time.time(), daily=await self.db.get_daily_task(doc.uid),
+                era_note=self._era_note(await self._era_state()))
         except Exception as exc:
             logger.error(f"[zhutian] extras {cmd} 失败: {exc}")
             yield event.plain_result(f"指令处理失败：{exc}")
@@ -8525,8 +8571,11 @@ class ZhutianPlugin(Star):
             return
         state = calamity.ensure(await self.db.get_calamity())
         era = state["era"]
+        world = era_mod.state_of((await self._era_state())["years_total"])
         lines = [
             f"【纪元】第 {era['index']} 纪元 · 第 {era['years']} 年",
+            f"世界时代：{world['icon']}{world['name']}"
+            f"（第 {world['epoch']} 纪元·第 {world['years']:,} 年）｜#查看时代 详情",
             f"绝灵压制：{int(era['suppression'] * 100)}%（上限 50%）",
             f"域外灾厄：{len(calamity.active_calamities(state))} 尊存世 / {calamity.MAX_ACTIVE}",
             f"你的奖励折算：×{calamity.reward_multiplier(doc, state, time.time()):.2f}",
@@ -8551,10 +8600,18 @@ class ZhutianPlugin(Star):
             state = calamity.ensure(await self.db.get_calamity())
             res = calamity.advance_era(state, avg, rng, now)
             await self.db.save_calamity(state)
+        # 世界历法同步走一千年（可能跨时代）：灾厄与天地同频
+        wst, winfo = era_mod.advance_years(await self._era_state(), 1_000)
+        await self.db.save_era(wst)
         yield event.plain_result(
             f"【纪元轮转】第 {res['index']} 纪元（第 {res['years']} 年）降临。\n"
             f"绝灵压制加深至 {int(res['suppression'] * 100)}%，新增灾厄 {res['spawned']} 尊。\n"
-            f"{res['loss']['note']}"
+            f"{res['loss']['note']}\n"
+            f"世界时代：{winfo['new']['icon']}{winfo['new']['name']}"
+            f"（第 {winfo['new']['epoch']} 纪元·第 {winfo['new']['years']:,} 年）"
+            + (f"\n天地法则已变：练气 {winfo['new']['qi_rate'] * 100:+.0f}% / "
+               f"×{winfo['new']['qi_cost']:.1f}｜炼体 {winfo['new']['body_rate'] * 100:+.0f}% / "
+               f"×{winfo['new']['body_cost']:.1f}" if winfo["changed"] else "")
         )
 
     @filter.command(CMD_ERA_LOSSES, "查看损失")
@@ -8606,6 +8663,209 @@ class ZhutianPlugin(Star):
         for e in events[-12:]:
             lines.append("· " + str(e.get("text")))
         yield event.plain_result("\n".join(lines))
+
+    # ---- W7-2：时代系统（五时代轮转 / 天地法则 / 秘境出金率 / 禁仙六封） ----
+
+    def _era_tick_args(self) -> tuple[float, int]:
+        """(每 tick 秒数, 每 tick 年数)。默认为原版 cron：2 小时 / 1000 年。"""
+        hours = float(self._val("ERA_TICK_HOURS", era_mod.DEFAULT_TICK_HOURS))
+        years = int(self._val("ERA_YEARS_PER_TICK", era_mod.DEFAULT_YEARS_PER_TICK))
+        return max(60.0, hours * 3600), max(1, years)
+
+    async def _era_state(self) -> dict:
+        """读世界历法并原地懒推进；只有真的跨年才落库（读指令不白写盘）。"""
+        raw = await self.db.get_era()
+        span, step = self._era_tick_args()
+        st, info = era_mod.tick(raw, time.time(), tick_seconds=span, years_per_tick=step)
+        if not raw or info["ticks"]:
+            await self.db.save_era(st)
+        return st
+
+    async def _era_sealed_count(self, st: dict) -> int:
+        key = era_mod.era_key(st)
+        try:
+            rows = await self.db.all_players()
+        except Exception:
+            return 0
+        return sum(1 for r in rows
+                   if isinstance(r.get("ext"), dict)
+                   and str((r["ext"].get("seal") or {}).get("era") or "") == key)
+
+    async def _era_break_gate(self, doc: PlayerDoc) -> str | None:
+        """封印拦截：被镇入神源者不得突破。"""
+        return era_mod.seal_block(doc, await self._era_state(), "突破")
+
+    def _era_note(self, st: dict, body: bool = False) -> str:
+        cur = era_mod.state_of(st["years_total"])
+        rate, cost = (era_mod.body_mods(st) if body else era_mod.qi_mods(st))
+        return (f"时代：{cur['icon']}{cur['name']}（成功率 {rate * 100:+.0f}%，"
+                f"消耗 ×{cost:.1f}）")
+
+    @filter.command(CMD_ERA_SHOW, alias={"#时代", "#当前时代"})
+    async def handle_era_show(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        st = await self._era_state()
+        span, step = self._era_tick_args()
+        sealed = await self._era_sealed_count(st)
+        yield event.plain_result(era_mod.panel(
+            st, time.time(), tick_seconds=span, years_per_tick=step, sealed_count=sealed))
+
+    @filter.command(CMD_ERA_ADVANCE, "下一个时代")
+    async def handle_era_advance(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not event.is_admin:
+            yield event.plain_result("此权柄唯管理员可执。")
+            return
+        st = await self._era_state()
+        before = era_mod.state_of(st["years_total"])
+        st, info = era_mod.to_next_era(st)
+        await self.db.save_era(st)
+        span, step = self._era_tick_args()
+        sealed = await self._era_sealed_count(st)
+        yield event.plain_result(
+            f"【仙帝伟力·跨越时代】{before['icon']}{before['name']} → "
+            f"{info['new']['icon']}{info['new']['name']}\n"
+            + era_mod.panel(st, time.time(), tick_seconds=span,
+                            years_per_tick=step, sealed_count=sealed))
+
+    @filter.command(CMD_ERA_SET, "设置时代")
+    async def handle_era_set(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not event.is_admin:
+            yield event.plain_result("此权柄唯管理员可执。")
+            return
+        parts = (event.get_message_str() or "").strip().split()[1:]
+        if not parts or not parts[0].lstrip("+-").isdigit():
+            names = "｜".join(f"{i}={e['name']}" for i, e in enumerate(era_mod.ERAS))
+            yield event.plain_result(f"格式：#设置时代 索引 [年份]\n{names}")
+            return
+        idx = int(parts[0])
+        years = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+        if not 0 <= idx < len(era_mod.ERAS):
+            yield event.plain_result(f"索引需在 0-{len(era_mod.ERAS) - 1} 之间。")
+            return
+        st, info = era_mod.set_era(await self._era_state(), idx, years)
+        await self.db.save_era(st)
+        yield event.plain_result(
+            f"【天地改易】世界已拨至 {info['new']['icon']}{info['new']['name']}"
+            f"（第 {info['new']['epoch']} 纪元·第 {info['new']['years']} 年）。\n"
+            f"练气 {info['new']['qi_rate'] * 100:+.0f}% / ×{info['new']['qi_cost']:.1f}｜"
+            f"炼体 {info['new']['body_rate'] * 100:+.0f}% / ×{info['new']['body_cost']:.1f}")
+
+    @filter.command(CMD_ERA_RESHAPE, "重塑天地大道")
+    async def handle_era_reshape(self, event: AstrMessageEvent):
+        """准仙帝级权柄：改写秘境三档出金率（原版 EraStatusPlugin.reshapeSecretPlace）。"""
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if int(doc.realm_index) < ERA_RESHAPE_REALM:
+            table = self.content.table(doc.realm_table)
+            need = table[min(ERA_RESHAPE_REALM, len(table) - 1)]["level"]
+            yield event.plain_result(f"你尚未达到【{need}】，无法重塑天地大道！")
+            return
+        parts = (event.get_message_str() or "").strip().split()[1:]
+        try:
+            vals = [float(x) for x in parts[:3]]
+        except ValueError:
+            vals = []
+        if len(vals) != 3 or any(not 0.0 <= v <= 1.0 for v in vals):
+            yield event.plain_result("格式：#重塑天地大道 [低级] [中级] [高级]（各 0-1）")
+            return
+        st, info = era_mod.set_seal_rates(await self._era_state(), *vals)
+        await self.db.save_era(st)
+        old, new = info["old"], info["new"]
+        yield event.plain_result(
+            f"【准仙帝伟力·重塑天地大道】\n{doc.name}以无上伟力改写秘境法则！\n"
+            f"低级出金：{old['one']:.2f} → {new['one']:.2f}\n"
+            f"中级出金：{old['two']:.2f} → {new['two']:.2f}\n"
+            f"高级出金：{old['three']:.2f} → {new['three']:.2f}\n"
+            f"天地大道已重塑，秘境出金法则立即生效。")
+
+    @filter.command(CMD_ERA_SEAL, "禁仙六封")
+    async def handle_era_seal(self, event: AstrMessageEvent):
+        """源天师 100 万源石封人于神源，待黄金大世（时代更迭）自解。"""
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if str(doc.ext.get("occupation") or "") != "源天师":
+            yield event.plain_result(
+                "「源术造诣不足！」\n禁仙六封乃源天师一脉至高秘术，"
+                f"你当前职业：{doc.ext.get('occupation') or '未就职'}。")
+            return
+        target, terr = await self._target_doc(event)
+        if terr:
+            yield event.plain_result(terr)
+            return
+        if target.uid == doc.uid:
+            yield event.plain_result("何必自封？")
+            return
+        st = await self._era_state()
+        if era_mod.is_sealed(target, st):
+            yield event.plain_result(f"「{target.name}」已被禁仙六封封印，待黄金大世方解。")
+            return
+        if int(target.realm_index) > int(doc.realm_index) + 2:
+            yield event.plain_result(
+                f"「源术反噬！」{target.name}境界过高（第 {int(target.realm_index) + 1} 境），"
+                f"你只到第 {int(doc.realm_index) + 1} 境，封印不成。")
+            return
+        cost = 1_000_000
+        y = yuanshi.system_of(doc)
+        if int(y["amount"]) < cost:
+            yield event.plain_result(
+                f"「源石不足！」施展禁仙六封需消耗 {cost:,} 源石，"
+                f"你当前源石：{int(y['amount']):,}。")
+            return
+        d = doc.model_copy(deep=True)
+        y["amount"] = int(y["amount"]) - cost
+        d.ext["yuanshi"] = y
+        d.ext["seal_cast"] = int(d.ext.get("seal_cast", 0) or 0) + 1
+        dt = target.model_copy(deep=True)
+        era_mod.seal(dt, doc.name, doc.uid, st, time.time())
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            await self.db.save_player(dt.model_dump())
+        cur = era_mod.state_of(st["years_total"])
+        yield event.plain_result(
+            f"【禁仙六封·神源永镇】\n{doc.name}双眸绽放源天神光，手掐无上源诀！\n"
+            f"「源天师一脉，禁仙六封！」\n"
+            f"六道神链贯穿虚空，{target.name}被永恒封入神源。\n"
+            f"消耗：{cost:,} 源石｜解封条件：黄金大世开启（{cur['name']}结束）或源天师解封。")
+
+    @filter.command(CMD_ERA_UNSEAL, "解除禁仙六封")
+    async def handle_era_unseal(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        target, terr = await self._target_doc(event)
+        if terr:
+            yield event.plain_result(terr)
+            return
+        if not event.is_admin and str(doc.ext.get("occupation") or "") != "源天师":
+            yield event.plain_result("解除禁仙六封需源天师境界（或管理员出手）。")
+            return
+        st = await self._era_state()
+        if not era_mod.seal_of(target):
+            yield event.plain_result(f"「{target.name}」未被禁仙六封封印。")
+            return
+        dt = target.model_copy(deep=True)
+        was = era_mod.is_sealed(dt, st)
+        era_mod.unseal(dt)
+        await self.db.save_player(dt.model_dump())
+        yield event.plain_result(
+            f"【神源崩解】{doc.name}以源术震碎神源，{target.name}重见天日。"
+            + ("" if was else "（封印本已随时代更迭失效）"))
 
     # ---- 彼岸世界 / 真世界（基础世界层：世界 / 坐标 / 星辰 / 探索 / 道标） ----
 
@@ -9427,6 +9687,10 @@ class ZhutianPlugin(Star):
         if not sess:
             yield event.plain_result(f"道友不在秘境之中。先「{CMD_ENTER} 名字」降临。")
             return
+        blocked = era_mod.seal_block(doc, await self._era_state(), "秘境寻宝")
+        if blocked:
+            yield event.plain_result(blocked)
+            return
         hp_cur, hp_max = self._hp_pair(doc)
         if hp_cur <= hp_max * 0.1:
             yield event.plain_result("气血将尽，强寻恐有性命之忧。发「{0}」撤离或先「{1}」".format(CMD_FLEE, CMD_HEAL))
@@ -9474,6 +9738,7 @@ class ZhutianPlugin(Star):
             sess, base, me, self.drop_pool, rng, sect_mode=bool(sess.sect_name), me_fighter=me_fighter,
             treasure_bonus=mingge.bonus(doc, "寻宝加成"),
             buff=_buff, protect=_protect,
+            loot_rates=era_mod.seal_rates(await self._era_state()),
         )
         if used_arrays:
             flavor = "【阵法·" + "、".join(used_arrays) + "】阵纹复苏，笼罩战场！\n" + flavor

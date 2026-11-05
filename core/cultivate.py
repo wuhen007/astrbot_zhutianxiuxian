@@ -161,10 +161,13 @@ def breakthrough(
     success_rate: float,
     fail_penalty: float,
     rng: random.Random,
+    cost_factor: float = 1.0,
+    rate_bonus: float = 0.0,
 ) -> tuple[bool, str, PlayerDoc]:
     """突破：修为达标即可尝试（累计制，成功不扣修为）；失败按比例损耗。
 
     success_rate/fail_penalty 来自面板配置；原版境界表未含成功率字段。
+    cost_factor / rate_bonus 来自时代法则（W7-2，原版 Level.js 的 qiCostFactor / qiSuccessRate）。
     """
     if doc.state != "空闲":
         return False, f"道友正在「{doc.state}」中，无法突破。", doc
@@ -175,15 +178,18 @@ def breakthrough(
 
     nxt = level_table[i]
     # 语义：境界表当前条目的 exp = 从该境界突破到下一境所需的累计修为
-    req = int(level_table[doc.realm_index].get("exp", 0))
+    base_req = int(level_table[doc.realm_index].get("exp", 0))
+    req = max(1, int(base_req * max(0.05, float(cost_factor)) + 0.999))
     if doc.exp < req:
+        era_note = f"（时代法则 ×{float(cost_factor):.1f}）" if abs(float(cost_factor) - 1.0) > 1e-9 else ""
         return False, (
             f"修为不足，无法突破【{nxt['level']}】。\n"
-            f"需求 {req}，当前 {doc.exp}。"
+            f"需求 {req}{era_note}，当前 {doc.exp}。"
         ), doc
 
     d = doc.model_copy(deep=True)
-    if rng.random() < success_rate:
+    rate = min(0.99, max(0.01, float(success_rate) + float(rate_bonus)))
+    if rng.random() < rate:
         d.realm_index = i
         e = level_table[min(i, len(level_table) - 1)]
         d.ext["base_attack"] = e.get("基础攻击", 0)
@@ -226,11 +232,13 @@ def body_breakthrough(
     success_bonus: float = 0.0,
     cost_scale: float = BODY_COST_SCALE,
     luck: bool = False,
+    cost_factor: float = 1.0,
+    rate_bonus: float = 0.0,
 ) -> tuple[bool, str, int]:
     """炼体突破（原版 Level.js 炼体支线直译，量级按 cost_scale 缩放）。
 
-    - 消耗血气 = 当前境界行 exp × cost_scale（向上取整）
-    - 成功率 = max(1%, 1 - (境界+1)/60) + success_bonus；luck 把失败部分减半
+    - 消耗血气 = 当前境界行 exp × cost_scale × 时代系数（向上取整）
+    - 成功率 = max(1%, 1 - (境界+1)/60) + success_bonus + 时代加成；luck 把失败部分减半
     - 成功：境界 +1，扣全部消耗；失败：按 40%/20%/10%/0% 分档扣血气
     返回 (是否成功, 文案, 应扣血气)。境界自增由本函数完成，扣费由调用方执行。
     """
@@ -238,13 +246,14 @@ def body_breakthrough(
     if idx >= len(table) - 1:
         return False, f"肉身已至【{table[-1]['level']}】，天地再无进境之路。", 0
     row, nxt = table[idx], table[idx + 1]
-    cost = int(float(row.get("exp", 0) or 0) * cost_scale + 0.999)
+    factor = max(0.05, float(cost_factor))
+    cost = int(float(row.get("exp", 0) or 0) * cost_scale * factor + 0.999)
     if xueqi < cost:
         return False, f"突破【{nxt['level']}】需血气 {cost:,}（当前 {int(xueqi):,}）。", 0
-    prob = max(0.01, 1 - (idx + 1) / 60) + max(0.0, float(success_bonus or 0))
+    prob = max(0.01, 1 - (idx + 1) / 60) + max(-0.9, float(success_bonus or 0)) + float(rate_bonus)
     if luck:
         prob += (1 - prob) * 0.5
-    prob = min(0.99, prob)
+    prob = min(0.99, max(0.01, prob))
     if rng.random() < prob:
         doc.physique_index = idx + 1
         return True, (f"炼体突破成功，肉身升华！\n"
@@ -294,11 +303,15 @@ def one_key_break(
     rng: random.Random,
     luck: bool = False,
     grass: int = 0,
+    cost_factor: float = 1.0,
+    rate_bonus: float = 0.0,
+    era_note: str = "",
 ) -> tuple[str, PlayerDoc, int]:
     """一键突破（原版 OneKeyLevelUp 直译）。
 
-    shortcut: 原版时代系数、仙道潜力、体质减免、仙宠掉落、战报长图未移植；
+    shortcut: 原版仙道潜力、体质减免、仙宠掉落、战报长图未移植；
     仅保留累计制循环、幸运草 p+(1-p)*0.5、终止条件与统计输出。
+    cost_factor / rate_bonus 为 W7-2 时代法则，era_note 是显示用的「当前时代」一行。
     返回 (文案, 新档案, 幸运草消耗)。
     """
     d = doc.model_copy(deep=True)
@@ -313,7 +326,8 @@ def one_key_break(
             reason = "幸运草用尽"
             break
         rate = min(0.99, success_rate + ((1 - success_rate) * 0.5 if luck else 0.0))
-        allowed, msg, nd = breakthrough(d, level_table, rate, fail_penalty, rng)
+        allowed, msg, nd = breakthrough(d, level_table, rate, fail_penalty, rng,
+                                        cost_factor=cost_factor, rate_bonus=rate_bonus)
         if not allowed:
             reason = msg.split("\n")[0]
             break
@@ -324,9 +338,11 @@ def one_key_break(
         d = nd
         if luck:
             used += 1
-    lines = ["--- 一键突破 ---",
-             f"境界：第 {start + 1} 境 → 第 {int(d.realm_index) + 1} 境",
-             f"成功 {win} 次｜失败 {fail} 次"]
+    lines = ["--- 一键突破 ---"]
+    if era_note:
+        lines.append(era_note)
+    lines += [f"境界：第 {start + 1} 境 → 第 {int(d.realm_index) + 1} 境",
+              f"成功 {win} 次｜失败 {fail} 次"]
     if luck:
         lines.append(f"幸运草消耗 {used} 株")
     lines.append(f"结束原因：{reason}")
@@ -340,6 +356,9 @@ def one_key_body(
     luck: bool = False,
     grass: int = 0,
     cost_scale: float = BODY_COST_SCALE,
+    cost_factor: float = 1.0,
+    rate_bonus: float = 0.0,
+    era_note: str = "",
 ) -> tuple[str, PlayerDoc, int]:
     """一键破体（原版 OneKeyMaxUp 直译）。返回 (文案, 新档案, 幸运草消耗)。
 
@@ -349,6 +368,7 @@ def one_key_body(
     start = int(d.physique_index)
     win = fail = used = 0
     reason = "已达单次轮数上限"
+    factor = max(0.05, float(cost_factor))
     for _ in range(ONE_KEY_MAX_ROUNDS):
         idx = int(d.physique_index)
         if idx >= len(table) - 1:
@@ -358,11 +378,13 @@ def one_key_body(
             reason = "幸运草用尽"
             break
         xueqi = float(d.ext.get("xueqi", 0) or 0)
-        need = int(float(table[idx].get("exp", 0) or 0) * cost_scale + 0.999)
+        need = int(float(table[idx].get("exp", 0) or 0) * cost_scale * factor + 0.999)
         if xueqi < need:
             reason = "血气不足"
             break
-        good, _msg, cost = body_breakthrough(d, table, xueqi, rng, luck=luck)
+        good, _msg, cost = body_breakthrough(
+            d, table, xueqi, rng, luck=luck, cost_scale=cost_scale,
+            cost_factor=cost_factor, rate_bonus=rate_bonus)
         if cost:
             d.ext["xueqi"] = max(0.0, xueqi - cost)
         if int(d.physique_index) > idx:
@@ -371,9 +393,11 @@ def one_key_body(
             fail += 1
         if luck:
             used += 1
-    lines = ["--- 一键破体 ---",
-             f"炼体：第 {start + 1} 重 → 第 {int(d.physique_index) + 1} 重",
-             f"成功 {win} 次｜失败 {fail} 次"]
+    lines = ["--- 一键破体 ---"]
+    if era_note:
+        lines.append(era_note)
+    lines += [f"炼体：第 {start + 1} 重 → 第 {int(d.physique_index) + 1} 重",
+              f"成功 {win} 次｜失败 {fail} 次"]
     if luck:
         lines.append(f"幸运草消耗 {used} 株")
     lines.append(f"结束原因：{reason}")

@@ -20,7 +20,8 @@ def main() -> int:
     # @filter.command(名, 说明) —— 名可为常量或字面量
     entries = []
     for m in re.finditer(
-        r'@filter\.command\(\s*(CMD_\w+|"#[^"]+")\s*(?:,\s*"([^"]*)")?\s*\)\s*\n\s*async def (\w+)',
+        r'@filter\.command\(\s*(CMD_\w+|"#[^"]+")\s*(?:,\s*"([^"]*)")?\s*'
+        r'(?:,\s*alias=\{[^}]*\})?\s*\)\s*\n\s*async def (\w+)',
         src,
     ):
         name_tok, desc, fn = m.group(1), m.group(2) or "", m.group(3)

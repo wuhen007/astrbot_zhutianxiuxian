@@ -206,7 +206,8 @@ def trib_stage_name(doc: PlayerDoc) -> str:
     return _trib.best_stage(doc)[0]
 
 
-def assistant(doc: PlayerDoc, now: float | None = None, daily: Any = None) -> str:
+def assistant(doc: PlayerDoc, now: float | None = None, daily: Any = None,
+              era_note: str = "") -> str:
     """W7-0：读真实存档/每日任务/CD 给动态建议，不再是静态分档文案。"""
     now = now if now is not None else time.time()
     r = max(int(doc.realm_index), int(doc.physique_index))
@@ -217,6 +218,8 @@ def assistant(doc: PlayerDoc, now: float | None = None, daily: Any = None) -> st
              f"寿元 {sy:,} 年（每日流逝 {lifespan.decay_amount(doc)}）｜"
              f"血气 {int(doc.ext.get('xueqi', 0) or 0):,}",
              f"今日增寿丹 {int(doc.ext.get('pill_taken', 0) or 0)}/{lifespan.PILL_DAILY_CAP} 枚"]
+    if era_note:
+        lines.append(era_note)
     urgent: list[str] = []
     if isinstance(daily, dict):
         w = [int(daily.get(k, 0) or 0) for k in ("w1", "w2", "w3")]
@@ -380,7 +383,7 @@ def sacrifice(doc: PlayerDoc) -> tuple[str, bool]:
 
 def dispatch(cmd: str, doc: PlayerDoc, arg: str, content: Callable[[str], Any],
              groups: list[dict], stats: Any, rng: random.Random,
-             now: float, daily: Any = None) -> tuple[str, bool, dict]:
+             now: float, daily: Any = None, era_note: str = "") -> tuple[str, bool, dict]:
     """统一入口：返回 (文案, 是否改了档案, 额外物品)。"""
     changed, items = False, {}
     if cmd in HELP_TOPICS:
@@ -394,7 +397,7 @@ def dispatch(cmd: str, doc: PlayerDoc, arg: str, content: Callable[[str], Any],
     elif cmd == "#查看时代":
         text = "--- 当前时代 ---\n天命时代（本移植未实现时代轮转，时代系数恒为 1.0 / 成功率加成 0）。"
     elif cmd == "#修仙助手":
-        text = assistant(doc, now=now, daily=daily)
+        text = assistant(doc, now=now, daily=daily, era_note=era_note)
     elif cmd == "#打散雷劫":
         text, changed = break_trib_cd(doc, now)
     elif cmd == "#灵市帮助":

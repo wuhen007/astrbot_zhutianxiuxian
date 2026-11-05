@@ -33,6 +33,28 @@ ENCOUNTER_WEIGHTS = (45, 8, 20, 15, 12)
 ELITE_MULT = 2.2
 PREFIX_MULT = {"受伤的": 0.7, "凶暴的": 1.15, "远古的": 1.4, "嗜血的": 1.25, "变异的": 1.3}
 
+# 出金档位（W7-2 时代法则 one/two/three 三连判定；对齐原版 SecretPlaceTask.js:270-300）
+# 档位 → (灵石系数, 可掉稀有度上浮)
+LOOT_GRADES: dict[str, tuple[float, int]] = {
+    "none": (0.5, 0),
+    "low": (1.0, 0),
+    "mid": (1.15, 1),
+    "high": (1.35, 2),
+}
+DEFAULT_LOOT_RATES = (0.99, 0.5, 0.25)
+
+
+def loot_grade(rates: tuple[float, float, float], rng: random.Random) -> str:
+    """三连判定：低级必过（默认 0.99），中级 0.5，高级 0.25 → 约 12% 出高级。"""
+    one, two, three = (min(1.0, max(0.0, float(x))) for x in rates)
+    if rng.random() > one:
+        return "none"
+    if rng.random() > two:
+        return "low"
+    if rng.random() > three:
+        return "mid"
+    return "high"
+
 
 @dataclass
 class Session:
@@ -96,12 +118,13 @@ def roll_encounter(rng: random.Random) -> str:
 
 
 def roll_drop(
-    item_pool: list[Mapping], rng: random.Random, floor: int, elite: bool
+    item_pool: list[Mapping], rng: random.Random, floor: int, elite: bool,
+    rar_bonus: int = 0,
 ) -> Mapping | None:
-    """按稀有度过滤掉落：深度与精英提升可掉稀有度上限。"""
+    """按稀有度过滤掉落：深度、精英与出金档位共同提升可掉稀有度上限。"""
     if not item_pool:
         return None
-    cap = 2 + floor // 3 + (2 if elite else 0)
+    cap = 2 + floor // 3 + (2 if elite else 0) + max(0, int(rar_bonus))
     candidates = [e for e in item_pool if int(e.get("稀有度", 1) or 1) <= cap]
     pool = candidates or [e for e in item_pool if int(e.get("稀有度", 1) or 1) <= 2]
     return rng.choice(pool) if pool else None
@@ -148,6 +171,7 @@ def explore(
     protect: Any = None,
     me_fighter: Any = None,
     treasure_bonus: float = 0.0,
+    loot_rates: tuple[float, float, float] | None = None,
 ) -> tuple[Session, Unit, str, bool]:
     """寻宝一次。返回 (更新后的会话, 战斗后的我, 文本, 是否被打出局)。
 
@@ -157,12 +181,21 @@ def explore(
     只在真正进入战斗时调用，避免空探索白烧次数。
     protect：护道回调 (place, floor, enemy) -> (护道人, 文案) | None；
     战败瞬间调用，触发则气血全复、收益不减、留在秘境。
+    loot_rates：时代法则的秘境出金率 (one, two, three)；None = 不套用（旧行为）。
     """
     session.floor += 1
     boss_floor = sect_mode and (session.floor % 5 == 0)
     kind = roll_encounter(rng)
     depth = depth_mult(session.floor)
     pf = session.factor if session.factor > 0 else place_factor(session.place)
+
+    def grade() -> tuple[str, float, int]:
+        """掷出金档（无时代配置时按 low 折算，保持历史行为）。"""
+        if not loot_rates:
+            return "low", 1.0, 0
+        g = loot_grade(tuple(loot_rates), rng)
+        mult, rar = LOOT_GRADES[g]
+        return g, mult, rar
 
     if boss_floor:
         monster = make_monster(
@@ -176,12 +209,13 @@ def explore(
         skill_lines = [x for x in log if x.startswith("【")]
         tail = "\n".join(skill_lines + [log[-1]]) if skill_lines and log else (log[-1] if log else "")
         if winner == 0:
-            stones = int((1500 + 800 * session.floor) * depth * pf)
+            g, gmult, rar = grade()
+            stones = int((1500 + 800 * session.floor) * depth * pf * gmult)
             session.stones += max(1, int(stones * (1.0 + float(treasure_bonus or 0))))
             session.boss_kills += 1
             drops = []
-            for _ in range(2):
-                drop = roll_drop(item_pool, rng, session.floor + 4, elite=True)
+            for _ in range(0 if g == "none" else 2):
+                drop = roll_drop(item_pool, rng, session.floor + 4, elite=True, rar_bonus=rar)
                 if drop:
                     session.items[drop["name"]] = session.items.get(drop["name"], 0) + 1
                     drops.append(drop["name"])
@@ -211,9 +245,12 @@ def explore(
         skill_lines = [x for x in log if x.startswith("【")]
         tail = "\n".join(skill_lines + [log[-1]]) if skill_lines and log else (log[-1] if log else "")
         if winner == 0:
-            stones = int((300 + 200 * session.floor) * depth * pf * stone_scale * (3 if kind == "elite" else 1))
+            g, gmult, rar = grade()
+            stones = int((300 + 200 * session.floor) * depth * pf * stone_scale
+                         * (3 if kind == "elite" else 1) * gmult)
             session.stones += max(1, int(stones * (1.0 + float(treasure_bonus or 0))))
-            drop = roll_drop(item_pool, rng, session.floor, elite=(kind == "elite"))
+            drop = None if g == "none" else roll_drop(
+                item_pool, rng, session.floor, elite=(kind == "elite"), rar_bonus=rar)
             got = ""
             if drop:
                 session.items[drop["name"]] = session.items.get(drop["name"], 0) + 1
@@ -233,13 +270,16 @@ def explore(
         return session, me, tail, True
 
     if kind == "chest":
-        stones = int((500 + 300 * session.floor) * depth * pf * stone_scale)
+        g, gmult, _rar = grade()
+        stones = int((500 + 300 * session.floor) * depth * pf * stone_scale * gmult)
         session.stones += max(1, int(stones * (1.0 + float(treasure_bonus or 0))))
         session.log.append(f"第{session.floor}层：发现古旧宝箱，开出 {stones} 灵石")
         return session, me, "古旧宝箱中灵光一闪。", False
 
     if kind == "herb":
-        drop = roll_drop(item_pool, rng, session.floor, elite=False)
+        g, _gmult, rar = grade()
+        drop = None if g == "none" else roll_drop(item_pool, rng, session.floor,
+                                                  elite=False, rar_bonus=rar)
         if drop:
             session.items[drop["name"]] = session.items.get(drop["name"], 0) + 1
             session.log.append(f"第{session.floor}层：采得灵物「{drop['name']}」")

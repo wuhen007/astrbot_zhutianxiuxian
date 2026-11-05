@@ -170,9 +170,10 @@ async def main():
     ok, _, _ = items_mod.sell(inv_doc, junk, 1)
     assert not ok, "出售价 0 不可出售"
 
-    # 10. 迁移版本 = 15
+    # 10. 迁移版本 = 16
+    from infra.db import LATEST_DB_VERSION
     async with db.conn.execute("SELECT version FROM db_info") as cur:
-        assert (await cur.fetchone())[0] == 15
+        assert (await cur.fetchone())[0] == LATEST_DB_VERSION == 16
 
     # 11. 装备：穿戴/换位/卸下 + 比例与固定加成聚合
     from core import battle as battle_mod   # noqa: E402
@@ -3470,6 +3471,113 @@ async def main():
     txt22 = ad22.summary_text(rec22b)
     assert "类型：秘境" in txt22 and "血气：" in txt22 and "起止：" in txt22
     print("W7-1 ④ addict 11 fields ok")
+
+    # 23. W7-2 时代系统：五时代修正值 / 轮转边界 / 封印 / 出金率 / v16 迁移
+    from core import era as era_mod23
+
+    # ① 五时代修正值（EraStatusPlugin.js:56-105）
+    want_eras = [
+        ("神话时代", 0.25, 0.10, 0.4, 0.3),
+        ("太古时代", 0.10, 0.25, 0.6, 0.5),
+        ("天命时代", 0.0, 0.0, 1.0, 0.9),
+        ("末法时代", -0.10, 0.15, 1.8, 1.6),
+        ("绝灵时代", -0.30, -0.35, 3.0, 2.8),
+    ]
+    for i, (ename, qr, br, qc, bc) in enumerate(want_eras):
+        st23 = era_mod23.ensure({"years_total": i * era_mod23.ERA_YEARS}, 1_800_000_000)
+        row23 = era_mod23.state_of(st23["years_total"])
+        assert row23["name"] == ename and row23["index"] == i
+        assert abs(row23["qi_rate"] - qr) < 1e-9 and abs(row23["body_rate"] - br) < 1e-9
+        assert abs(row23["qi_cost"] - qc) < 1e-9 and abs(row23["body_cost"] - bc) < 1e-9
+        assert era_mod23.qi_mods(st23) == (qr, qc) and era_mod23.body_mods(st23) == (br, bc)
+    assert "专注练气" in era_mod23.advice(era_mod23.state_of(0))
+    assert "专注炼体" in era_mod23.advice(era_mod23.state_of(era_mod23.ERA_YEARS))
+    assert "双修并进" in era_mod23.advice(era_mod23.state_of(2 * era_mod23.ERA_YEARS))
+    assert "维艰" in era_mod23.advice(era_mod23.state_of(4 * era_mod23.ERA_YEARS))
+    print("W7-2 ① five-era modifiers ok")
+
+    # ② 轮转边界 + 纪元进位 + 懒推进（余数不吞）
+    st23, info23 = era_mod23.advance_years(era_mod23.ensure({"years_total": 9999}, 1_800_000_000), 1000)
+    assert info23["changed"] and info23["new"]["index"] == 1 and info23["new"]["years"] == 999
+    assert info23["new"]["epoch"] == 1 and "太古时代" in era_mod23.change_text(info23)
+    st23, info23 = era_mod23.advance_years(era_mod23.ensure({"years_total": 49_999}, 1_800_000_000), 1000)
+    assert info23["new"]["index"] == 0 and info23["new"]["epoch"] == 2 and info23["new"]["years"] == 999
+    st23, info23 = era_mod23.to_next_era(era_mod23.ensure({"years_total": 0}, 1_800_000_000))
+    assert info23["new"]["index"] == 1 and info23["new"]["years"] == 0
+    st23, info23 = era_mod23.set_era(era_mod23.ensure({"years_total": 0}, 1_800_000_000), 4, 500)
+    assert info23["new"]["index"] == 4 and info23["new"]["years"] == 500
+    st23 = era_mod23.ensure({"years_total": 0, "last_tick": 1000.0}, 1000.0)
+    st23, info23 = era_mod23.tick(st23, 1000.0 + 5 * 3600)
+    assert info23["ticks"] == 2 and st23["years_total"] == 2000
+    assert abs(st23["last_tick"] - (1000.0 + 4 * 3600)) < 1e-6   # 余下 1 小时不吞
+    st23, info23 = era_mod23.tick(era_mod23.ensure({"years_total": 0}, 1000.0), 1000.0 + 60)
+    assert info23["ticks"] == 0 and st23["years_total"] == 0
+    print("W7-2 ② rotation/epoch/lazy tick ok")
+
+    # ③ 禁仙六封：封印拦截 + 跨时代（黄金大世）自动解封
+    st24 = era_mod23.ensure({"years_total": 0}, 1_800_000_000)
+    dseal = PlayerDoc(uid="w7seal", realm_index=10, ext={})
+    assert era_mod23.seal_block(dseal, st24) is None
+    era_mod23.seal(dseal, "张源天", "uid-src", st24, 1_800_000_000)
+    block23 = era_mod23.seal_block(dseal, st24, "突破")
+    assert block23 and "禁仙六封" in block23 and "张源天" in block23
+    st24b, _info = era_mod23.to_next_era(st24)
+    assert not era_mod23.is_sealed(dseal, st24b)
+    assert era_mod23.seal_block(dseal, st24b) is None
+    era_mod23.unseal(dseal)
+    assert era_mod23.seal_of(dseal) is None
+    # 封印确实管住突破入口：被封印的修士连修为足够的突破也做不了（main 侧拦在 era.seal_block）
+    assert block23.startswith("你已被")
+    print("W7-2 ③ seal blocks & auto-releases ok")
+
+    # ④ 秘境出金率：三档改写生效（同一组种子，高 vs 断供）
+    assert all(sc22.loot_grade((1.0, 1.0, 1.0), _random.Random(i)) == "high" for i in range(5))
+    assert all(sc22.loot_grade((0.0, 0.0, 0.0), _random.Random(i)) == "none" for i in range(5))
+    st25 = era_mod23.ensure({"years_total": 0, "seal": {"one": 1.0, "two": 1.0, "three": 1.0}},
+                            1_800_000_000)
+    assert era_mod23.seal_rates(st25) == (1.0, 1.0, 1.0)
+    st25, sinfo = era_mod23.set_seal_rates(st25, 0.99, 0.5, 0.25)
+    assert st25["seal"] == {"one": 0.99, "two": 0.5, "three": 0.25}
+    assert era_mod23.set_seal_rates(st25, 2, -1, 0.5)[0]["seal"]["one"] == 1.0   # 钳制
+
+    def _delve(rates):
+        place23 = next(iter(sc22.PLACES))
+        sess23 = sc22.Session(place=place23)
+        me23 = battle_mod.Unit("我", 10 ** 9, 10 ** 9, 10 ** 9)
+        for i in range(40):
+            sess23, me23, _t, _fled = sc22.explore(
+                sess23, (10 ** 9, 10 ** 9, 10 ** 9), me23, [], _random.Random(700 + i),
+                loot_rates=rates)
+            me23.hp = 10 ** 9
+        return sess23.stones
+
+    rich, poor = _delve((1.0, 1.0, 1.0)), _delve((0.0, 0.0, 0.0))
+    assert rich > poor > 0, (rich, poor)
+    assert _delve(None) == _delve(None)   # 无时代配置 → 历史行为不变
+    print("W7-2 ④ loot rates ok")
+
+    # ⑤ db v16：空库建表 + 已有 v15 存档升级 + 单例读写
+    await db.save_era({"years_total": 12_345, "last_tick": 1_800_000_000.0,
+                       "seal": {"one": 0.9, "two": 0.5, "three": 0.3}})
+    assert (await db.get_era())["years_total"] == 12_345
+    tmp15 = Path(tempfile.mkdtemp(prefix="zhutian_v15_"))
+    seed_db = DataBase(tmp15 / "z.db")
+    await seed_db.connect()
+    await seed_db.close()
+    import aiosqlite as _aiosqlite23
+    raw23 = await _aiosqlite23.connect(tmp15 / "z.db")
+    await raw23.execute("DROP TABLE era_state")
+    await raw23.execute("UPDATE db_info SET version = 15")
+    await raw23.commit()
+    await raw23.close()
+    up_db = DataBase(tmp15 / "z.db")
+    await up_db.connect()
+    async with up_db.conn.execute("SELECT version FROM db_info") as cur:
+        assert (await cur.fetchone())[0] == 16, "v15 → v16 迁移失败"
+    await up_db.save_era({"years_total": 1, "last_tick": 1_800_000_000.0})
+    assert (await up_db.get_era())["years_total"] == 1
+    await up_db.close()
+    print("W7-2 ⑤ db v16 fresh+upgrade ok")
 
     await db.close()
     print("ALL M12 CHECKS PASSED")
