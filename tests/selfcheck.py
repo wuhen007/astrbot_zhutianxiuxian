@@ -4327,6 +4327,8 @@ async def main():
     assert au33.extra_levels(base33) == [40]
     assert au33.authority_of(base33) == 40
     assert au33.authority_of(PlayerDoc(uid="w8track2", realm_index=50, ext={})) == 50
+    au33.reset_tracks()            # 隔离：别污染后续组的 authority 判定
+    assert au33.authority_of(base33) == 10
     print("W8-B1a bloodline awaken ok")
 
     # ================= W8-B5 记忆命途 =================
@@ -4433,6 +4435,109 @@ async def main():
     # ⑧ 未开启时的提示
     assert "未开" in iw35.panel(PlayerDoc(uid="w8iw2", ext={}), cls35)
     print("W8-B2a inner world storage ok")
+
+    # ============ 第 36 组：W8-B2b 元神与精神宇宙 ============
+    from core import yuanshen as ys36
+    from core.combat import loadout as lo36
+    import json as _json36
+    places36 = _json36.loads((PLUGIN / "data/jingshen/精神宇宙.json").read_text(encoding="utf-8"))
+    assert ys36.load_places(places36) == 9, "位面表应为 9 处"
+    assert sum(len(x["layers"]) for x in places36) == 28, "总层数应为 28"
+
+    # ① 凝练：首次 150 万，等级推进受 authority_21 门槛限制
+    d36 = PlayerDoc(uid="w8ys", name="元神测试", realm_index=40, ext={})
+    assert ys36.level_of(d36) is None and ys36.max_of(d36) == 0
+    assert ys36.consolidate(d36)[0] is False, "空元神不能凝练"
+    ys36.save(d36, {**ys36.ensure(d36), "cur": 5_000_000, "max": 5_000_000})
+    ok36, msg36 = ys36.consolidate(d36)
+    assert ok36 and ys36.level_of(d36) == 0, msg36
+    assert ys36.ensure(d36)["cur"] == 5_000_000 - ys36.CONSOLIDATE_FIRST
+    de = PlayerDoc(uid="w8ys0", realm_index=8, ext={})
+    ys36.save(de, {**ys36.ensure(de), "cur": 100_000_000, "max": 100_000_000})
+    assert ys36.consolidate(de)[0] and ys36.level_of(de) == 0
+    bad, why = ys36.consolidate(de)                # 第二次要 1500 万 + 权柄 11 重
+    assert bad is False and "重天" in why, why
+
+    # ② 天药：只认 class=丹药 且 type=天药，元神与上限同增
+    idx36 = {"涅槃丹": {"class": "丹药", "type": "天药", "yuanshen": 100000},
+             "回春丹": {"class": "丹药", "type": "疗伤"}}
+    before36 = ys36.max_of(d36)
+    ok36b, _m36b, used36 = ys36.take_pills(d36, {"涅槃丹": 3, "回春丹": 9}, idx36, "全部")
+    assert ok36b and used36 == {"涅槃丹": 3}, used36
+    assert ys36.max_of(d36) == before36 + 300000
+    assert ys36.take_pills(d36, {}, idx36)[0] is False
+
+    # ③ 四类法门：恢复 / 淬炼 / 爆发 / 护体 + CD
+    d36.ext["gongfa"] = ["前字秘", "九劫玄身", "劫运神拳", "元神盾"]
+    t36 = 2_000_000.0
+    cap36 = ys36.max_of(d36)
+    ys36.save(d36, {**ys36.ensure(d36), "cur": cap36 // 2})
+    okc, _ = ys36.cultivate(d36, "前字秘", t36)
+    assert okc and ys36.cur_of(d36) == cap36 // 2 + int(ys36.math.ceil(cap36 * 0.20))
+    assert ys36.cultivate(d36, "前字秘", t36 + 60)[0] is False       # 240 分 CD
+    assert ys36.cultivate(d36, "九劫玄身", t36)[0] is False          # 类型不符
+    assert ys36.cultivate(d36, "太一凝神诀", t36)[0] is False        # 未学
+    cap36b = ys36.max_of(d36)
+    okr, _ = ys36.refine(d36, "九劫玄身", t36)
+    assert okr and ys36.max_of(d36) == cap36b + int(ys36.math.ceil(cap36b * 0.05))
+    okb, _ = ys36.burst(d36, "劫运神拳", t36)
+    assert okb and ys36.active_burst(d36, t36)[0] == 0.30
+    assert ys36.active_burst(d36, t36 + 301)[0] == 0.0               # 5 分钟过期
+    okg, _ = ys36.guard(d36, "元神盾", t36)
+    assert okg and abs(ys36.active_shield(d36, t36)[0] - 0.25) < 1e-9
+    assert ys36.active_shield(d36, t36 + 1801)[0] == 0.0             # 30 分钟过期
+
+    # ④ 战斗注入：爆发进增伤、护体进减伤
+    ys36.save(d36, {**ys36.ensure(d36),
+                    "buff": {"skill": "劫运神拳", "mult": 0.30, "end": 9e9},
+                    "shield": {"skill": "元神盾", "rate": 0.5, "end": 9e9}})
+    f36 = lo36.build_fighter(d36, "测试", 1000, 500, 10000, 0.1, lambda n: None)
+    assert float(f36.eff("dmg_dealt_mult", 1.0)) >= 1.30 - 1e-6
+    assert float(f36.eff("dmg_taken_mult", 1.0)) <= 0.75 + 1e-6
+
+    # ⑤ 神游：入场扣心神与元神 → 观想 → 抉择 → 节点满 → 深入通关
+    d36b = PlayerDoc(uid="w8ys3", name="神游", realm_index=60, ext={"gongfa": []})
+    ys36.save(d36b, {**ys36.ensure(d36b), "level": 1, "cur": 9_000_000, "max": 9_000_000})
+    heart36 = ys36.heart_of(d36b, t36)
+    assert heart36[1] == ys36.HEART_BASE_MAX + 3
+    assert ys36.enter(d36b, "不存在的地方", t36)[0] is False
+    assert ys36.enter(d36b, "九劫雷池", t36)[0] is False             # 等级不足
+    okd, _ = ys36.enter(d36b, "未央天域", t36)
+    assert okd and ys36.journey(d36b)["layer"] == 1
+    assert ys36.heart_of(d36b, t36)[0] == heart36[1] - ys36.HEART_ENTRY
+    assert ys36.cur_of(d36b) == 9_000_000 - 300000
+    assert ys36.enter(d36b, "未央天域", t36)[0] is False             # 已在云游
+    oke, txt36e = ys36.observe(d36b, t36 + 1, _random.Random(11))
+    assert oke and "#抉择" in txt36e, txt36e
+    okf, _txt36f, _it36 = ys36.choose(d36b, 1, t36 + 2, _random.Random(11))
+    assert okf and ys36.journey(d36b)["actions"] == 1
+    assert ys36.choose(d36b, 1, t36 + 3, _random.Random(11))[0] is False   # 无待处理异象
+    ys36.observe(d36b, t36 + 4, _random.Random(12))
+    ys36.choose(d36b, 1, t36 + 5, _random.Random(12))
+    assert ys36.journey(d36b)["actions"] == 2
+    assert ys36.observe(d36b, t36 + 6, _random.Random(13))[0] is False     # 节点已满
+    okg2, txt36g, it36g = ys36.deep(d36b, t36 + 7, _random.Random(14))
+    assert okg2 and "进入第 2 层" in txt36g, txt36g
+    assert ys36.journey(d36b)["layer"] == 2
+    oks, txt36s, _ = ys36.settle(d36b, forced=False, now=t36 + 8, rng=_random.Random(15))
+    assert oks and "战利品保留：100%" in txt36s
+    assert ys36.journey(d36b) is None
+
+    # ⑥ 强制归位按层折损：第 3 层 50%
+    assert ys36._retention(1) == 0.8 and ys36._retention(3) == 0.5
+    assert ys36._retention(9) == ys36.FORCED_RETENTION[-1]
+
+    # ⑦ 内景地修炼：未开启拒绝；开启后消耗元神换修为
+    from core import inner_world as iw36
+    d36c = PlayerDoc(uid="w8ys4", name="内景", realm_index=30, stones=10_000_000, ext={})
+    ys36.save(d36c, {**ys36.ensure(d36c), "level": 0, "cur": 5_000_000, "max": 5_000_000})
+    assert ys36.inner_cultivate(d36c, 1, t36, _random.Random(1))[0] is False
+    iw36.open_world(d36c)
+    okh, txt36h = ys36.inner_cultivate(d36c, 20, t36, _random.Random(3))
+    assert okh and "内景地修炼" in txt36h
+    assert ys36.cur_of(d36c) < 5_000_000
+    print("W8-B2b yuanshen & spirit universe ok")
+
 
     await db.close()
     print("ALL M12 CHECKS PASSED")

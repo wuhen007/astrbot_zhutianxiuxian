@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -441,6 +441,19 @@ CMD_IW_PUT = "#存入内景地"
 CMD_IW_TAKE = "#取出内景地"
 CMD_IW_PUT_ALL = "#一键存入内景地"
 CMD_IW_TAKE_ALL = "#一键取出内景地"
+# W8-B2b：元神与精神宇宙
+CMD_YS_CONSOLIDATE = "#凝练元神"
+CMD_YS_PANEL = "#我的元神"
+CMD_YS_PANEL_ALIAS = "#元神"
+CMD_YS_PILL = "#服食天药"
+CMD_YS_UNIVERSE = "#精神宇宙"
+CMD_YS_ENTER = "#神游"
+CMD_YS_OBSERVE = "#观想"
+CMD_YS_CHOOSE = "#抉择"
+CMD_YS_DEEP = "#深入"
+CMD_YS_BACK = "#归位"
+CMD_YS_STATUS = "#神识状态"
+CMD_YS_INNER = "#内景地修炼"
 # W7-4：养成深度（灵根觉醒 / 寿元救援 / 帝兵铭文 / 职业产线 / 道法卡）
 CMD_LG_AWAKEN = "#灵根觉醒"
 CMD_RESCUE = "#轮回救人"
@@ -526,7 +539,7 @@ ITEM_TABLES = (
     "丹药列表", "道具列表", "材料列表", "草药列表", "装备列表", "功法列表",
     "特殊装备列表", "食材列表", "宝石", "盒子列表", "帝兵列表", "锻造杂类",
     "锻造武器", "锻造护具", "锻造宝物", "锻造材料", "炼丹师丹药", "常驻", "限定",
-    "仙宠列表", "仙宠口粮列表",
+    "仙宠列表", "仙宠口粮列表", "精神宇宙掉落",
 )
 
 
@@ -548,6 +561,9 @@ class ZhutianPlugin(Star):
         # shortcut: 数据表暂从插件目录读取（随代码分发），表多体积大后改放 StarTools 数据目录
         self.content = ContentStore(PLUGIN_DIR / "data")
         logger.info(f"[zhutian] 内容表 {len(self.content.tables)} 张已加载")
+        # W8-B2b：精神位面（9 处 / 28 层）灌进元神模块
+        loaded = ysh_mod.load_places(self.content.table("jingshen/精神宇宙") or [])
+        logger.info(f"[zhutian] 精神位面 {loaded} 处已载入")
         # W8-B5：记忆命途注册为第三轨（只进门槛与天堑）
         try:
             from .core import authority as _auth
@@ -1332,6 +1348,21 @@ class ZhutianPlugin(Star):
                 (CMD_PET_ADV, "进阶仙宠（品级觉醒暴击）"),
                 (f"{CMD_GONGFA_LEARN} 功法名", "学习功法（提升闭关效率）"),
                 (CMD_GONGFA_MY, "已学功法"),
+            ]},
+            {"title": "元神与精神宇宙", "lines": [
+                (CMD_YS_PANEL, "元神境界 / 强度 / 心神 / 已学法门（别名 #元神）"),
+                (CMD_YS_CONSOLIDATE, "凝练元神（首次 150 万，之后 1500 万×次数）"),
+                (CMD_YS_PILL, "服食天药：元神与上限同增"),
+                (CMD_YS_UNIVERSE, "精神宇宙：9 处位面 / 28 层"),
+                (f"{CMD_YS_ENTER} 位面名", "神游入场（10 心神 + 位面元神）"),
+                (CMD_YS_OBSERVE, "观想：本层异象三选一"),
+                (f"{CMD_YS_CHOOSE} 1|2|3", "镇守心神 / 搜寻机缘 / 参悟道痕"),
+                (CMD_YS_DEEP, "深入：守关元神战"),
+                (CMD_YS_BACK, "归位：保留收获（战败按层折损）"),
+                (CMD_YS_STATUS, "神识云游状态"),
+                (f"{CMD_YS_INNER} [次数]", "内景地修炼：消耗元神换修为/血气"),
+                ("以X修炼元神 / 以X淬炼元神", "恢复元神 / 提升元神上限"),
+                ("以X元神爆发 / 以X元神护体", "5 分钟增伤 / 30 分钟减伤"),
             ]},
         ]
 
@@ -10941,6 +10972,284 @@ class ZhutianPlugin(Star):
             await self.db.save_player(doc.model_dump())
             await self.db.add_items(doc.uid, moved)
         async for r in self._smart(event, msg, "一键取出"):
+            yield r
+
+    # ---- W8-B2b：元神与精神宇宙（15 门法门 / 9 处位面 / 内景地修炼） ----
+
+    @filter.command(CMD_YS_CONSOLIDATE, "凝练元神")
+    async def handle_ys_consolidate(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = ysh_mod.consolidate(doc)
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, msg, "凝练元神"):
+            yield r
+
+    @filter.command(CMD_YS_PANEL, alias={"#元神"})
+    async def handle_ys_panel(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        now = time.time()
+        cur_h, cap_h = ysh_mod.heart_of(doc, now)
+        await self.db.save_player(doc.model_dump())      # 心神惰性恢复要落库
+        st = ysh_mod.ensure(doc)
+        lv = ysh_mod.level_of(doc)
+        lines = [
+            f"【{doc.name or doc.uid} 元神状态】",
+            f"元神境界：{ysh_mod.level_name(doc)}",
+            f"元神强度：{ysh_mod.cur_of(doc):,}/{ysh_mod.max_of(doc):,}",
+            f"心神：{cur_h}/{cap_h}（每 {ysh_mod.HEART_RECOVER_SECONDS // 60} 分钟 +1）",
+        ]
+        if lv is None:
+            lines.append(f"状态：尚未凝练（#凝练元神 需 {ysh_mod.consolidate_cost(doc):,} 元神）")
+        else:
+            lines.append(f"凝练次数：{int(st.get('lian', 1) or 1)}"
+                         f"｜下一境需 {ysh_mod.consolidate_cost(doc):,} 元神")
+        burst, bname = ysh_mod.active_burst(doc, now)
+        shield, sname = ysh_mod.active_shield(doc, now)
+        if burst:
+            left = int((float(st["buff"]["end"]) - now) / 60)
+            lines.append(f"爆发：{bname} +{burst:.0%} 伤害（余 {left} 分）")
+        if shield:
+            left = int((float(st["shield"]["end"]) - now) / 60)
+            lines.append(f"护体：{sname} -{shield:.0%} 受伤（余 {left} 分）")
+        owned = ysh_mod.known_skills(doc)
+        if owned:
+            lines.append("可用元神法门：")
+            for name in owned:
+                cfg = ysh_mod.SKILLS[name]
+                lines.append(f"  · {name}（{ysh_mod.TYPE_LABEL.get(str(cfg.get('type')), '?')}）")
+        elif lv is not None:
+            lines.append("可用元神法门：无（去 #精神宇宙 神游获取）")
+        dead = ysh_mod.journey(doc)
+        if dead:
+            lines.append(f"⚠ 神识正在「{dead.get('place_name')}」第 {int(dead.get('layer') or 1)} 层云游")
+        lines.append("用法：以X修炼元神 / 以X淬炼元神 / 以X元神爆发 / 以X元神护体")
+        async for r in self._smart(event, "\n".join(lines), "我的元神"):
+            yield r
+
+    @filter.command(CMD_YS_PILL, "服食天药")
+    async def handle_ys_pill(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        name = (arg or "").replace("*", " ").strip().split()
+        ok, msg, used = ysh_mod.take_pills(doc, inv, self.item_index, name[0] if name else "")
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            for pill, qty in used.items():
+                await self.db.remove_item(doc.uid, pill, qty)
+        async for r in self._smart(event, msg, "服食天药"):
+            yield r
+
+    @filter.command(CMD_YS_UNIVERSE, "精神宇宙")
+    async def handle_ys_universe(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        now = time.time()
+        text = ysh_mod.panel(doc, now)
+        await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, text, "精神宇宙"):
+            yield r
+
+    @filter.command(CMD_YS_ENTER, "神游")
+    async def handle_ys_enter(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        name = (arg or "").replace("*", " ").strip().split()
+        if not name:
+            yield event.plain_result(f"格式：{CMD_YS_ENTER} 位面名（#精神宇宙 看可进入的位面）")
+            return
+        ok, msg = ysh_mod.enter(doc, name[0], time.time())
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, msg, "神游"):
+            yield r
+
+    @filter.command(CMD_YS_OBSERVE, "观想")
+    async def handle_ys_observe(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = ysh_mod.observe(doc, time.time(), random.Random())
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, msg, "观想"):
+            yield r
+
+    async def _ys_choose(self, event: AstrMessageEvent, number: int):
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, items = ysh_mod.choose(doc, number, time.time(), random.Random())
+        if ok:
+            async with self.db.transaction():
+                await self.db.save_player(doc.model_dump())
+                if items:
+                    await self.db.add_items(doc.uid, items)
+        async for r in self._smart(event, msg, "抉择"):
+            yield r
+
+    @filter.command(CMD_YS_CHOOSE, "抉择")
+    async def handle_ys_choose(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        digits = "".join(ch for ch in (arg or "") if ch.isdigit())
+        if not digits or digits not in ("1", "2", "3"):
+            yield event.plain_result(f"格式：{CMD_YS_CHOOSE} 1|2|3")
+            return
+        async for r in self._ys_choose(event, int(digits)):
+            yield r
+
+    @filter.regex(r"^#抉择([1-3])$")
+    async def handle_ys_choose_star(self, event: AstrMessageEvent):
+        """兼容原版写法 #抉择1（无空格）。"""
+        import re as _re
+        if not self._allowed(event):
+            return
+        m = _re.match(r"^#抉择([1-3])$", (event.get_message_str() or "").strip())
+        async for r in self._ys_choose(event, int(m.group(1)) if m else 1):
+            yield r
+
+    @filter.command(CMD_YS_DEEP, "深入")
+    async def handle_ys_deep(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, items = ysh_mod.deep(doc, time.time(), random.Random())
+        if ok:
+            async with self.db.transaction():
+                await self.db.save_player(doc.model_dump())
+                if items:
+                    await self.db.add_items(doc.uid, items)
+        async for r in self._smart(event, msg, "深入"):
+            yield r
+
+    @filter.command(CMD_YS_BACK, "归位")
+    async def handle_ys_back(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, items = ysh_mod.settle(doc, forced=False, now=time.time(), rng=random.Random())
+        if ok:
+            async with self.db.transaction():
+                await self.db.save_player(doc.model_dump())
+                if items:
+                    await self.db.add_items(doc.uid, items)
+        async for r in self._smart(event, msg, "归位"):
+            yield r
+
+    @filter.command(CMD_YS_STATUS, "神识状态")
+    async def handle_ys_status(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        text = ysh_mod.status_text(doc, time.time())
+        await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, text, "神识状态"):
+            yield r
+
+    @filter.command(CMD_YS_INNER, "内景地修炼")
+    async def handle_ys_inner(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        digits = "".join(ch for ch in (arg or "") if ch.isdigit())
+        times = int(digits) if digits else 1
+        ok, msg = ysh_mod.inner_cultivate(doc, times, time.time(), random.Random())
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, msg, "内景地修炼"):
+            yield r
+
+    async def _ys_skill(self, event: AstrMessageEvent, kind: str):
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        import re as _re
+        text = (event.get_message_str() or "").replace(" ", "").replace("*", "").strip()
+        pattern = {"cultivate": r"^以(.+)修炼元神$", "refine": r"^以(.+)淬炼元神$",
+                   "burst": r"^以(.+)元神爆发$", "guard": r"^以(.+)元神护体$"}[kind]
+        m = _re.match(pattern, text)
+        if not m:
+            yield event.plain_result("格式：以X修炼元神 / 以X淬炼元神 / 以X元神爆发 / 以X元神护体")
+            return
+        name = m.group(1)
+        fn = {"cultivate": ysh_mod.cultivate, "refine": ysh_mod.refine,
+              "burst": ysh_mod.burst, "guard": ysh_mod.guard}[kind]
+        ok, msg = fn(doc, name, time.time())
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, msg, "元神法门"):
+            yield r
+
+    @filter.regex(r"^以.+修炼元神$")
+    async def handle_ys_cultivate(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        async for r in self._ys_skill(event, "cultivate"):
+            yield r
+
+    @filter.regex(r"^以.+淬炼元神$")
+    async def handle_ys_refine(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        async for r in self._ys_skill(event, "refine"):
+            yield r
+
+    @filter.regex(r"^以.+元神爆发$")
+    async def handle_ys_burst(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        async for r in self._ys_skill(event, "burst"):
+            yield r
+
+    @filter.regex(r"^以.+元神护体$")
+    async def handle_ys_guard(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        async for r in self._ys_skill(event, "guard"):
             yield r
 
     # ---- W7-4：养成深度（灵根觉醒 / 寿元救援 / 帝兵铭文 / 职业产线 / 道法卡） ----

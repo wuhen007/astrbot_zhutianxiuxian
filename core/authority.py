@@ -31,6 +31,11 @@ def register_track(fn) -> None:
         _TRACK_HOOKS.append(fn)
 
 
+def reset_tracks() -> None:
+    """清空注册表（自检隔离用；运行时热重载会重新注册）。"""
+    _TRACK_HOOKS.clear()
+
+
 def extra_levels(doc: Any) -> list[int]:
     out = []
     for fn in _TRACK_HOOKS:

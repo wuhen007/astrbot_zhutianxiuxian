@@ -172,6 +172,18 @@ def build_fighter(
             f.effects["shield"] = int(f.effects.get("shield", 0) or 0) + int(f.hp_max * rel["shield"])
     except Exception:
         pass
+    # W8-B2b 元神：爆发 +25%~30% 增伤、护体 -25%~-35% 受伤（各有时效，读时判定）
+    try:
+        from .. import yuanshen as ys_mod
+        burst, _bname = ys_mod.active_burst(doc)
+        if burst > 0:
+            f.effects["dmg_dealt_mult"] = float(f.eff("dmg_dealt_mult", 1.0)) * (1 + burst)
+        shield, _sname = ys_mod.active_shield(doc)
+        if shield > 0:
+            f.effects["dmg_taken_mult"] = max(0.4, float(f.eff("dmg_taken_mult", 1.0))
+                                              * (1 - shield))
+    except Exception:
+        pass
     apply_proficiency(f, doc)   # W7-0：三乘区 + 档位共鸣，PvP/PvE 同源
     if (int(getattr(doc, "realm_index", 0) or 0) >= 10
             and int(getattr(doc, "physique_index", 0) or 0) >= 10):
