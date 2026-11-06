@@ -69,7 +69,11 @@ def _try_revive(f: Fighter, hp: list[int], idx: int, log: list[str], rng: random
     pr = 1.0 if raw_pr is None else min(1.0, max(0.0, float(raw_pr)))   # pr=0 合法：永不触发
     if rng.random() >= pr:
         return False
-    rev["used"] = True
+    times = max(1, int(rev.get("times", 1) or 1))   # W8-B4 白云苍狗：一场三次复活
+    if times > 1:
+        rev["times"] = times - 1
+    else:
+        rev["used"] = True
     hp[idx] = max(1, int(f.hp_max * min(1.0, max(0.05, float(rev.get("ratio", 0.7) or 0.7)))))
     msg = str(rev.get("msg") or "")
     name = str(rev.get("name") or "复活技")

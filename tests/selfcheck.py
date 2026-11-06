@@ -4718,6 +4718,157 @@ async def main():
     print("W8-B3 flower pollen path ok")
 
 
+    # ---- W8-B4：岁云灵根 ----
+    from core import suiyun as sy38            # noqa: E402
+    from core import equipment as eq38         # noqa: E402
+    from core.combat import loadout as lo38    # noqa: E402
+    from core.combat import opening as op38    # noqa: E402
+    from core.combat.engine import Fighter as F38   # noqa: E402
+
+    class _Seq38:
+        """定序伪随机：让掉落/CD/成功率可精确断言。"""
+        def __init__(self, *seq):
+            self.seq = list(seq) or [0.0]
+            self.i = 0
+        def _next(self):
+            v = self.seq[self.i % len(self.seq)]
+            self.i += 1
+            return v
+        def random(self):
+            return self._next()
+        def randint(self, a, b):
+            return a
+        def choice(self, seq):
+            return seq[0]
+
+    t38 = 1_800_000.0
+    d38 = PlayerDoc(uid="w8sy1", name="岁云", realm_index=60, physique_index=60,
+                    exp=10 ** 12, stones=10 ** 9, ext={"xueqi": 10 ** 9})
+    # ① 五阶表 / 未觉醒零加成 / 感应岁云的唯一性与 CD（不能误写 awake）
+    assert len(sy38.STAGES) == 5 and sy38.STAGES[4]["realm"] == 20
+    assert sy38.stage_of(d38) == 0 and sy38.effects(d38)["loot_mult"] == 1
+    assert sy38.combat(d38, t38) == {} and sy38.set_bonus(d38)[0] == 0.0
+    assert sy38.seek(d38, {}, t38, _Seq38(0.01), True)[0] is False
+    ok38, _m38, delta38 = sy38.seek(d38, {}, t38, _Seq38(0.01), False)
+    assert ok38 and delta38.get(sy38.REMNANT) == 1
+    assert sy38.stage_of(d38) == 0
+    assert sy38.seek(d38, {}, t38 + 60, _Seq38(0.01), False)[0] is False
+    assert sy38.seek(d38, {}, t38 + 3600, _Seq38(0.99), False)[0] is False
+    # ② 觉醒 + 全服登记表
+    ok38, msg38, delta38 = sy38.activate(d38, {sy38.REMNANT: 1}, t38)
+    assert ok38 and delta38[sy38.REMNANT] == -1 and delta38[sy38.GONGFA[0]] == 1
+    assert sy38.stage_of(d38) == 1 and "月华初生" in msg38
+    assert sy38.activate(d38, {sy38.REMNANT: 1}, t38)[0] is False
+    reg38 = sy38.registry_of({"suiyun_registry": {"remnant": d38.uid}})
+    assert reg38["remnant"] == d38.uid and sy38.gift_left(reg38) == 3
+    # ③ 惰性结算：等效权柄 21 → 自动连升 5 阶 + 阶段馈赠 + 天阙枝唯一
+    note38, rew38 = sy38.settle(d38, t38, 21)
+    assert "自动晋阶" in note38 and sy38.stage_of(d38) == 5
+    assert all(rew38.get(n) == 1 for n in sy38.FROST_SET)
+    assert rew38.get(sy38.TREASURE) == 1 and d38.ext["equipment"]["至宝"] == sy38.TREASURE
+    ok38, msg38, _ = sy38.witness(d38, t38)
+    assert ok38 and "已全部领取" in msg38
+    assert sy38.stage_name(d38) == "岁云剑尊"
+    d38b = PlayerDoc(uid="w8sy2", name="岁云乙", realm_index=60, exp=10 ** 12)
+    sy38.activate(d38b, {sy38.REMNANT: 1}, t38)
+    _n38, rew38b = sy38.settle(d38b, t38, 21, treasure_taken=True)
+    assert sy38.TREASURE not in rew38b and sy38.stage_of(d38b) == 5
+    # ④ 月华经济：修炼 24h / 岁岁年年 1h / 炼化 24h / 锁魂必成
+    ok38, _m38, _ = sy38.cultivate(d38, t38, _Seq38())
+    assert ok38 and sy38.state_of(d38)["moonlight"] == 2000
+    assert sy38.cultivate(d38, t38 + 3600, _Seq38())[0] is False
+    pool38, gf38 = list(sy38.YEAR_POOL), list(sy38.NINE_SECRETS + sy38.TEN_XIONG)
+    ok38, _m38, delta38 = sy38.years(d38, "祈愿 九秘", t38, _Seq38(), pool38, gf38)
+    assert ok38 and sum(delta38.values()) >= 1
+    assert sy38.years(d38, "", t38 + 60, _Seq38(), pool38, gf38)[0] is False
+    ok38, _m38, _ = sy38.refine(d38, "天骄", t38, _Seq38(0.0))
+    assert ok38 and sy38.state_of(d38)["lotus_moon"] > 0
+    assert sy38.refine(d38, "天骄", t38 + 3600, _Seq38(0.0))[0] is False
+    ok38, _m38, _ = sy38.soul_lock(d38, t38)
+    assert ok38
+    ok38, msg38, _ = sy38.refine(d38, "天骄", t38, _Seq38(0.99))
+    assert ok38 and "搜魂必成" in msg38
+    ok38, _m38, _ = sy38.redeem(d38, "")
+    assert ok38 and sy38.state_of(d38)["moonlight"] >= 0
+    # ⑤ 套装倍率 / 云月之莲 / 战斗注入
+    lookup38 = {n: {"name": n, "class": "装备", "套装": "岁云剑尊套",
+                    "type": {"岁云剑": "武器", "岁云袍": "护具", "云月之莲": "法宝"}[n],
+                    "atk": 1000, "def": 1000, "HP": 1000}
+                for n in sy38.FINAL_SET}
+    d38.ext["equipment"] = {"武器": "岁云剑", "护具": "岁云袍", "法宝": "云月之莲",
+                            "至宝": sy38.TREASURE}
+    assert abs(sy38.set_bonus(d38)[0] - 19.0) < 1e-6
+    st38 = sy38.state_of(d38)
+    st38["lotus_moon"] = 10
+    sy38.set_state(d38, st38)
+    assert sy38.lotus_flat(d38) == 2_000_000
+    with_set = eq38.aggregate(d38, level_table, lambda n: lookup38.get(n))
+    d38.ext["equipment"]["法宝"] = "别的"
+    no_set = eq38.aggregate(d38, level_table, lambda n: lookup38.get(n))
+    assert with_set.atk >= no_set.atk * 10       # 套装层 ×20
+    d38.ext["equipment"]["法宝"] = "云月之莲"
+    f38 = lo38.build_fighter(d38, "岁云", 100000, 100000, 1000000, 0.1, lookup38)
+    assert f38.tags["linggen_name"] == "岁云剑尊" and f38.tags["suiyun_stage"] == 5
+    assert float(f38.eff("dmg_dealt_mult", 1.0)) >= 2.0
+    assert f38.effects["revive"]["times"] == 3
+    # ⑥ 对外加成：悟道 / 物品 / 渡劫 / 免费入场 / 免即死
+    assert abs(sy38.wudao_bonus(d38) - 0.45) < 1e-6
+    assert sy38.loot_mult(d38) == 10 and sy38.free_entry(d38) is True
+    assert abs(sy38.trib_reduction(d38) - 0.85) < 1e-6
+    st38 = sy38.state_of(d38)
+    st38["trib_shield"] = True
+    sy38.set_state(d38, st38)
+    assert abs(sy38.trib_reduction(d38) - 0.95) < 1e-6
+    hi38 = F38(name="仙帝", atk=1, defense=1, hp=100, hp_max=100, bao=0.0)
+    low38 = F38(name="岁云", atk=1, defense=1, hp=100, hp_max=100, bao=0.0)
+    hi38.tags["auth21"] = 21
+    low38.tags["auth21"] = 5
+    low38.tags["suiyun_stage"] = 5
+    assert op38.high_realm_exec(hi38, low38) is None      # 岁云常青免即死
+    low38.tags.pop("suiyun_stage")
+    assert op38.high_realm_exec(hi38, low38) is not None  # 素人仍被镇杀
+    # ⑦ 岁云之力经济：造物 / 更改 / 剑宫兑换 / 九印解封 / 权柄技
+    st38 = sy38.state_of(d38)
+    st38["power"] = 100.0
+    sy38.set_state(d38, st38)
+    ok38, _m38, delta38 = sy38.create(d38, "潜力丹", {"潜力丹": {}})
+    assert ok38 and delta38.get("潜力丹") == 1 and float(sy38.state_of(d38)["power"]) == 90.0
+    assert sy38.create(d38, sy38.REMNANT, {sy38.REMNANT: {}})[0] is False
+    ok38, _m38, _ = sy38.change(d38, "称号 月宫主人")
+    assert ok38 and sy38.state_of(d38)["title"] == "月宫主人"
+    rows38 = [{"name": "月华帝剑", "class": "装备", "出售价": 200_000_000}]
+    ok38, _m38, delta38 = sy38.buy(d38, "月华帝剑", 2, rows38)
+    assert ok38 and delta38["月华帝剑"] == 2 and d38.stones == 10 ** 9 - 4_000_000
+    inv38 = {"如梦的加持": 20, "地心红莲": 1, "雷帝宝术": 1, "万物母气": 1,
+             "仙坟土": 1, "仙泉之眼": 1, "九彩神金": 1, "群星圣药": 10, "界核": 200}
+    for seal38 in sy38.SEALS:
+        ok38, _m38, _ = sy38.unseal(d38, seal38[0], inv38, t38)
+        assert ok38, seal38[0]
+    assert len(sy38.state_of(d38)["seals"]) == 9
+    assert sy38.unseal(d38, "梦幻", inv38, t38)[0] is False
+    assert sy38.dream(d38, "无上天阙枝 梦幻", t38)[0] is True
+    assert sy38.sword(d38, t38, grand=True)[0] is True
+    assert sy38.combat(d38, t38)["dealt"] > 3.0     # 梦幻 + 岁云降世叠加
+    assert "已解封 9/9" in sy38.authority_panel(d38)
+    # ⑧ 赐予月华（全服 3 席）
+    ok38, msg38, reg38 = sy38.grant(d38, "someone", False, reg38, t38)
+    assert ok38 and len(reg38["gifts"]) == 1 and "第 1 席" in msg38
+    assert sy38.grant(d38, "someone", False, reg38, t38)[0] is False
+    assert sy38.grant(d38, "other", True, reg38, t38)[0] is False
+    # ⑨ 原版物品表已随包存在，无需新增数据文件
+    cs38 = ContentStore(PLUGIN / "data")
+    idx38 = {}
+    for tname38 in ("特殊装备列表", "道具列表", "功法列表", "仙宠列表"):
+        for e38 in cs38.table("item/" + tname38) or []:
+            if isinstance(e38, dict) and e38.get("name"):
+                idx38.setdefault(str(e38["name"]), e38)
+    for n38 in (*sy38.FROST_SET, *sy38.FINAL_SET, sy38.TREASURE, sy38.REMNANT,
+                sy38.PET, *sy38.GONGFA):
+        assert n38 in idx38, n38
+    assert len(sy38.panel(d38, t38, reg38).split("\n")) >= 10
+    print("W8-B4 suiyun path ok")
+
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

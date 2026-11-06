@@ -110,6 +110,16 @@ def main() -> int:
                     "handle_fl_fruit", "handle_fl_purify", "handle_fl_reshape",
                     "handle_fl_wudao", "handle_fl_seed_wudao", "handle_fl_breed",
                     "handle_fl_super", "handle_fl_trib", "handle_fl_extreme")),
+        ("岁云灵根", ("handle_sy_seek", "handle_sy_awake", "handle_sy_panel",
+                    "handle_sy_stages", "handle_sy_witness", "handle_sy_cultivate",
+                    "handle_sy_years", "handle_sy_lotus", "handle_sy_refine",
+                    "handle_sy_soul", "handle_sy_redeem", "handle_sy_create",
+                    "handle_sy_change", "handle_sy_grant", "handle_sy_fish",
+                    "handle_sy_dungeon", "handle_sy_addict", "handle_sy_shop",
+                    "handle_sy_buy", "handle_sy_authority", "handle_sy_unseal",
+                    "handle_sy_dream", "handle_sy_sword", "handle_sy_descent",
+                    "handle_sy_root", "handle_sy_pray", "handle_sy_skill",
+                    "handle_sy_genesis")),
         ("帮助", ("handle_help",)),
     ]
     grouped = {}

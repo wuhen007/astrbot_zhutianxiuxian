@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, authority as authority_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -472,6 +472,41 @@ CMD_FL_BREED_ALIAS = "#祖种孕育"
 CMD_FL_SUPER = "#服用超级异果"
 CMD_FL_TRIB = "#花粉渡劫"
 CMD_FL_EXTREME = "#极尽蜕变"
+# W8-B4：岁云灵根（唯一造化 → 五阶 → 月华经济 → 套装战技 → 十三权柄）
+CMD_SY_SEEK = "#感应岁云"
+CMD_SY_AWAKE = "#消耗岁云的残念"
+CMD_SY_AWAKE_ALIAS1 = "#使用岁云的残念"
+CMD_SY_AWAKE_ALIAS2 = "#服用岁云的残念"
+CMD_SY_AWAKE_ALIAS3 = "#炼化岁云的残念"
+CMD_SY_PANEL = "#岁云之力"
+CMD_SY_PANEL_ALIAS = "#我的岁云"
+CMD_SY_STAGES = "#岁云五阶"
+CMD_SY_WITNESS = "#岁云见证"
+CMD_SY_CULTIVATE = "#云月修炼"
+CMD_SY_YEARS = "#岁岁年年"
+CMD_SY_LOTUS = "#云月之莲"
+CMD_SY_REFINE = "#月华炼化"
+CMD_SY_SOUL = "#月华锁魂"
+CMD_SY_REDEEM = "#月华救赎"
+CMD_SY_CREATE = "#岁云造物"
+CMD_SY_CHANGE = "#岁云更改"
+CMD_SY_GRANT = "#赐予月华"
+CMD_SY_FISH = "#月华垂钓"
+CMD_SY_DUNGEON = "#刻舟求剑"
+CMD_SY_ADDICT = "#朝花夕拾"
+CMD_SY_SHOP = "#岁云剑宫商店"
+CMD_SY_SHOP_ALIAS = "#剑宫商店"
+CMD_SY_BUY = "#剑宫兑换"
+CMD_SY_AUTHORITY = "#天阙权柄"
+CMD_SY_AUTHORITY_ALIAS = "#无上天阙枝"
+CMD_SY_UNSEAL = "#天阙解封"
+CMD_SY_DREAM = "#梦幻"
+CMD_SY_SWORD = "#断崖之剑"
+CMD_SY_DESCENT = "#岁云降世"
+CMD_SY_ROOT = "#根源波动"
+CMD_SY_PRAY = "#祈愿渡劫"
+CMD_SY_SKILL = "#无极悟技"
+CMD_SY_GENESIS = "#创世"
 # W7-4：养成深度（灵根觉醒 / 寿元救援 / 帝兵铭文 / 职业产线 / 道法卡）
 CMD_LG_AWAKEN = "#灵根觉醒"
 CMD_RESCUE = "#轮回救人"
@@ -1399,6 +1434,36 @@ class ZhutianPlugin(Star):
                 (CMD_FL_SUPER, "领取超级异果：修为血气大涨、补满道则、根基与污染清零"),
                 (CMD_FL_TRIB, "逐阶段雷劫，全过方成；失败有下次成功率保护"),
                 (CMD_FL_EXTREME, "极尽蜕变：消耗积淀换成功率/悟道/等效权柄"),
+            ]},
+            {"title": "岁云灵根", "lines": [
+                (CMD_SY_SEEK, "觉醒前入口：1 小时一次、3% 得唯一造化【岁云的残念】"),
+                (CMD_SY_AWAKE, "消耗残念承接月华之体（别名 #使用/#服用/#炼化岁云的残念）"),
+                (CMD_SY_PANEL, "岁云大面板：阶段/月华/本源/岁云之力/套装/封印（别名 #我的岁云）"),
+                (CMD_SY_STAGES, "五阶境界门槛与悟道/减伤/物品倍率/本源上限表"),
+                (CMD_SY_WITNESS, "补领阶段馈赠（霜月套 / 岁云套），幂等不重复"),
+                (CMD_SY_CULTIVATE, "24 小时一次：月华值 +2000~5000"),
+                (f"{CMD_SY_YEARS} [祈愿 X|材料名]", "1 小时一次：产材料或祈愿九秘/单字秘/十凶宝术"),
+                (CMD_SY_LOTUS, "月华养器：每累计 1 点炼化月华，三维各 +20 万"),
+                (f"{CMD_SY_REFINE} [玩家|天骄|灾厄|魔主|邪祟]", "24 小时禁术调息，炼化本源得月华"),
+                (CMD_SY_SOUL, "五阶锁魂：下次炼化必成并搜魂得修为"),
+                (f"{CMD_SY_REDEEM} [解放]", "100 月华复原本源 / 200 月华解放，清渡劫反噬"),
+                (f"{CMD_SY_CREATE} 物品名", "三阶起 10 点岁云之力造 1 件（唯一/专属不可造）"),
+                (f"{CMD_SY_CHANGE} 称号|道韵|命格 名称", "三阶起耗 5/10/20 点岁云之力改写"),
+                (f"{CMD_SY_GRANT} @目标", "五阶赐月华传承，全服 3 席，赠三道战技"),
+                (CMD_SY_FISH, "五阶耗 3 点岁云之力垂钓鱼王"),
+                (CMD_SY_DUNGEON, "五阶免门票探索岁云殿堂"),
+                (f"{CMD_SY_ADDICT} [组数]", "五阶沉迷仙境 1~12 组（每组 10 轮），免钥匙灵石"),
+                (CMD_SY_SHOP, "剑宫商店 22 条名录（别名 #剑宫商店）"),
+                (f"{CMD_SY_BUY} 物品名 [数量]", "宫主兑换，源石价 ÷100 折算灵石"),
+                (CMD_SY_AUTHORITY, "无上天阙枝十三权柄与 9 道封印进度（别名 #无上天阙枝）"),
+                (f"{CMD_SY_UNSEAL} 权柄名", "上交供物解封九印之一"),
+                (f"{CMD_SY_DREAM} 至宝名 权柄名", "24 小时借来一次权柄，战斗增伤 +50%"),
+                (CMD_SY_SWORD, "大地封印：24 小时首击三倍（增伤 +30%）"),
+                (CMD_SY_DESCENT, "九印齐解：24 小时岁云剑雨（增伤 +90%）"),
+                (f"{CMD_SY_ROOT} @目标", "海洋封印：48 小时修复本源、清道伤"),
+                (f"{CMD_SY_PRAY} @目标", "七夜封印：耗 500 万修为，下一场渡劫承伤减半"),
+                (f"{CMD_SY_SKILL} 功法名", "无极封印：功法百分百领悟"),
+                (f"{CMD_SY_GENESIS} 武器|防具|法宝 名称", "创世封印：供物铸器，三维 +500%"),
             ]},
         ]
 
@@ -12277,8 +12342,10 @@ class ZhutianPlugin(Star):
         fund_note = ""
         items_out = dict(sess.items)
         mem_mult = int(mem_mod.effects(doc)["item_mult"]) if mem_mod.stage_of(doc) > 0 else 1
-        if mem_mult > 1 and items_out:
-            items_out = {k: v * mem_mult for k, v in items_out.items()}
+        sy_mult = suiyun_mod.loot_mult(doc)          # W8-B4 岁云物品倍率 1~10
+        loot_mult = max(mem_mult, sy_mult)           # 两轨取 max，不叠乘（避免 40 倍通胀）
+        if loot_mult > 1 and items_out:
+            items_out = {k: v * loot_mult for k, v in items_out.items()}
         async with self.db.transaction():
             await self.db.save_player(d.model_dump())
             if items_out:
@@ -12371,7 +12438,7 @@ class ZhutianPlugin(Star):
                 return
             drow, kind = found
             gate = dungeon.gate_of(drow.get("Price", 0))
-            fee = dungeon.fee_of(drow.get("Price", 0))
+            fee = 0 if suiyun_mod.free_entry(doc) else dungeon.fee_of(drow.get("Price", 0))
             desc = (f"{drow.get('Grade') or kind}｜门票 {fee:,} 灵石｜"
                     f"掉落 {len(dungeon.pool_of(drow))} 种")
         if doc.realm_index < gate:
@@ -14997,4 +15064,445 @@ class ZhutianPlugin(Star):
             return
         await self._fl_apply(doc, delta)
         async for r in self._smart(event, msg, "极尽蜕变"):
+            yield r
+
+    # ---- W8-B4：岁云灵根（原版 Suiyun.js / SuiyunAuthority.js + model/suiyun.js） ----
+
+    async def _sy_registry(self) -> dict:
+        """全服唯一登记表：残念承继者 / 天阙枝归属 / 三席月华传承（挂 calamity_state，不动库）。"""
+        return suiyun_mod.registry_of(await self.db.get_calamity())
+
+    async def _sy_apply(self, doc: PlayerDoc, delta: dict[str, int] | None = None,
+                        reg: dict | None = None, settle: bool = True,
+                        extra_docs: list | None = None) -> str:
+        """统一落库：惰性结算 + 玩家档 + 物品增减 + 全服登记表（事务内不 yield）。"""
+        delta = dict(delta or {})
+        reg_given = reg is not None
+        r = dict(reg) if reg_given else await self._sy_registry()
+        changed = reg_given
+        note = ""
+        if settle:
+            note, sd = suiyun_mod.settle(
+                doc, time.time(), authority_mod.authority_21(doc),
+                bool(r.get("treasure") and r["treasure"] != doc.uid),
+            )
+            for k, v in sd.items():
+                delta[k] = delta.get(k, 0) + v
+        if suiyun_mod.TREASURE in delta and not r.get("treasure"):
+            r["treasure"] = doc.uid
+            changed = True
+        if suiyun_mod.stage_of(doc) > 0 and not r.get("remnant"):
+            r["remnant"] = doc.uid
+            changed = True
+        if changed:
+            state = await self.db.get_calamity()
+            state["suiyun_registry"] = r
+            await self.db.save_calamity(state)
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            for d in (extra_docs or []):
+                await self.db.save_player(d.model_dump())
+            for name, qty in delta.items():
+                if qty > 0:
+                    await self.db.add_items(doc.uid, {name: qty})
+                elif qty < 0:
+                    await self.db.remove_item(doc.uid, name, -qty)
+        return note
+
+    async def _sy_finish(self, event, doc, result, title, reg=None,
+                         settle=True, extra_docs=None):
+        """成功/失败都落库（CD 与天宫结算不能丢），成功才出面板。"""
+        ok, msg, delta = result
+        note = await self._sy_apply(doc, delta, reg=reg, settle=settle,
+                                    extra_docs=extra_docs)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        text = (note + "\n" if note else "") + msg
+        async for r in self._smart(event, text, title):
+            yield r
+
+    @filter.command(CMD_SY_SEEK, "感应岁云")
+    async def handle_sy_seek(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        reg = await self._sy_registry()
+        inv = await self.db.get_inventory(doc.uid)
+        taken = bool(reg.get("remnant") and reg["remnant"] != doc.uid)
+        result = suiyun_mod.seek(doc, inv, time.time(), random.Random(), taken)
+        async for r in self._sy_finish(event, doc, result, "感应岁云"):
+            yield r
+
+    @filter.command(CMD_SY_AWAKE, alias={CMD_SY_AWAKE_ALIAS1, CMD_SY_AWAKE_ALIAS2,
+                                         CMD_SY_AWAKE_ALIAS3})
+    async def handle_sy_awake(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        reg = await self._sy_registry()
+        inv = await self.db.get_inventory(doc.uid)
+        result = suiyun_mod.activate(doc, inv, time.time(), reg.get("remnant") or "")
+        if result[0]:
+            reg["remnant"] = doc.uid
+        async for r in self._sy_finish(event, doc, result, "月华初生",
+                                       reg=reg if result[0] else None):
+            yield r
+
+    @filter.command(CMD_SY_PANEL, alias={CMD_SY_PANEL_ALIAS})
+    async def handle_sy_panel(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        if (arg or "").strip():
+            yield event.plain_result(f"{CMD_SY_PANEL} 不接受参数（原版严格匹配），"
+                                     "查阶段表请发「#岁云五阶」。")
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        note = await self._sy_apply(doc, {})
+        reg = await self._sy_registry()
+        msg = suiyun_mod.panel(doc, time.time(), reg)
+        text = (note + "\n" if note else "") + msg
+        async for r in self._smart(event, text, "岁云之力"):
+            yield r
+
+    @filter.command(CMD_SY_STAGES, "岁云五阶")
+    async def handle_sy_stages(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        async for r in self._smart(event, suiyun_mod.stages_text(), "岁云五阶"):
+            yield r
+
+    @filter.command(CMD_SY_WITNESS, "岁云见证")
+    async def handle_sy_witness(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        result = suiyun_mod.witness(doc, time.time())
+        async for r in self._sy_finish(event, doc, result, "岁云见证"):
+            yield r
+
+    @filter.command(CMD_SY_CULTIVATE, "云月修炼")
+    async def handle_sy_cultivate(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        result = suiyun_mod.cultivate(doc, time.time(), random.Random())
+        async for r in self._sy_finish(event, doc, result, "云月修炼"):
+            yield r
+
+    @filter.command(CMD_SY_YEARS, "岁岁年年")
+    async def handle_sy_years(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        pool = [n for n in suiyun_mod.YEAR_POOL if n in self.item_index]
+        gongfa = list(suiyun_mod.NINE_SECRETS + suiyun_mod.TEN_XIONG)
+        result = suiyun_mod.years(doc, arg, time.time(), random.Random(), pool, gongfa)
+        async for r in self._sy_finish(event, doc, result, "岁岁年年"):
+            yield r
+
+    @filter.command(CMD_SY_LOTUS, "云月之莲")
+    async def handle_sy_lotus(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        note = await self._sy_apply(doc, {})
+        msg = suiyun_mod.lotus(doc)
+        text = (note + "\n" if note else "") + msg
+        async for r in self._smart(event, text, "云月之莲"):
+            yield r
+
+    @filter.command(CMD_SY_REFINE, "月华炼化")
+    async def handle_sy_refine(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        result = suiyun_mod.refine(doc, arg, time.time(), random.Random())
+        async for r in self._sy_finish(event, doc, result, "月华炼化"):
+            yield r
+
+    @filter.command(CMD_SY_SOUL, "月华锁魂")
+    async def handle_sy_soul(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        result = suiyun_mod.soul_lock(doc, time.time())
+        async for r in self._sy_finish(event, doc, result, "月华锁魂"):
+            yield r
+
+    @filter.command(CMD_SY_REDEEM, "月华救赎")
+    async def handle_sy_redeem(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        result = suiyun_mod.redeem(doc, arg)
+        async for r in self._sy_finish(event, doc, result, "月华救赎"):
+            yield r
+
+    @filter.command(CMD_SY_CREATE, "岁云造物")
+    async def handle_sy_create(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        result = suiyun_mod.create(doc, arg, self.item_index)
+        async for r in self._sy_finish(event, doc, result, "岁云造物"):
+            yield r
+
+    @filter.command(CMD_SY_CHANGE, "岁云更改")
+    async def handle_sy_change(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        result = suiyun_mod.change(doc, arg)
+        async for r in self._sy_finish(event, doc, result, "岁云更改"):
+            yield r
+
+    @filter.command(CMD_SY_GRANT, "赐予月华")
+    async def handle_sy_grant(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        target_uid = self._at_target(event) or (arg or "").strip()
+        reg = await self._sy_registry()
+        if not target_uid:
+            yield event.plain_result(f"月华传承剩余 {suiyun_mod.gift_left(reg)}/"
+                                     f"{suiyun_mod.GIFT_SLOTS} 席。格式：{CMD_SY_GRANT} @目标")
+            return
+        raw = await self.db.get_player(target_uid)
+        tdoc = PlayerDoc(**raw) if raw else None
+        ok, msg, new_reg = suiyun_mod.grant(
+            doc, target_uid, bool(tdoc and suiyun_mod.stage_of(tdoc) > 0), reg, time.time())
+        extra = []
+        if ok and tdoc:
+            tdoc.ext["suiyun_blessing"] = {"from": doc.uid, "at": time.time()}
+            extra.append(tdoc)
+        note = await self._sy_apply(doc, {}, reg=new_reg if ok else None,
+                                    settle=False, extra_docs=extra)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        async for r in self._smart(event, (note + "\n" if note else "") + msg, "赐予月华"):
+            yield r
+
+    @filter.command(CMD_SY_FISH, "月华垂钓")
+    async def handle_sy_fish(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        result = suiyun_mod.fish(doc, time.time(), random.Random())
+        async for r in self._sy_finish(event, doc, result, "月华垂钓"):
+            yield r
+
+    @filter.command(CMD_SY_DUNGEON, "刻舟求剑")
+    async def handle_sy_dungeon(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        result = suiyun_mod.explore(doc, 1, time.time(), random.Random())
+        async for r in self._sy_finish(event, doc, result, "刻舟求剑"):
+            yield r
+
+    @filter.command(CMD_SY_ADDICT, "朝花夕拾")
+    async def handle_sy_addict(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        parts = (arg or "").replace("*", " ").strip().split()
+        try:
+            groups = int(parts[0]) if parts else 1
+        except ValueError:
+            groups = 1
+        result = suiyun_mod.explore(doc, groups, time.time(), random.Random())
+        async for r in self._sy_finish(event, doc, result, "朝花夕拾"):
+            yield r
+
+    @filter.command(CMD_SY_SHOP, alias={CMD_SY_SHOP_ALIAS})
+    async def handle_sy_shop(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        rows = self.content.table("item/势力商店/岁云剑宫商店") or []
+        async for r in self._smart(event, suiyun_mod.shop_text(rows), "岁云剑宫商店"):
+            yield r
+
+    @filter.command(CMD_SY_BUY, "剑宫兑换")
+    async def handle_sy_buy(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        parts = (arg or "").replace("*", " ").strip().split()
+        if not parts:
+            yield event.plain_result(f"格式：{CMD_SY_BUY} 物品名 [数量]（#岁云剑宫商店 看名录）")
+            return
+        try:
+            qty = int(parts[1]) if len(parts) > 1 else 1
+        except ValueError:
+            qty = 1
+        rows = self.content.table("item/势力商店/岁云剑宫商店") or []
+        result = suiyun_mod.buy(doc, parts[0], qty, rows)
+        async for r in self._sy_finish(event, doc, result, "剑宫兑换"):
+            yield r
+
+    @filter.command(CMD_SY_AUTHORITY, alias={CMD_SY_AUTHORITY_ALIAS})
+    async def handle_sy_authority(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        note = await self._sy_apply(doc, {})
+        msg = suiyun_mod.authority_panel(doc)
+        async for r in self._smart(event, (note + "\n" if note else "") + msg, "天阙权柄"):
+            yield r
+
+    @filter.command(CMD_SY_UNSEAL, "天阙解封")
+    async def handle_sy_unseal(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        name = (arg or "").strip()
+        inv = await self.db.get_inventory(doc.uid)
+        result = suiyun_mod.unseal(doc, name, inv, time.time())
+        async for r in self._sy_finish(event, doc, result, "天阙解封"):
+            yield r
+
+    @filter.command(CMD_SY_DREAM, "梦幻")
+    async def handle_sy_dream(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        result = suiyun_mod.dream(doc, arg, time.time())
+        async for r in self._sy_finish(event, doc, result, "梦幻"):
+            yield r
+
+    @filter.command(CMD_SY_SWORD, "断崖之剑")
+    async def handle_sy_sword(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        result = suiyun_mod.sword(doc, time.time())
+        async for r in self._sy_finish(event, doc, result, "断崖之剑"):
+            yield r
+
+    @filter.command(CMD_SY_DESCENT, "岁云降世")
+    async def handle_sy_descent(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        result = suiyun_mod.sword(doc, time.time(), grand=True)
+        async for r in self._sy_finish(event, doc, result, "岁云降世"):
+            yield r
+
+    @filter.command(CMD_SY_ROOT, "根源波动")
+    async def handle_sy_root(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        who = self._at_target(event) or (arg or "").strip()
+        result = suiyun_mod.root_wave(doc, who, time.time())
+        async for r in self._sy_finish(event, doc, result, "根源波动"):
+            yield r
+
+    @filter.command(CMD_SY_PRAY, "祈愿渡劫")
+    async def handle_sy_pray(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        who = self._at_target(event) or (arg or "").strip()
+        result = suiyun_mod.pray_trib(doc, who, time.time())
+        async for r in self._sy_finish(event, doc, result, "祈愿渡劫"):
+            yield r
+
+    @filter.command(CMD_SY_SKILL, "无极悟技")
+    async def handle_sy_skill(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        result = suiyun_mod.skill(doc, arg)
+        async for r in self._sy_finish(event, doc, result, "无极悟技"):
+            yield r
+
+    @filter.command(CMD_SY_GENESIS, "创世")
+    async def handle_sy_genesis(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        result = suiyun_mod.genesis(doc, arg, inv)
+        async for r in self._sy_finish(event, doc, result, "创世"):
             yield r

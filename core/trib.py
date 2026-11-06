@@ -169,6 +169,13 @@ def trib_run(doc: PlayerDoc, stats: Any, rng: random.Random) -> tuple[bool, str]
     x = thunder_resist(doc, stats)
     prob = (x - THUNDER_N) / (THUNDER_P + rounds * 0.1)
     prob = min(0.95, max(0.05, prob))
+    try:
+        from . import suiyun as _sy
+        sy_red = float(_sy.trib_reduction(doc))    # W8-B4 岁云：20%~85% 渡劫减伤 + 七夜祈愿
+    except Exception:
+        sy_red = 0.0
+    if sy_red:
+        prob = min(0.99, prob * (1 + sy_red))
     ok = rng.random() < prob
     if ok:
         doc.ext["power"] = 2
@@ -178,7 +185,7 @@ def trib_run(doc: PlayerDoc, stats: Any, rng: random.Random) -> tuple[bool, str]
                       f"雷抗 {x:.1f}｜需渡 {rounds} 道雷劫｜成功率 {prob:.0%}\n"
                       f"天雷淬体，元神化真——双重真劫皆渡！\n"
                       f"肉身与元神已臻圆满，可感应仙门 #登仙。")
-    cost = int(doc.exp * 0.25)
+    cost = int(doc.exp * 0.25 * (1 - min(0.8, sy_red)))
     doc.exp = max(0, doc.exp - cost)
     doc.ext["hp"] = 1
     doc.ext["spirit_fail_ts"] = time.time()

@@ -165,10 +165,23 @@ def aggregate(
     set_mult = 1.0
     set_lines = []
     for sname, cnt in set_count.items():
+        if sname in ("霜月剑尊套", "岁云剑尊套"):
+            continue   # W8-B4：岁云专属套走独立倍率（×10 / ×20），不吃通用 2/3 件档
         bonus = SET_BONUS.get(min(cnt, max(SET_BONUS)))
         if bonus:
             set_mult += bonus
             set_lines.append(f"{sname}×{cnt}（+{bonus:.0%} 三维）")
+
+    # W8-B4 岁云：专属套装层倍率 + 云月之莲固定加成（后者不被套装倍率放大）
+    sy_lotus = 0.0
+    try:
+        from . import suiyun as _sy
+        sy_bonus, sy_lines = _sy.set_bonus(doc)
+        set_mult += sy_bonus
+        set_lines.extend(sy_lines)
+        sy_lotus = float(_sy.lotus_flat(doc))
+    except Exception:
+        pass
 
     # 仙宠：ext["pet"]={name, level}，加成 = 初始加成 + 每级增加×(level-1)（三维）
     pet_mult = 1.0
@@ -231,9 +244,9 @@ def aggregate(
     flat["hp"] += lg_flat
 
     return Stats(
-        atk=int((base_atk * (1 + ratio["atk"] + av_atk + lg_atk + dt_all) + flat["atk"]) * set_mult * pet_mult),
-        defense=int((base_def * (1 + ratio["def"] + av_def + lg_def + dt_all) + flat["def"]) * set_mult * pet_mult),
-        hp=int((base_hp * (1 + ratio["hp"] + av_hp + lg_hp + dt_all) + flat["hp"]) * set_mult * pet_mult),
+        atk=int((base_atk * (1 + ratio["atk"] + av_atk + lg_atk + dt_all) + flat["atk"]) * set_mult * pet_mult) + int(sy_lotus),
+        defense=int((base_def * (1 + ratio["def"] + av_def + lg_def + dt_all) + flat["def"]) * set_mult * pet_mult) + int(sy_lotus),
+        hp=int((base_hp * (1 + ratio["hp"] + av_hp + lg_hp + dt_all) + flat["hp"]) * set_mult * pet_mult) + int(sy_lotus),
         bao=min(bao + dt_bao, 1.0),
         set_lines=tuple(set_lines),
     )

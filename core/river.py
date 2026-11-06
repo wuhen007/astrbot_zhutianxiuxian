@@ -105,8 +105,13 @@ def roam(doc: PlayerDoc, stats: Any, build_fighter_fn: Any, run_1v1: Any, rng: r
         exp_g = 600_000 * (int(doc.realm_index) + 1)
         from . import memory as mem_mod
         wudao = mem_mod.effects(doc)["wudao"] if mem_mod.stage_of(doc) > 0 else 0.0
+        try:
+            from . import suiyun as _sy
+            wudao += _sy.wudao_bonus(doc)         # W8-B4：岁云 +20%~45% 悟道收益
+        except Exception:
+            pass
         if wudao:
-            exp_g = int(exp_g * (1 + wudao))     # W8-B5：记忆因子悟道加成
+            exp_g = int(exp_g * (1 + wudao))     # W8-B5 / B4：两轨悟道加成相加
         exp_g, favor_used = calamity.consume_favor_for_wudao(doc, exp_g)
         gains["exp"] = exp_g
         gains["insight"] = 3

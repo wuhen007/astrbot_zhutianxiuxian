@@ -184,6 +184,30 @@ def build_fighter(
                                               * (1 - shield))
     except Exception:
         pass
+    # W8-B4 岁云：四战技 + 岁云套开场 + 天阙权柄时效（PvP/PvE 同源）
+    try:
+        from .. import suiyun as sy_mod
+        sy = sy_mod.combat(doc)
+        if sy:
+            f.tags["suiyun_stage"] = int(sy["stage"])
+            f.effects["dmg_dealt_mult"] = float(f.eff("dmg_dealt_mult", 1.0)) * sy["dealt"]
+            f.effects["dmg_taken_mult"] = max(0.15, float(f.eff("dmg_taken_mult", 1.0)) * sy["taken"])
+            if sy.get("shield"):
+                f.effects["shield"] = int(f.effects.get("shield", 0) or 0) + int(f.hp_max * sy["shield"])
+            if sy.get("revives"):
+                rev = f.effects.get("revive")
+                if isinstance(rev, dict):
+                    rev["times"] = max(int(rev.get("times", 1) or 1), int(sy["revives"]))
+                    rev["ratio"] = max(float(rev.get("ratio", 0.7) or 0.7), 0.6)
+                else:
+                    f.effects["revive"] = {"name": "白云苍狗", "ratio": 0.6, "pr": 1.0,
+                                          "msg": "岁月倒卷，三度归来",
+                                          "times": int(sy["revives"]), "used": False}
+            sname = sy_mod.stage_name(doc)
+            if sname:
+                f.tags["linggen_name"] = sname   # 复用 opening.suiyun_verdict 已实装的同境裁决
+    except Exception:
+        pass
     apply_proficiency(f, doc)   # W7-0：三乘区 + 档位共鸣，PvP/PvE 同源
     if (int(getattr(doc, "realm_index", 0) or 0) >= 10
             and int(getattr(doc, "physique_index", 0) or 0) >= 10):

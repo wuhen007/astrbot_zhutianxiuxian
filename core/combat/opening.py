@@ -49,6 +49,8 @@ def high_realm_exec(a: Fighter, b: Fighter) -> tuple[int, list[str]] | None:
         return None
     winner = 0 if la > lb else 1
     high, low = (a, b) if la > lb else (b, a)
+    if int(low.tags.get("suiyun_stage", 0) or 0) >= 3:
+        return None       # W8-B4 岁云常青：免即死 / 免禁复活，镇杀对其无效
     low.hp = 0
     low.effects["sealed"] = True       # 不可复活（_try_revive 前 sealed 单位已无血，此处仅作文案）
     vision = REALM_VISIONS.get(max(la, lb), "道果横隔，天地相隔。")
