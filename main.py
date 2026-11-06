@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -454,6 +454,24 @@ CMD_YS_DEEP = "#深入"
 CMD_YS_BACK = "#归位"
 CMD_YS_STATUS = "#神识状态"
 CMD_YS_INNER = "#内景地修炼"
+# W8-B3：花粉进化路（第三轨）
+CMD_FL_START = "#踏上花粉路"
+CMD_FL_PANEL = "#花粉路"
+CMD_FL_PANEL_ALIAS = "#花粉进化路"
+CMD_FL_LEVELS = "#花粉境界"
+CMD_FL_PLANE = "#花粉位面"
+CMD_FL_SENSE = "#感应异变"
+CMD_FL_EVOLVE = "#进化"
+CMD_FL_FRUIT = "#服用异果"
+CMD_FL_PURIFY = "#净化隐患"
+CMD_FL_RESHAPE = "#重塑进化根基"
+CMD_FL_WUDAO = "#花粉悟道"
+CMD_FL_SEED_WUDAO = "#祖种悟道"
+CMD_FL_BREED = "#孕育超级异果"
+CMD_FL_BREED_ALIAS = "#祖种孕育"
+CMD_FL_SUPER = "#服用超级异果"
+CMD_FL_TRIB = "#花粉渡劫"
+CMD_FL_EXTREME = "#极尽蜕变"
 # W7-4：养成深度（灵根觉醒 / 寿元救援 / 帝兵铭文 / 职业产线 / 道法卡）
 CMD_LG_AWAKEN = "#灵根觉醒"
 CMD_RESCUE = "#轮回救人"
@@ -539,7 +557,7 @@ ITEM_TABLES = (
     "丹药列表", "道具列表", "材料列表", "草药列表", "装备列表", "功法列表",
     "特殊装备列表", "食材列表", "宝石", "盒子列表", "帝兵列表", "锻造杂类",
     "锻造武器", "锻造护具", "锻造宝物", "锻造材料", "炼丹师丹药", "常驻", "限定",
-    "仙宠列表", "仙宠口粮列表", "精神宇宙掉落",
+    "仙宠列表", "仙宠口粮列表", "精神宇宙掉落", "花粉", "异果",
 )
 
 
@@ -564,10 +582,11 @@ class ZhutianPlugin(Star):
         # W8-B2b：精神位面（9 处 / 28 层）灌进元神模块
         loaded = ysh_mod.load_places(self.content.table("jingshen/精神宇宙") or [])
         logger.info(f"[zhutian] 精神位面 {loaded} 处已载入")
-        # W8-B5：记忆命途注册为第三轨（只进门槛与天堑）
+        # W8-B5 / B3：记忆命途、花粉路注册为第三轨（只进门槛与天堑）
         try:
             from .core import authority as _auth
             _auth.register_track(mem_mod.equivalent_level)
+            _auth.register_track(flower_mod.equivalent_level)
         except Exception:
             pass
         self.whitelist_groups = [
@@ -1363,6 +1382,23 @@ class ZhutianPlugin(Star):
                 (f"{CMD_YS_INNER} [次数]", "内景地修炼：消耗元神换修为/血气"),
                 ("以X修炼元神 / 以X淬炼元神", "恢复元神 / 提升元神上限"),
                 ("以X元神爆发 / 以X元神护体", "5 分钟增伤 / 30 分钟减伤"),
+            ]},
+            {"title": "花粉进化路", "lines": [
+                (CMD_FL_START, "开启第三轨（练气/炼体双轨各达第 16 境，赠花粉×3）"),
+                (CMD_FL_PANEL, "花粉面板：境界/积淀/隐患/污染/道则/渡劫/祖种（别名 #花粉进化路）"),
+                (CMD_FL_LEVELS, "二十五境进化表与各境媒介品阶"),
+                (f"{CMD_FL_PLANE} 位面名", "三级圣墟位面：小阴间 11 / 大阴间 13 / 阳间 17 境上限"),
+                (CMD_FL_SENSE, "每日一次：产进化媒介、净化花露、异果与祖种石罐，积淀 +8"),
+                (f"{CMD_FL_EVOLVE} [媒介名]", "消耗修为/血气与媒介进化；失败损三成，异变累积始祖污染"),
+                (f"{CMD_FL_FRUIT} [异果名]", "服异果换进化积淀，附带隐患/污染/根基损伤"),
+                (CMD_FL_PURIFY, "消耗净化花露/本源圣药洗隐患与污染，清零额外 +50 积淀"),
+                (f"{CMD_FL_RESHAPE} [材料名]", "修复进化根基损伤，满 100 时禁止进化"),
+                (CMD_FL_WUDAO, "每日 3 次悟道，道则圆满方可进化/渡劫"),
+                (CMD_FL_SEED_WUDAO, "祖种共鸣三倍道韵，每轮 3 次（需祖种 + 石罐）"),
+                (CMD_FL_BREED, "祖种孕育 8 小时得超级异果，之后沉寂 24 小时（别名 #祖种孕育）"),
+                (CMD_FL_SUPER, "领取超级异果：修为血气大涨、补满道则、根基与污染清零"),
+                (CMD_FL_TRIB, "逐阶段雷劫，全过方成；失败有下次成功率保护"),
+                (CMD_FL_EXTREME, "极尽蜕变：消耗积淀换成功率/悟道/等效权柄"),
             ]},
         ]
 
@@ -14704,3 +14740,261 @@ class ZhutianPlugin(Star):
             f"天赋觉醒：【{talent['name']}】（{talent['rarity']}）——{talent_desc(talent)}\n"
             f"当前属性：攻击 {st.atk} · 防御 {st.defense} · 血量 {st.hp}"
         )
+
+    # ---- W8-B3：花粉进化路（原版 FlowerPollenPath.js 16 reg + model/flowerPollenPath.js） ----
+
+    async def _fl_apply(self, doc: PlayerDoc, delta: dict[str, int]) -> None:
+        """花粉路统一落库：玩家档 + 物品增减（正数为产出，负数为扣除）。"""
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            for name, qty in (delta or {}).items():
+                if qty > 0:
+                    await self.db.add_items(doc.uid, {name: qty})
+                elif qty < 0:
+                    await self.db.remove_item(doc.uid, name, -qty)
+
+    @filter.command(CMD_FL_START, "踏上花粉路")
+    async def handle_fl_start(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        ok, msg, delta = flower_mod.activate(doc, inv)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self._fl_apply(doc, delta)
+        async for r in self._smart(event, msg, "花粉路开启"):
+            yield r
+
+    @filter.command(CMD_FL_PANEL, alias={CMD_FL_PANEL_ALIAS})
+    async def handle_fl_panel(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        msg = flower_mod.panel(doc, time.time())
+        await self._fl_apply(doc, {})
+        async for r in self._smart(event, msg, "花粉进化路"):
+            yield r
+
+    @filter.command(CMD_FL_LEVELS, "花粉境界")
+    async def handle_fl_levels(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        async for r in self._smart(event, flower_mod.levels_text(), "花粉二十五境"):
+            yield r
+
+    @filter.command(CMD_FL_PLANE, "花粉位面")
+    async def handle_fl_plane(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        parts = (arg or "").replace("*", " ").strip().split()
+        if not parts:
+            yield event.plain_result(f"用法：{CMD_FL_PLANE} 小阴间|大阴间|阳间")
+            return
+        ok, msg, delta = flower_mod.set_plane(doc, parts[0])
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self._fl_apply(doc, delta)
+        async for r in self._smart(event, msg, "花粉位面"):
+            yield r
+
+    @filter.command(CMD_FL_SENSE, "感应异变")
+    async def handle_fl_sense(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        ok, msg, delta = flower_mod.sense(doc, inv, time.time(), random.Random())
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self._fl_apply(doc, delta)
+        async for r in self._smart(event, msg, "感应异变"):
+            yield r
+
+    @filter.command(CMD_FL_EVOLVE, "进化")
+    async def handle_fl_evolve(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        parts = (arg or "").replace("*", " ").strip().split()
+        ok, msg, delta = flower_mod.evolve(doc, inv, parts[0] if parts else "",
+                                           time.time(), random.Random())
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self._fl_apply(doc, delta)
+        async for r in self._smart(event, msg, "花粉进化"):
+            yield r
+
+    @filter.command(CMD_FL_FRUIT, "服用异果")
+    async def handle_fl_fruit(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        parts = (arg or "").replace("*", " ").strip().split()
+        ok, msg, delta = flower_mod.eat_fruit(doc, inv, parts[0] if parts else "")
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self._fl_apply(doc, delta)
+        async for r in self._smart(event, msg, "服用异果"):
+            yield r
+
+    @filter.command(CMD_FL_PURIFY, "净化隐患")
+    async def handle_fl_purify(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        parts = (arg or "").replace("*", " ").strip().split()
+        ok, msg, delta = flower_mod.purify(doc, inv, parts[0] if parts else "")
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self._fl_apply(doc, delta)
+        async for r in self._smart(event, msg, "本源净化"):
+            yield r
+
+    @filter.command(CMD_FL_RESHAPE, "重塑进化根基")
+    async def handle_fl_reshape(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        parts = (arg or "").replace("*", " ").strip().split()
+        ok, msg, delta = flower_mod.reshape(doc, inv, parts[0] if parts else "")
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self._fl_apply(doc, delta)
+        async for r in self._smart(event, msg, "重塑进化根基"):
+            yield r
+
+    @filter.command(CMD_FL_WUDAO, "花粉悟道")
+    async def handle_fl_wudao(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        ok, msg, delta = flower_mod.wudao(doc, inv, time.time(), random.Random())
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self._fl_apply(doc, delta)
+        async for r in self._smart(event, msg, "花粉悟道"):
+            yield r
+
+    @filter.command(CMD_FL_SEED_WUDAO, "祖种悟道")
+    async def handle_fl_seed_wudao(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        ok, msg, delta = flower_mod.wudao(doc, inv, time.time(), random.Random(), ancestor=True)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self._fl_apply(doc, delta)
+        async for r in self._smart(event, msg, "祖种悟道"):
+            yield r
+
+    @filter.command(CMD_FL_BREED, alias={CMD_FL_BREED_ALIAS})
+    async def handle_fl_breed(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        ok, msg, delta = flower_mod.breed(doc, inv, time.time())
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self._fl_apply(doc, delta)
+        async for r in self._smart(event, msg, "祖种孕育"):
+            yield r
+
+    @filter.command(CMD_FL_SUPER, "服用超级异果")
+    async def handle_fl_super(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, delta = flower_mod.super_fruit(doc, time.time())
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self._fl_apply(doc, delta)
+        async for r in self._smart(event, msg, "服用超级异果"):
+            yield r
+
+    @filter.command(CMD_FL_TRIB, "花粉渡劫")
+    async def handle_fl_trib(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, delta = flower_mod.tribulation(doc, time.time(), random.Random())
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self._fl_apply(doc, delta)
+        async for r in self._smart(event, msg, "花粉渡劫"):
+            yield r
+
+    @filter.command(CMD_FL_EXTREME, "极尽蜕变")
+    async def handle_fl_extreme(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, delta = flower_mod.extreme(doc)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self._fl_apply(doc, delta)
+        async for r in self._smart(event, msg, "极尽蜕变"):
+            yield r

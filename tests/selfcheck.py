@@ -4539,6 +4539,185 @@ async def main():
     print("W8-B2b yuanshen & spirit universe ok")
 
 
+    # ---- W8-B3：花粉进化路 ----
+    from core import flower as fl37            # noqa: E402
+    from core import authority as auth37       # noqa: E402
+
+    class _Seq37:
+        """按序列返回 random()，让成功/失败/异变可精确断言。"""
+        def __init__(self, *seq):
+            self.seq = list(seq) or [0.0]
+            self.i = 0
+        def _next(self):
+            v = self.seq[self.i % len(self.seq)]
+            self.i += 1
+            return v
+        def random(self):
+            return self._next()
+        def randrange(self, n):
+            return 0
+        def uniform(self, a, b):
+            return (a + b) / 2
+
+    t37 = 1_800_000.0
+    d37 = PlayerDoc(uid="w8fl1", name="花粉", realm_index=15, physique_index=15,
+                    exp=10 ** 12, ext={"xueqi": 10 ** 12})
+    inv37 = {"普通进化花粉": 20, "灵性进化花粉": 10, "神性进化花粉": 10,
+             "无暇进化花粉": 10, "净化花露": 10, "本源圣药": 10,
+             "进化异果": 10, "本源异果": 10, "祖种异果": 10,
+             fl37.SEED: 1, fl37.JAR: 1}
+
+    # ① 开启门槛 / 重复开启 / 赠媒介
+    low37 = PlayerDoc(uid="w8fl0", name="低境", realm_index=3, physique_index=3, ext={})
+    assert fl37.activate(low37, {})[0] is False
+    ok37, _msg37, delta37 = fl37.activate(d37, {})
+    assert ok37 and delta37 == {"普通进化花粉": 3}
+    assert fl37.activate(d37, {})[0] is False
+    assert fl37.state_of(d37)["level"] == 1
+
+    # ② 感应异变：每日一次、按下一境品阶产媒介、积淀 +8
+    ok37, _msg37, gains37 = fl37.sense(d37, inv37, t37, _Seq37(0.5))
+    assert ok37 and fl37.state_of(d37)["accum"] == fl37.SENSE_ACCUM
+    assert "普通进化花粉" in gains37 and sum(gains37.values()) >= 3
+    assert fl37.sense(d37, inv37, t37, _Seq37(0.5))[0] is False
+
+    # ③ 进化成功（扣修为血气 + 媒介，境界 +1）
+    exp37, xq37 = int(d37.exp), int(d37.ext["xueqi"])
+    ok37, msg37, delta37 = fl37.evolve(d37, inv37, "", t37, _Seq37(0.0))
+    assert ok37 and "生命跃迁" in msg37 and delta37 == {"普通进化花粉": -1}
+    assert fl37.state_of(d37)["level"] == 2
+    assert int(d37.exp) == exp37 - fl37.evo_cost(1)
+    assert int(d37.ext["xueqi"]) == xq37 - fl37.evo_cost(1)
+
+    # ④ 媒介品阶 / 位面法则上限
+    st37 = fl37.state_of(d37)
+    st37.update({"level": 5, "completed": [5]})   # 第 5 境花劫已渡，否则先被渡劫门槛拦下
+    fl37.set_state(d37, st37)
+    ok37, msg37, _ = fl37.evolve(d37, inv37, "普通进化花粉", t37, _Seq37(0.0))
+    assert not ok37 and "品阶不足" in msg37, msg37
+    ok37, msg37, _ = fl37.evolve(d37, {}, "", t37, _Seq37(0.0))
+    assert not ok37 and "媒介" in msg37, msg37
+    st37 = fl37.state_of(d37)
+    st37.update({"level": 11, "plane": "小阴间", "dao": {}, "completed": [11], "root": 0})
+    fl37.set_state(d37, st37)
+    ok37, msg37, _ = fl37.evolve(d37, inv37, "", t37, _Seq37(0.0))
+    assert not ok37 and "位面" in msg37, msg37
+    ok37, msg37, _ = fl37.set_plane(d37, "阳间")
+    assert ok37 and fl37.state_of(d37)["plane"] == "阳间"
+    assert fl37.set_plane(d37, "不存在")[0] is False
+
+    # ⑤ 失败三成 / 异变污染 / 始祖接引
+    st37 = fl37.state_of(d37)
+    st37.update({"level": 4, "accum": 0, "risk": 0, "pollution": 0, "root": 0,
+                 "mark_until": 0.0, "extremes": []})
+    fl37.set_state(d37, st37)
+    ok37, msg37, _ = fl37.evolve(d37, inv37, "", t37, _Seq37(0.99, 0.01))
+    assert ok37 and "进化受阻" in msg37 and "始祖异变" in msg37
+    assert fl37.state_of(d37)["level"] == 4
+    st37 = fl37.state_of(d37)
+    st37.update({"pollution": 95, "risk": 0, "root": 0, "mark_until": 0.0})
+    fl37.set_state(d37, st37)
+    ok37, msg37, _ = fl37.evolve(d37, inv37, "", t37, _Seq37(0.99, 0.01))
+    assert ok37 and "始祖接引" in msg37
+    assert fl37.state_of(d37)["pollution"] == 60
+    assert fl37.state_of(d37)["mark_until"] > t37
+
+    # ⑥ 服异果 / 净化清零奖励 / 根基满禁进化 / 重塑
+    st37 = fl37.state_of(d37)
+    st37.update({"pollution": 10, "risk": 20, "root": 0, "accum": 0, "mark_until": 0.0})
+    fl37.set_state(d37, st37)
+    ok37, _msg37, delta37 = fl37.eat_fruit(d37, inv37, "进化异果")
+    assert ok37 and delta37["进化异果"] == -1 and fl37.state_of(d37)["root"] == 2
+    ok37, msg37, _ = fl37.purify(d37, inv37, "本源圣药")
+    assert ok37 and "破而后立" in msg37
+    assert fl37.state_of(d37)["accum"] >= fl37.PURIFY_CLEAR_BONUS
+    assert fl37.purify(d37, inv37, "本源圣药")[0] is False
+    st37 = fl37.state_of(d37)
+    st37.update({"root": 100, "pollution": 5, "risk": 5})
+    fl37.set_state(d37, st37)
+    ok37, msg37, _ = fl37.evolve(d37, inv37, "", t37, _Seq37(0.0))
+    assert not ok37 and "根基" in msg37, msg37
+    ok37, msg37, _ = fl37.reshape(d37, inv37, "本源圣药")
+    assert ok37 and fl37.state_of(d37)["root"] == 55
+
+    # ⑦ 悟道每日 3 次 / 祖种三倍 / 道则圆满
+    st37 = fl37.state_of(d37)
+    st37.update({"level": 9, "root": 0, "dao": {}, "dao_date": "", "dao_count": 0,
+                 "seed_wudao": 0, "extremes": []})
+    fl37.set_state(d37, st37)
+    for _ in range(fl37.WUDAO_DAILY_LIMIT):
+        assert fl37.wudao(d37, inv37, t37, _Seq37(0.0))[0] is True
+    ok37, msg37, _ = fl37.wudao(d37, inv37, t37, _Seq37(0.0))
+    assert not ok37 and "用尽" in msg37, msg37
+    assert fl37.state_of(d37)["dao"]["9"] == 3 * fl37.DAO_RULES[9][2]
+    d37b = PlayerDoc(uid="w8fl2", name="祖种", realm_index=15, physique_index=15,
+                     exp=10 ** 12, ext={"xueqi": 10 ** 12})
+    fl37.activate(d37b, {})
+    st37 = fl37.state_of(d37b)
+    st37["level"] = 9
+    fl37.set_state(d37b, st37)
+    assert fl37.wudao(d37b, {}, t37, _Seq37(0.0), ancestor=True)[0] is False
+    assert fl37.wudao(d37b, inv37, t37, _Seq37(0.0), ancestor=True)[0] is True
+    assert fl37.state_of(d37b)["dao"]["9"] == 3 * fl37.DAO_RULES[9][2]
+    assert fl37.state_of(d37b)["seed_wudao"] == 1
+
+    # ⑧ 祖种孕育 8h → 沉寂 24h → 超级异果
+    st37 = fl37.state_of(d37b)
+    st37.update({"breed_at": 0.0, "dormant_until": 0.0, "ready": 0})
+    fl37.set_state(d37b, st37)
+    assert fl37.breed(d37b, inv37, t37)[0] is True
+    assert fl37.breed(d37b, inv37, t37 + 3600)[0] is False
+    ok37, msg37, _ = fl37.breed(d37b, inv37, t37 + fl37.BREED_SECONDS + 1)
+    assert ok37 and "孕育完成" in msg37
+    assert fl37.breed(d37b, inv37, t37 + fl37.BREED_SECONDS + 2)[0] is False
+    exp37 = int(d37b.exp)
+    st37 = fl37.state_of(d37b)
+    st37["root"] = 40
+    fl37.set_state(d37b, st37)
+    ok37, msg37, _ = fl37.super_fruit(d37b, t37 + fl37.BREED_SECONDS + 3)
+    assert ok37 and "超级异果" in msg37 and int(d37b.exp) > exp37
+    assert fl37.state_of(d37b)["root"] == 0
+    assert fl37.state_of(d37b)["dao"]["9"] == fl37.DAO_RULES[9][1]
+
+    # ⑨ 渡劫成功 / 失败保护
+    d37c = PlayerDoc(uid="w8fl3", name="渡劫", realm_index=15, physique_index=15,
+                     exp=10 ** 12, ext={"xueqi": 10 ** 12})
+    fl37.activate(d37c, {})
+    st37 = fl37.state_of(d37c)
+    st37["level"] = 5
+    fl37.set_state(d37c, st37)
+    ok37, msg37, _ = fl37.tribulation(d37c, t37, _Seq37(0.0))
+    assert ok37 and "渡尽" in msg37 and 5 in fl37.state_of(d37c)["completed"]
+    assert fl37.tribulation(d37c, t37, _Seq37(0.0))[0] is False
+    st37 = fl37.state_of(d37c)
+    st37["completed"] = []
+    fl37.set_state(d37c, st37)
+    ok37, msg37, _ = fl37.tribulation(d37c, t37, _Seq37(0.99))
+    assert ok37 and "未渡尽" in msg37 and fl37.state_of(d37c)["trib_fail"]["5"] == 1
+
+    # ⑩ 极境 + 等效权柄注册制 + 面板
+    st37 = fl37.state_of(d37c)
+    st37.update({"level": 3, "accum": 500, "risk": 0, "extremes": []})
+    fl37.set_state(d37c, st37)
+    ok37, msg37, _ = fl37.extreme(d37c)
+    assert ok37 and "本源觉醒" in msg37 and len(fl37.state_of(d37c)["extremes"]) == 1
+    assert fl37.panel(d37c, t37).startswith("【花粉进化路】")
+    assert len(fl37.levels_text().split("\n")) == 26
+    auth37.reset_tracks()
+    auth37.register_track(fl37.equivalent_level)
+    assert fl37.equivalent_level(d37c) > 0
+    assert auth37.authority_of(low37) == 3          # 未开启花粉路不抬权柄（双轨仍为 3）
+    fl37.set_state(low37, {"level": 25})
+    assert auth37.authority_of(low37) == 24
+    auth37.reset_tracks()          # 与第 33 组一致：隔离，别污染其它组的 authority 判定
+
+    # ⑪ 物品表已进内容索引
+    cs37 = ContentStore(PLUGIN / "data")
+    assert len(cs37.table("item/花粉") or []) == 6
+    assert len(cs37.table("item/异果") or []) == 6
+    print("W8-B3 flower pollen path ok")
+
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

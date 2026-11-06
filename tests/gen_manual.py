@@ -105,6 +105,11 @@ def main() -> int:
                    "handle_endless_treasure_up", "handle_endless_treasure_equip",
                    "handle_endless_treasure_unequip", "handle_endless_treasure_slot",
                    "handle_endless_sweep")),
+        ("花粉进化路", ("handle_fl_start", "handle_fl_panel", "handle_fl_levels",
+                    "handle_fl_plane", "handle_fl_sense", "handle_fl_evolve",
+                    "handle_fl_fruit", "handle_fl_purify", "handle_fl_reshape",
+                    "handle_fl_wudao", "handle_fl_seed_wudao", "handle_fl_breed",
+                    "handle_fl_super", "handle_fl_trib", "handle_fl_extreme")),
         ("帮助", ("handle_help",)),
     ]
     grouped = {}
