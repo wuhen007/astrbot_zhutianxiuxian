@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, authority as authority_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, authority as authority_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -507,6 +507,19 @@ CMD_SY_ROOT = "#根源波动"
 CMD_SY_PRAY = "#祈愿渡劫"
 CMD_SY_SKILL = "#无极悟技"
 CMD_SY_GENESIS = "#创世"
+# W8-B6：证道与道伤（道伤经济 / 三路线成帝 / 路尽重证 / 仙古冲关 / 护道）
+CMD_DZ_PANEL = "#我的道伤"
+CMD_DZ_PANEL_ALIAS = "#道伤"
+CMD_DZ_RULES = "#道伤规则"
+CMD_DZ_RESHAPE = "#道基重塑"
+CMD_DZ_REPAIR = "#修复道伤"
+CMD_DZ_PROVE = "#证道成帝"
+CMD_DZ_REPROVE = "#证道"
+CMD_DZ_CHARGE = "#冲关"
+CMD_DZ_CHARGE_EXTREME = "#冲关极境"
+CMD_DZ_GUARD = "#护法"
+CMD_DZ_UNGUARD = "#解除护法"
+CMD_DZ_HEART = "#天心印记"
 # W7-4：养成深度（灵根觉醒 / 寿元救援 / 帝兵铭文 / 职业产线 / 道法卡）
 CMD_LG_AWAKEN = "#灵根觉醒"
 CMD_RESCUE = "#轮回救人"
@@ -1464,6 +1477,19 @@ class ZhutianPlugin(Star):
                 (f"{CMD_SY_PRAY} @目标", "七夜封印：耗 500 万修为，下一场渡劫承伤减半"),
                 (f"{CMD_SY_SKILL} 功法名", "无极封印：功法百分百领悟"),
                 (f"{CMD_SY_GENESIS} 武器|防具|法宝 名称", "创世封印：供物铸器，三维 +500%"),
+            ]},
+            {"title": "证道与道伤", "lines": [
+                (CMD_DZ_PANEL, "道伤大面板：三层惩罚 / 帝号 / 天心印记（别名 #道伤）"),
+                (CMD_DZ_RULES, "道伤累积、自然恢复、硬门槛与全部祛伤途径"),
+                (CMD_DZ_RESHAPE, "5 枚五行本源 + 50 万灵石，道伤 -1"),
+                (CMD_DZ_REPAIR, "八门疗伤功法取最强效率，一次性归零"),
+                (CMD_DZ_PROVE, "准帝九重天证道成帝：三路线 + 9 波雷劫 + 7 古帝"),
+                (CMD_DZ_REPROVE, "路尽级仙帝跌落重证：清修为血气、复归峰值境界"),
+                (CMD_DZ_CHARGE, "仙古冲关：消耗修为血气冲 1 境"),
+                (CMD_DZ_CHARGE_EXTREME, "极境冲关：三种太古遗种真血 + 血气 100 万，冲 2 境"),
+                (f"{CMD_DZ_GUARD} @目标", "为道友立 1 小时护道法阵（帝路断绝的破局口）"),
+                (CMD_DZ_UNGUARD, "撤去自己/目标的护道法阵"),
+                (CMD_DZ_HEART, "天心印记归属、帝榜与护道窗口"),
             ]},
         ]
 
@@ -9558,6 +9584,7 @@ class ZhutianPlugin(Star):
 
         # 战败：仇恨 +5、污损 20%、护道人回血、按仇恨档逃脱
         _old, new_h, lvl = tj_mod.add_hatred(d, row["name"], "挑战失败")
+        dz_mod.add_wounds(d, 1.0, "天骄一掌")     # W8-B6：境界不足被天骄一掌击败 +1 道伤
         _ln, escape_chance, protector_chance = tj_mod.level_of(new_h)
         lines = [f"你不敌{row['name']}，血战脱身（气血 {int(d.ext['hp'])}）。",
                  f"仇恨 +{new_h - _old} → {new_h}（{lvl}）"]
@@ -12327,6 +12354,9 @@ class ZhutianPlugin(Star):
         d.state = "空闲"
         d.state_start = 0.0
         d.ext.pop("explore", None)
+        if any(k in str(reason) for k in ("血战", "战败", "不敌", "陨", "亡")):
+            # W8-B6：秘境道则/帝威反噬累积道伤（全身而退、传送脱身不计）
+            dz_mod.add_wounds(d, 1.0, "秘境道则反噬")
         dungeon_note = ""
         if sess.dungeon:
             found = dungeon.find(sess.dungeon, self.content.table)
@@ -15505,4 +15535,175 @@ class ZhutianPlugin(Star):
         inv = await self.db.get_inventory(doc.uid)
         result = suiyun_mod.genesis(doc, arg, inv)
         async for r in self._sy_finish(event, doc, result, "创世"):
+            yield r
+
+    # ---- W8-B6：证道与道伤（道伤经济 / 三路线成帝 / 路尽重证 / 仙古冲关） ----
+
+    async def _dz_registry(self) -> dict:
+        return dz_mod.registry_of(await self.db.get_calamity())
+
+    async def _dz_apply(self, doc: PlayerDoc, delta: dict[str, int] | None = None,
+                        reg: dict | None = None) -> None:
+        """统一落库：玩家档 + 物品增减 + 全服天心印记/帝榜/护道（事务内不 yield）。"""
+        delta = dict(delta or {})
+        if reg is not None:
+            state = await self.db.get_calamity()
+            state["zhengdao_registry"] = reg
+            await self.db.save_calamity(state)
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            for name, qty in delta.items():
+                if qty > 0:
+                    await self.db.add_items(doc.uid, {name: qty})
+                elif qty < 0:
+                    await self.db.remove_item(doc.uid, name, -qty)
+
+    async def _dz_finish(self, event, doc, result, title, reg=None):
+        """成功/失败都落库（CD 与道伤不能丢），成功才出面板。"""
+        ok, msg, delta = result
+        await self._dz_apply(doc, delta, reg=reg)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        async for r in self._smart(event, msg, title):
+            yield r
+
+    @filter.command(CMD_DZ_PANEL, alias={CMD_DZ_PANEL_ALIAS})
+    async def handle_dz_panel(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        reg = await self._dz_registry()
+        async for r in self._smart(event, dz_mod.panel(doc, reg), "道伤·证道"):
+            yield r
+
+    @filter.command(CMD_DZ_RULES, "道伤规则")
+    async def handle_dz_rules(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, dz_mod.rules_text(), "道伤规则"):
+            yield r
+
+    @filter.command(CMD_DZ_RESHAPE, "道基重塑")
+    async def handle_dz_reshape(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        result = dz_mod.reshape(doc, inv)
+        async for r in self._dz_finish(event, doc, result, "道基重塑"):
+            yield r
+
+    @filter.command(CMD_DZ_REPAIR, "修复道伤")
+    async def handle_dz_repair(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        result = dz_mod.repair(doc)
+        async for r in self._dz_finish(event, doc, result, "修复道伤"):
+            yield r
+
+    @filter.command(CMD_DZ_PROVE, "证道成帝")
+    async def handle_dz_prove(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        reg = await self._dz_registry()
+        ok, msg, delta, new_reg = dz_mod.prove(doc, reg, time.time(), random.Random())
+        await self._dz_apply(doc, delta, reg=new_reg)
+        async for r in self._smart(event, msg, "证道成帝"):
+            yield r
+
+    @filter.command(CMD_DZ_REPROVE, "证道")
+    async def handle_dz_reprove(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        result = dz_mod.reprove(doc)
+        async for r in self._dz_finish(event, doc, result, "路尽重证"):
+            yield r
+
+    @filter.command(CMD_DZ_CHARGE, "冲关")
+    async def handle_dz_charge(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        result = dz_mod.charge(doc, inv, time.time(), random.Random())
+        async for r in self._dz_finish(event, doc, result, "仙古冲关"):
+            yield r
+
+    @filter.command(CMD_DZ_CHARGE_EXTREME, "冲关极境")
+    async def handle_dz_charge_extreme(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        result = dz_mod.charge(doc, inv, time.time(), random.Random(), extreme=True)
+        async for r in self._dz_finish(event, doc, result, "极境冲关"):
+            yield r
+
+    @filter.command(CMD_DZ_GUARD, "护法")
+    async def handle_dz_guard(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        who = self._at_target(event) or (arg or "").strip()
+        reg = await self._dz_registry()
+        _ok, msg = dz_mod.guard(reg, doc.uid, who, time.time())
+        await self._dz_apply(doc, reg=reg)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_DZ_UNGUARD, "解除护法")
+    async def handle_dz_unguard(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        who = self._at_target(event) or (arg or "").strip()
+        reg = await self._dz_registry()
+        _ok, msg = dz_mod.unguard(reg, doc.uid, who)
+        await self._dz_apply(doc, reg=reg)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_DZ_HEART, "天心印记")
+    async def handle_dz_heart(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        reg = await self._dz_registry()
+        async for r in self._smart(event, dz_mod.heart_panel(doc, reg), "天心印记·帝榜"):
             yield r

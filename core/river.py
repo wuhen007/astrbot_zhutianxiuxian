@@ -112,6 +112,13 @@ def roam(doc: PlayerDoc, stats: Any, build_fighter_fn: Any, run_1v1: Any, rng: r
             pass
         if wudao:
             exp_g = int(exp_g * (1 + wudao))     # W8-B5 / B4：两轨悟道加成相加
+        try:
+            from . import zhengdao as _dz
+            dz_mult = _dz.effects(doc)["dao_multiplier"]
+            if dz_mult < 1.0:
+                exp_g = int(exp_g * dz_mult)     # W8-B6 道伤：悟道 -10%/层（下限 0.5）
+        except Exception:
+            pass
         exp_g, favor_used = calamity.consume_favor_for_wudao(doc, exp_g)
         gains["exp"] = exp_g
         gains["insight"] = 3

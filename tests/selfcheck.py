@@ -4869,6 +4869,130 @@ async def main():
     print("W8-B4 suiyun path ok")
 
 
+    # ============================================================ 39. W8-B6 证道与道伤
+    from core import zhengdao as dz39            # noqa: E402
+    from core import trib as trib39              # noqa: E402
+    from core import flower as fl39              # noqa: E402
+    from core import suiyun as sy39              # noqa: E402
+    from core import yuanshen as ys39            # noqa: E402
+    from types import SimpleNamespace as _NS39   # noqa: E402
+
+    class _Seq39:
+        def __init__(self, *seq):
+            self.seq = list(seq) or [0.0]
+            self.i = 0
+        def _next(self):
+            v = self.seq[self.i % len(self.seq)]
+            self.i += 1
+            return v
+        def random(self):
+            return self._next()
+        def randint(self, a, b):
+            return a
+        def choice(self, seq):
+            return seq[0]
+
+    t39 = time.time()          # 与现实时钟对齐，避免道伤被「离线自然恢复」一次性结算清光
+    d39 = PlayerDoc(uid="w8dz1", name="证道", realm_index=60, physique_index=60,
+                    exp=10 ** 12, stones=10 ** 9,
+                    ext={"xueqi": 10 ** 12, "gongfa": ["不灭经"],
+                         "linggen": {"name": "凡根", "type": "凡"}})
+    # ① 初始态 / 三层惩罚 / 面板与规则
+    assert dz39.peek(d39) == 0.0 and dz39.effects(d39)["dao_multiplier"] == 1.0
+    assert len(dz39.panel(d39, {}, t39).split("\n")) >= 9
+    assert "自然恢复" in dz39.rules_text()
+    dz39.add_wounds(d39, 3.0, "自检", t39)
+    e39 = dz39.effects(d39)
+    assert e39["wounds"] == 3.0 and e39["level"] == 3.0
+    assert abs(e39["chance_penalty"] - 0.24) < 1e-6
+    assert abs(e39["dao_multiplier"] - 0.7) < 1e-6
+    assert abs(e39["attr_multiplier"] - 0.85) < 1e-6
+    assert dz39.add_wounds(d39, 1.0, "霜华", t39, halve=True) == 3.5
+    assert abs(dz39.effects(d39)["chance_penalty"] - 0.28) < 1e-6
+    # ② 读时自然恢复：每 10 分钟 -0.1，且时间倒退时对齐不误清
+    st39 = dz39.state_of(d39, t39)
+    st39["last_decay_at"] = t39 - 1800
+    dz39.save(d39, st39)
+    assert abs(dz39.state_of(d39, t39)["wounds"] - 3.2) < 1e-6
+    d39t = PlayerDoc(uid="w8dz_t", name="时钟", realm_index=0, exp=0, ext={})
+    dz39.add_wounds(d39t, 2.0, "自检", t39)
+    dz39.state_of(d39t, t39 - 100_000)         # 时间倒退：独立档验证不得把道伤清零
+    assert dz39.peek(d39t) == 2.0
+    # ③ 花粉成功率惩罚 / 渡劫门槛 / 渡劫失败累积与成功清空
+    st39b = fl39.state_of(d39) or fl39._defaults()
+    med39 = next(iter(fl39.MEDIA.values()))
+    assert fl39._chance(st39b, med39, t39, 0.4) < fl39._chance(st39b, med39, t39)
+    stats39 = _NS39(atk=10 ** 9, defense=10 ** 9, hp=10 ** 9)
+    d39.realm_index = trib39.TRIB_REALM
+    d39.ext["power"] = 0
+    d39.ext["linggen"] = {"name": "凡根", "type": "凡"}
+    assert "道伤" in (trib39.trib_check(d39, [{"exp": 0}], stats39, 10 ** 9, 10 ** 9) or "")
+    ok39, _ = trib39.trib_run(d39, stats39, _Seq39(0.99))
+    assert ok39 is False and dz39.peek(d39) >= 4.2
+    ok39, _ = trib39.trib_run(d39, stats39, _Seq39(0.0))
+    assert ok39 is True and dz39.peek(d39) == 0.0
+    # ④ 道基重塑 / 修复道伤（八门功法效率）
+    dz39.add_wounds(d39, 2.0, "自检", t39)
+    assert dz39.reshape(d39, {}, t39)[0] is False
+    assert dz39.reshape(d39, {dz39.RESHAPE_ITEM: 5}, t39)[0] is True
+    assert abs(dz39.peek(d39) - 1.0) < 1e-6
+    assert dz39.repair_efficiency(d39) == (1.0, "不灭经")
+    assert dz39.repair(d39, t39)[0] is True and dz39.peek(d39) == 0.0
+    assert dz39.repair(d39, t39)[0] is False
+    # ⑤ 冲关成功/失败（失败 +1 道伤）
+    d39.realm_index = 60
+    ok39, msg39, _ = dz39.charge(d39, {}, t39, _Seq39(0.0))
+    assert ok39 and d39.realm_index == 61
+    ok39, msg39, _ = dz39.charge(d39, {}, t39, _Seq39(0.99))
+    assert ok39 and "道伤" in msg39 and dz39.peek(d39) > 0
+    dz39.clear(d39, "自检", t39)
+    # ⑥ 全服注册表 / 护道窗口 / 三路线判定
+    reg39 = dz39.registry_of({})
+    assert reg39["heart_holder"] == "" and reg39["emperors"] == []
+    assert dz39.resolve_route(d39, reg39, t39) == "天心合道"
+    reg39["heart_holder"] = "someone"
+    assert dz39.resolve_route(d39, reg39, t39) == "帝路断绝"
+    assert dz39.guard(reg39, d39.uid, d39.uid, t39)[0] is True
+    assert dz39.guard_left(reg39, d39.uid, t39) == dz39.GUARD_WINDOW
+    assert dz39.resolve_route(d39, reg39, t39) == "护道成帝"
+    d39.ext["linggen"] = {"name": "混沌体", "type": "混沌"}
+    assert dz39.resolve_route(d39, reg39, t39) == "凌驾万道"
+    assert dz39.ROUTE_DIFFICULTY["凌驾万道"] == 1.5
+    assert dz39.unguard(reg39, d39.uid, d39.uid)[0] is True
+    assert "天心印记" in dz39.heart_panel(d39, reg39, t39)
+    # ⑦ 证道成帝：失败 +2 道伤 / 全过成功并写帝榜与天心印记
+    d39.ext["linggen"] = {"name": "凡根", "type": "凡"}
+    d39.realm_index = 60
+    d39.exp = 10 ** 12
+    d39.ext["xueqi"] = 10 ** 12
+    ok39, msg39, _, reg39b = dz39.prove(d39, dz39.registry_of({}), t39, _Seq39(0.99))
+    assert ok39 and "道基受损" in msg39 and dz39.peek(d39) > 0
+    dz39.clear(d39, "自检", t39)
+    reg39c = dz39.registry_of({})
+    ok39, msg39, _, reg39d = dz39.prove(d39, reg39c, t39, _Seq39(0.0))
+    assert ok39 and "证道成功" in msg39 and reg39d["heart_holder"] == d39.uid
+    assert len(reg39d["emperors"]) == 1 and dz39.peek(d39) == 0.0
+    assert abs(dz39.power_bonus(d39) - 0.8) < 1e-6
+    assert "天心合道" in dz39.panel(d39, reg39d, t39)
+    # ⑧ 路尽重证：24h CD / 清修为血气 / 帝威 +20%
+    assert dz39.reprove(d39, t39)[0] is False
+    ok39, msg39, _ = dz39.reprove(d39, t39 + dz39.PROVE_CD + 1)
+    assert ok39 and d39.exp == 0 and d39.ext["xueqi"] == 0
+    assert abs(dz39.power_bonus(d39) - 1.0) < 1e-6
+    # ⑨ 岁云霜华被动 / 雷帝道液（天药 daoshang 字段）/ 根源波动清伤
+    d39.ext["suiyun"] = {"awake": True,
+                         "seals": {n: t39 for n, *_ in sy39.SEALS}}
+    assert dz39.frost_active(d39) is True
+    idx39 = {"雷帝道液": {"name": "雷帝道液", "class": "丹药", "type": "天药",
+                          "yuanshen": 45_000_000, "daoshang": 1}}
+    pills39 = ys39.spirit_pills(d39, {"雷帝道液": 1}, idx39)
+    assert len(pills39) == 1 and pills39[0]["daoshang"] == 1
+    dz39.add_wounds(d39, 2.0, "自检", t39)
+    ok39, msg39, used39 = ys39.take_pills(d39, {"雷帝道液": 1}, idx39)
+    assert ok39 and "道伤 -1" in msg39 and abs(dz39.peek(d39) - 1.0) < 1e-6
+    print("W8-B6 zhengdao path ok")
+
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

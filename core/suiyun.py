@@ -629,6 +629,11 @@ def redeem(doc: Any, arg: str) -> tuple[bool, str, dict[str, int]]:
         return _no(f"月华不足：需 {cost:,} 点，当前 {have:,} 点（#云月修炼 / #月华炼化 可得）。")
     st["moonlight"] = have - cost
     doc.ext.pop("spirit_fail_ts", None)          # 渡劫失败冷却清除
+    try:
+        from . import zhengdao as _dz
+        _dz.clear(doc, "月华救赎")               # W8-B6：希望化身清道伤
+    except Exception:
+        pass
     gain_xueqi = 50_000 if heavy else 20_000
     doc.ext["xueqi"] = int(doc.ext.get("xueqi", 0) or 0) + gain_xueqi
     _save(doc, st)
@@ -883,6 +888,11 @@ def root_wave(doc: Any, arg: str, now: float) -> tuple[bool, str, dict[str, int]
         return _no(f"根源波动尚未平息，还需 {left / 3600:.1f} 小时（48h CD）。")
     st["cd"] = {**(st.get("cd") or {}), "根源波动": now + 2 * DAY}
     doc.ext.pop("spirit_fail_ts", None)
+    try:
+        from . import zhengdao as _dz
+        _dz.clear(doc, "根源波动")               # W8-B6：海洋封印真清道伤
+    except Exception:
+        pass
     doc.exp = int(getattr(doc, "exp", 0) or 0) + 2_000_000
     doc.ext["xueqi"] = int(doc.ext.get("xueqi", 0) or 0) + 100_000
     _save(doc, st)

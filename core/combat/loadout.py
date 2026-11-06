@@ -208,6 +208,14 @@ def build_fighter(
                 f.tags["linggen_name"] = sname   # 复用 opening.suiyun_verdict 已实装的同境裁决
     except Exception:
         pass
+    # W8-B6 证道：帝威增伤（每次证道成功累积 80%，重证 +20%，上限 +300%）
+    try:
+        from .. import zhengdao as dz_mod
+        bonus = dz_mod.power_bonus(doc)
+        if bonus > 0:
+            f.effects["dmg_dealt_mult"] = float(f.eff("dmg_dealt_mult", 1.0)) * (1 + bonus)
+    except Exception:
+        pass
     apply_proficiency(f, doc)   # W7-0：三乘区 + 档位共鸣，PvP/PvE 同源
     if (int(getattr(doc, "realm_index", 0) or 0) >= 10
             and int(getattr(doc, "physique_index", 0) or 0) >= 10):

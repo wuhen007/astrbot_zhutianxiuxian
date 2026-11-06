@@ -243,10 +243,17 @@ def aggregate(
 
     flat["hp"] += lg_flat
 
+    # W8-B6 道伤：三维 -5%/层（下限 0.7），作用于主体乘区、不削岁云云月之莲固定加成
+    dz_mult = 1.0
+    try:
+        from . import zhengdao as _dz
+        dz_mult = _dz.effects(doc)["attr_multiplier"]
+    except Exception:
+        pass
     return Stats(
-        atk=int((base_atk * (1 + ratio["atk"] + av_atk + lg_atk + dt_all) + flat["atk"]) * set_mult * pet_mult) + int(sy_lotus),
-        defense=int((base_def * (1 + ratio["def"] + av_def + lg_def + dt_all) + flat["def"]) * set_mult * pet_mult) + int(sy_lotus),
-        hp=int((base_hp * (1 + ratio["hp"] + av_hp + lg_hp + dt_all) + flat["hp"]) * set_mult * pet_mult) + int(sy_lotus),
+        atk=int((base_atk * (1 + ratio["atk"] + av_atk + lg_atk + dt_all) + flat["atk"]) * set_mult * pet_mult * dz_mult) + int(sy_lotus),
+        defense=int((base_def * (1 + ratio["def"] + av_def + lg_def + dt_all) + flat["def"]) * set_mult * pet_mult * dz_mult) + int(sy_lotus),
+        hp=int((base_hp * (1 + ratio["hp"] + av_hp + lg_hp + dt_all) + flat["hp"]) * set_mult * pet_mult * dz_mult) + int(sy_lotus),
         bao=min(bao + dt_bao, 1.0),
         set_lines=tuple(set_lines),
     )

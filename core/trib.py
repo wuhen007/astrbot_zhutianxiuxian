@@ -159,6 +159,14 @@ def trib_check(doc: PlayerDoc, table: list[dict], stats: Any, hp_cur: float, hp_
         return f"元神尚未恢复，强行渡劫恐有魂飞魄散之险！还需 {left / 60:.0f} 分钟。"
     if doc.exp < need:
         return f"修为不足，再积累 {need - doc.exp:,} 修为后方可渡劫。"
+    try:
+        from . import zhengdao as _dz
+        w = _dz.peek(doc)
+        if w >= 3.0:
+            return (f"身负道伤 {w:.1f} ≥3，劫云不认残破之基——"
+                    "先 #修复道伤 / #道基重塑 / #根源波动 祛伤。")
+    except Exception:
+        pass
     return None
 
 
@@ -180,6 +188,11 @@ def trib_run(doc: PlayerDoc, stats: Any, rng: random.Random) -> tuple[bool, str]
     if ok:
         doc.ext["power"] = 2
         doc.ext.pop("spirit_fail_ts", None)
+        try:
+            from . import zhengdao as _dz
+            _dz.clear(doc, "真劫淬体")           # W8-B6：淬炼成功清空道伤
+        except Exception:
+            pass
         return True, (f"≡≡≡ 无妄真劫启 ≡≡≡\n"
                       f"天道：就凭这肉身，也敢逆天改命？\n"
                       f"雷抗 {x:.1f}｜需渡 {rounds} 道雷劫｜成功率 {prob:.0%}\n"
@@ -189,10 +202,16 @@ def trib_run(doc: PlayerDoc, stats: Any, rng: random.Random) -> tuple[bool, str]
     doc.exp = max(0, doc.exp - cost)
     doc.ext["hp"] = 1
     doc.ext["spirit_fail_ts"] = time.time()
+    try:
+        from . import zhengdao as _dz
+        wound = _dz.add_wounds(doc, 1.0, "无妄真劫失败")
+        wnote = f"｜道伤 +1（现 {wound:.1f}）"
+    except Exception:
+        wnote = ""
     return False, (f"≡≡≡ 无妄真劫启 ≡≡≡\n"
                    f"雷抗 {x:.1f}｜需渡 {rounds} 道雷劫｜成功率 {prob:.0%}\n"
                    f"雷劫轰落，肉身崩碎、元神重创——渡劫失败！\n"
-                   f"修为 -{cost:,}，气血归一，元神 30 分钟后方可再战。")
+                   f"修为 -{cost:,}，气血归一{wnote}，元神 30 分钟后方可再战。")
 
 
 # ---------------------------------------------------------------- 渡劫复活设置（W7-1）

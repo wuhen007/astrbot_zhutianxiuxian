@@ -358,7 +358,7 @@ def spirit_pills(doc: Any, inv: Mapping[str, int], item_index: Mapping[str, Mapp
         if gain <= 0:
             continue
         out.append({"name": str(name), "qty": cnt, "gain": gain,
-                    "daoshang": int(row.get("道伤") or 0)})
+                    "daoshang": int(row.get("daoshang") or row.get("道伤") or 0)})
     out.sort(key=lambda r: r["gain"])
     return out
 
@@ -376,16 +376,26 @@ def take_pills(doc: Any, inv: Mapping[str, int], item_index: Mapping[str, Mappin
             return False, f"纳戒里没有【{which}】这种天药。", {}
     used: dict[str, int] = {}
     gain = 0
+    healed = 0.0
     for row in rows:
         used[row["name"]] = row["qty"]
         gain += row["gain"] * row["qty"]
+        healed += float(row.get("daoshang") or 0) * row["qty"]
     st = ensure(doc)
     st["cur"] = int(st.get("cur", 0) or 0) + gain
     st["max"] = int(st.get("max", 0) or 0) + gain
     save(doc, st)
+    wnote = ""
+    if healed > 0:
+        try:
+            from . import zhengdao as _dz
+            left = _dz.heal(doc, healed, "雷帝道液")
+            wnote = f"｜道伤 -{healed:g}（现 {left:.1f}）"
+        except Exception:
+            pass
     detail = "、".join(f"{k}×{v}" for k, v in used.items())
     return True, (f"服食天药：{detail}\n"
-                  f"元神 +{gain:,}，上限 +{gain:,}（现 {st['cur']:,}/{st['max']:,}）。"), used
+                  f"元神 +{gain:,}，上限 +{gain:,}（现 {st['cur']:,}/{st['max']:,}）{wnote}。"), used
 
 
 # ---------------------------------------------------------------- 法门四类
@@ -1110,5 +1120,13 @@ def inner_cultivate(doc: Any, times: int = 1, now: float | None = None,
     lines += notes
     lines.append(f"成功 {win} 次｜失败 {fail} 次｜投入元神 {spend:,}｜"
                  f"修为/血气/元神各 +{got:,}")
+    if win:
+        try:
+            from . import zhengdao as _dz
+            heal = round(0.1 * win, 3)
+            left = _dz.heal(doc, heal, "内景地修炼")
+            lines.append(f"【内景地洗道】道伤 -{heal:g}（现 {left:.1f}）")
+        except Exception:
+            pass
     lines.append(f"（单次消耗 {cost:,}｜成功率 {chance:.0%}｜#内景地修炼 可继续）")
     return True, "\n".join(lines)

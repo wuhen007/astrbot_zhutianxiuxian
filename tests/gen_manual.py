@@ -120,6 +120,10 @@ def main() -> int:
                     "handle_sy_dream", "handle_sy_sword", "handle_sy_descent",
                     "handle_sy_root", "handle_sy_pray", "handle_sy_skill",
                     "handle_sy_genesis")),
+        ("证道与道伤", ("handle_dz_panel", "handle_dz_rules", "handle_dz_reshape",
+                    "handle_dz_repair", "handle_dz_prove", "handle_dz_reprove",
+                    "handle_dz_charge", "handle_dz_charge_extreme", "handle_dz_guard",
+                    "handle_dz_unguard", "handle_dz_heart")),
         ("帮助", ("handle_help",)),
     ]
     grouped = {}

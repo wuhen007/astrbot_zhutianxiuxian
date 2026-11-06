@@ -298,7 +298,8 @@ def sense(doc: Any, inv: Mapping[str, int], now: float,
     return True, "\n".join(lines), delta
 
 
-def _chance(st: Mapping[str, Any], medium: Mapping, now: float) -> float:
+def _chance(st: Mapping[str, Any], medium: Mapping, now: float,
+            wound_penalty: float = 0.0) -> float:
     level = int(st["level"])
     base = 0.75 - min(0.35, (level - 1) * 0.018)
     chance = (base + float(medium["chance"])
@@ -310,6 +311,7 @@ def _chance(st: Mapping[str, Any], medium: Mapping, now: float) -> float:
         chance -= 0.15
     if now < float(st["mark_until"] or 0):
         chance -= 0.20
+    chance -= max(0.0, float(wound_penalty))   # W8-B6 道伤：成功率 -8pp/层
     return max(0.1, min(0.95, chance))
 
 
@@ -366,7 +368,12 @@ def evolve(doc: Any, inv: Mapping[str, int], asked: str, now: float,
     doc.exp = int(doc.exp) - cost
     _set_xueqi(doc, _xueqi(doc) - cost)
     delta = {medium: -1}
-    chance = _chance(st, MEDIA[medium], now)
+    try:
+        from . import zhengdao as _dz
+        dz_pen = _dz.effects(doc)["chance_penalty"]
+    except Exception:
+        dz_pen = 0.0
+    chance = _chance(st, MEDIA[medium], now, dz_pen)
     st["accum"] = int(st["accum"]) + int(MEDIA[medium]["accum"])
     st["risk"] = int(st["risk"]) + int(MEDIA[medium]["risk"])
 
@@ -572,7 +579,13 @@ def tribulation(doc: Any, now: float, rng: random.Random) -> tuple[bool, str, di
     doc.exp = int(doc.exp) - cost
     _set_xueqi(doc, _xueqi(doc) - cost)
     fails = int(st["trib_fail"].get(str(level), 0) or 0)
-    chance = min(0.95, rule[2] + min(0.15, fails * 0.03))
+    try:
+        from . import zhengdao as _dz
+        dz_pen = _dz.effects(doc)["chance_penalty"]
+        dz_frost = _dz.frost_active(doc)
+    except Exception:
+        dz_pen, dz_frost = 0.0, False
+    chance = max(0.1, min(0.95, rule[2] + min(0.15, fails * 0.03) - dz_pen))
     passed = 0
     for _ in range(int(rule[1])):
         if rng.random() >= chance:
@@ -586,6 +599,11 @@ def tribulation(doc: Any, now: float, rng: random.Random) -> tuple[bool, str, di
         st["pollution"] = max(0, int(st["pollution"]) - rule[8])
         _clamp(st)
         set_state(doc, st)
+        try:
+            from . import zhengdao as _dz2
+            _dz2.clear(doc, "花劫淬炼")           # W8-B6：淬炼成功清空道伤
+        except Exception:
+            pass
         return True, (f"【{rule[0]}·渡尽】{rule[1]} 阶段 {waves} 道雷劫尽数扛过！\n"
                       f"进化积淀 +{rule[6]}｜隐患 -{rule[7]}｜始祖污染 -{rule[8]}｜"
                       f"消耗修为与血气各 {cost:,}"), {}
@@ -597,8 +615,14 @@ def tribulation(doc: Any, now: float, rng: random.Random) -> tuple[bool, str, di
     st["trib_fail"][str(level)] = fails + 1
     _clamp(st)
     set_state(doc, st)
+    try:
+        from . import zhengdao as _dz3
+        wound = _dz3.add_wounds(doc, 1.0, "花粉渡劫失败", halve=dz_frost)
+        wnote = f"｜道伤 +{0.5 if dz_frost else 1:g}（现 {wound:.1f}）"
+    except Exception:
+        wnote = ""
     return True, (f"【{rule[0]}·未渡尽】第 {passed + 1}/{rule[1]} 阶段雷劫失守（单阶段 {chance:.0%}）。\n"
-                  f"修为与血气再损 15%｜隐患 +{rule[4]}｜污染 +{rule[5]}｜"
+                  f"修为与血气再损 15%｜隐患 +{rule[4]}｜污染 +{rule[5]}{wnote}｜"
                   f"失败保护：下次渡劫单阶段成功率 +3%（累计 {fails + 1} 次）"), {}
 
 
