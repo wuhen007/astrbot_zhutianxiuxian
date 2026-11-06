@@ -4993,6 +4993,111 @@ async def main():
     print("W8-B6 zhengdao path ok")
 
 
+    # ============================================================ 40. W8-B1b 至尊线
+    import json as _json40, io as _io40             # noqa: E402
+    from core import supreme as sp40                # noqa: E402
+    from core.combat import loadout as lo40         # noqa: E402
+    from core.combat.engine import Fighter as F40   # noqa: E402
+
+    tbl40 = _json40.load(_io40.open("data/item/灵根列表.json", encoding="utf-8"))
+    d40 = PlayerDoc(uid="w8sp1", name="至尊", realm_index=30, physique_index=30,
+                    exp=10 ** 12, stones=10 ** 9,
+                    ext={"linggen": {"name": "凡根", "type": "凡", "origin": 0, "awaken": 2},
+                         "gongfa": ["原始真解神引篇", "六道轮回天功",
+                                    "原始真解终极篇", "五行涅槃法"],
+                         "era_points": 200, "xueqi": 10 ** 12})
+    inv40 = {"至尊骨": 1, "重瞳本源": 1, "仙王残魂": 3, "世界石": 1}
+
+    class _S40:
+        atk, defense, hp, bao = 10 ** 9, 10 ** 9, 10 ** 9, 0.05
+
+    # ① 初始态 / 至尊传承换灵根（保留 W7-4 觉醒档）/ 生命本源 250 / 减伤 25%
+    assert sp40.stage_of(d40) == 0 and sp40.trib_reduction(d40) == 0.0
+    ok40, msg40, _ = sp40.inherit(d40, {"至尊骨": 0}, tbl40)
+    assert not ok40 and "至尊骨" in msg40
+    ok40, msg40, delta40 = sp40.inherit(d40, inv40, tbl40)
+    assert ok40 and sp40.stage_of(d40) == 1 and delta40 == {"至尊骨": -1}
+    assert d40.ext["linggen"]["awaken"] == 2 and sp40.life_max(d40) == 250
+    assert abs(sp40.trib_reduction(d40) - 0.25) < 1e-6
+    ok40, msg40b, _ = sp40.inherit(d40, inv40, tbl40)
+    assert not ok40 and "无需再承" in msg40b
+
+    # ② 前置缺口（境界代理极境）/ 斩骨开 9 胜试炼 / 试炼中不可重复开
+    d40.realm_index = 5
+    assert any("第 13 境" in g for g in sp40.missing_of(d40, "nirvana"))
+    d40.realm_index = 30
+    assert sp40.missing_of(d40, "nirvana") == []
+    ok40, msg40, delta40 = sp40.start(d40, "nirvana")
+    assert ok40 and delta40 == {"至尊骨": 1}
+    assert sp40.state_of(d40)["trial"]["target"] == 9
+    ok40, msg40, _ = sp40.start(d40, "nirvana")
+    assert not ok40 and "进行中" in msg40
+
+    # ③ 参悟至尊骨 → 上苍之手进功法栏；阶段 1 不能参悟涅槃骨；重复拒绝
+    ok40, msg40, _ = sp40.comprehend(d40, inv40, "涅槃至尊骨")
+    assert not ok40 and "阶段 2" in msg40
+    ok40, msg40, delta40 = sp40.comprehend(d40, inv40, "至尊骨")
+    assert ok40 and delta40 == {"至尊骨": -1} and "上苍之手" in d40.ext["gongfa"]
+    ok40, msg40, _ = sp40.comprehend(d40, inv40, "至尊骨")
+    assert not ok40 and "已在参悟" in msg40
+
+    # ④ 失败不损胜场的口径由回执保证；连胜 9 场 → 整体换灵根晋阶段 2
+    wins40 = 0
+    for _ in range(9):
+        ok40, msg40, _ = sp40.trial(d40, _S40(), tbl40, _random.Random(1))
+        wins40 += int(bool(ok40))
+    assert wins40 == 9 and sp40.stage_of(d40) == 2
+    assert sp40.state_of(d40)["trial"] is None
+    assert sp40.life_max(d40) == 400 and sp40.state_of(d40)["bone"] == "涅槃再生"
+    assert abs(sp40.trib_reduction(d40) - 0.40) < 1e-6
+
+    # ⑤ 阶段 2 #斩骨 复用为舍骨入血（纪元积累 100 + 两门功法）
+    assert sp40.missing_of(d40, "ultimate") == []
+    d40.ext["era_points"] = 10
+    assert any("纪元积累" in g for g in sp40.missing_of(d40, "ultimate"))
+    d40.ext["era_points"] = 200
+    ok40, msg40, delta40 = sp40.start(d40, "ultimate", via_chop=True)
+    assert ok40 and delta40 == {"涅槃至尊骨": 1} and "自动转" in msg40
+    for _k40, _v40 in delta40.items():        # 模拟统一落库：新骨入纳戒
+        inv40[_k40] = int(inv40.get(_k40, 0) or 0) + int(_v40)
+    ok40, msg40, delta40 = sp40.comprehend(d40, inv40, "涅槃至尊骨")
+    assert ok40 and delta40 == {"涅槃至尊骨": -1}
+    assert "轮回天罚" in d40.ext["gongfa"] and len(sp40.state_of(d40)["arts"]) == 2
+
+    # ⑥ 4 胜 → 终极涅槃·至尊 / 生命本源 600 / 减伤 65%
+    wins40 = 0
+    for _ in range(4):
+        ok40, msg40, _ = sp40.trial(d40, _S40(), tbl40, _random.Random(1))
+        wins40 += int(bool(ok40))
+    assert wins40 == 4 and sp40.stage_of(d40) == 3
+    assert sp40.life_max(d40) == 600 and sp40.state_of(d40)["bone"] == "血肉铭骨"
+    assert abs(sp40.trib_reduction(d40) - 0.65) < 1e-6
+
+    # ⑦ 三条支线：孕育仙骨 / 重瞳开天 / 瞳骨合一（缺一不可）
+    ok40, msg40, _ = sp40.merge(d40)
+    assert not ok40 and "未开重瞳" in msg40
+    ok40, msg40, delta40 = sp40.immortal_bone(d40, inv40)
+    assert ok40 and delta40 == {"仙王残魂": -3, "世界石": -1}
+    ok40, msg40, delta40 = sp40.double_pupil(d40, inv40)
+    assert ok40 and delta40 == {"重瞳本源": -1}
+    ok40, msg40, _ = sp40.merge(d40)
+    assert ok40 and sp40.title_of(d40) == "至尊重瞳仙骨"
+
+    # ⑧ 战斗技能池注入（重瞳/仙骨/共鸣 + 三至尊宝术）/ 面板规则 / 不进第三轨
+    atk40 = _json40.load(_io40.open("data/item/技能组/攻击技能.json", encoding="utf-8"))
+    def40 = _json40.load(_io40.open("data/item/技能组/防御技能.json", encoding="utf-8"))
+    f40 = F40(name="至尊", atk=1, defense=1, hp=1, hp_max=1)
+    f40.tags["linggen_name"] = "终极涅槃·至尊"
+    lo40.equip_skill_pool(f40, d40, {"atk": atk40, "def": def40, "heal": [], "boost": []})
+    an40 = {str(s.get("name")) for s in f40.tags.get("atk_skills", [])}
+    dn40 = {str(s.get("name")) for s in f40.tags.get("def_skills", [])}
+    assert {"重瞳", "重瞳至尊", "至尊重瞳仙骨", "上苍之手", "轮回宝术", "轮回天罚"} <= an40
+    assert "仙骨" in dn40 and len(sp40.skill_names(d40)) == 4
+    assert "终极涅槃·至尊" in sp40.panel(d40) and "无 CD" in sp40.rules_text()
+    assert isinstance(sp40.explore_drop(d40, _random.Random(2)), dict)
+    assert sp40.equivalent_level(d40) == 0        # 原版三体系无至尊：不注册第三轨
+    print("W8-B1b supreme path ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

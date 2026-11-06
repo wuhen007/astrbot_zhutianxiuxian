@@ -57,6 +57,11 @@ def equip_skill_pool(f: Fighter, doc: Any, tables: Mapping[str, Any] | None) -> 
     if not lg_name and not learned:
         return
     want = ({lg_name} if lg_name else set()) | learned
+    try:                                  # W8-B1b：重瞳 / 仙骨 / 瞳骨共鸣附加灵根类技能
+        from .. import supreme as _sp
+        want |= set(_sp.skill_names(doc))
+    except Exception:
+        pass
 
     atk_by_name: dict[str, dict] = {}
     for e in tables.get("atk") or []:

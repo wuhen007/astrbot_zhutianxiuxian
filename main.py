@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, authority as authority_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, authority as authority_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -520,6 +520,19 @@ CMD_DZ_CHARGE_EXTREME = "#冲关极境"
 CMD_DZ_GUARD = "#护法"
 CMD_DZ_UNGUARD = "#解除护法"
 CMD_DZ_HEART = "#天心印记"
+# W8-B1b：至尊线（至尊骨 / 斩骨涅槃 / 舍骨入血 / 试炼 / 仙骨 / 重瞳 / 瞳骨合一）
+CMD_SP_INHERIT = "#至尊传承"
+CMD_SP_PANEL = "#至尊之路"
+CMD_SP_RULES = "#至尊规则"
+CMD_SP_CHOP = "#斩骨"
+CMD_SP_CHOP_NIRVANA = "#斩骨涅槃"
+CMD_SP_ULTIMATE = "#舍骨入血"
+CMD_SP_TRIAL = "#至尊试炼"
+CMD_SP_LEARN = "#参悟至尊骨"
+CMD_SP_LEARN_NIRVANA = "#参悟涅槃至尊骨"
+CMD_SP_IMMORTAL = "#孕育仙骨"
+CMD_SP_PUPIL = "#重瞳开天"
+CMD_SP_MERGE = "#瞳骨合一"
 # W7-4：养成深度（灵根觉醒 / 寿元救援 / 帝兵铭文 / 职业产线 / 道法卡）
 CMD_LG_AWAKEN = "#灵根觉醒"
 CMD_RESCUE = "#轮回救人"
@@ -1490,6 +1503,20 @@ class ZhutianPlugin(Star):
                 (f"{CMD_DZ_GUARD} @目标", "为道友立 1 小时护道法阵（帝路断绝的破局口）"),
                 (CMD_DZ_UNGUARD, "撤去自己/目标的护道法阵"),
                 (CMD_DZ_HEART, "天心印记归属、帝榜与护道窗口"),
+            ]},
+            {"title": "至尊线", "lines": [
+                (CMD_SP_PANEL, "至尊大面板：阶段/至尊骨/宝术/仙骨/重瞳/共鸣/试炼进度"),
+                (CMD_SP_RULES, "阶段进阶、试炼、宝术合成、支线与渡劫减伤规则"),
+                (CMD_SP_INHERIT, "耗【至尊骨】×1 承接「天生至尊」灵根（本移植入口）"),
+                (CMD_SP_CHOP, "开「失骨涅槃」9 胜试炼并得【至尊骨】（阶段 2 自动转舍骨入血）"),
+                (CMD_SP_CHOP_NIRVANA, "斩骨涅槃：恒走斩骨线，不被阶段 2 复用"),
+                (CMD_SP_ULTIMATE, "开「血肉铭骨」4 胜试炼并得【涅槃至尊骨】"),
+                (CMD_SP_TRIAL, "打一场试炼战，败不损胜场、无 CD；达标换灵根进阶"),
+                (CMD_SP_LEARN, "耗【至尊骨】参悟《上苍之手》"),
+                (CMD_SP_LEARN_NIRVANA, "耗【涅槃至尊骨】参悟《轮回宝术》；两术齐自动得《轮回天罚》"),
+                (CMD_SP_IMMORTAL, "仙王残魂×3 + 世界石×1 + 五行涅槃法 + 本源满值，孕育仙骨"),
+                (CMD_SP_PUPIL, "第 6 境 + 重瞳本源×1，开启重瞳"),
+                (CMD_SP_MERGE, "阶段≥2 + 重瞳 + 仙骨 → 瞳照上苍·不朽轮回"),
             ]},
         ]
 
@@ -12376,6 +12403,11 @@ class ZhutianPlugin(Star):
         loot_mult = max(mem_mult, sy_mult)           # 两轨取 max，不叠乘（避免 40 倍通胀）
         if loot_mult > 1 and items_out:
             items_out = {k: v * loot_mult for k, v in items_out.items()}
+        # W8-B1b：大荒峡谷口径投放至尊骨 / 重瞳本源 / 仙王残魂 / 世界石（不乘倍率，避免通胀）
+        sp_drop = sp_mod.explore_drop(d, random.Random())
+        if sp_drop:
+            for _k, _v in sp_drop.items():
+                items_out[_k] = int(items_out.get(_k, 0) or 0) + int(_v)
         async with self.db.transaction():
             await self.db.save_player(d.model_dump())
             if items_out:
@@ -12394,6 +12426,9 @@ class ZhutianPlugin(Star):
             lines.append("物品：" + "、".join(f"{n}×{q}" for n, q in items_out.items()))
             if mem_mult > 1:
                 lines.append(f"【记忆命途】物品 ×{mem_mult}（每 6 个泰坦 +1 倍）")
+            if sp_drop:
+                lines.append("【大荒遗泽】" + "、".join(f"{n}×{q}" for n, q in sp_drop.items())
+                             + "（#至尊传承 / #重瞳开天 / #孕育仙骨）")
         else:
             lines.append("物品：无")
         if dungeon_note:
@@ -15706,4 +15741,163 @@ class ZhutianPlugin(Star):
             return
         reg = await self._dz_registry()
         async for r in self._smart(event, dz_mod.heart_panel(doc, reg), "天心印记·帝榜"):
+            yield r
+
+    # ---- W8-B1b：至尊线（至尊骨 / 试炼 / 仙骨 / 重瞳 / 瞳骨合一） ----
+
+    def _sp_table(self) -> list:
+        return self.content.table("item/灵根列表") or []
+
+    async def _sp_finish(self, event, doc, result, title):
+        """复用 B6 的通用事务落库（至尊线无全服登记，故不传 reg）。"""
+        async for r in self._dz_finish(event, doc, result, title):
+            yield r
+
+    @filter.command(CMD_SP_PANEL, "至尊之路")
+    async def handle_sp_panel(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, sp_mod.panel(doc), "至尊之路"):
+            yield r
+
+    @filter.command(CMD_SP_RULES, "至尊规则")
+    async def handle_sp_rules(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, sp_mod.rules_text(), "至尊规则"):
+            yield r
+
+    @filter.command(CMD_SP_INHERIT, "至尊传承")
+    async def handle_sp_inherit(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        result = sp_mod.inherit(doc, inv, self._sp_table())
+        async for r in self._sp_finish(event, doc, result, "至尊传承"):
+            yield r
+
+    @filter.command(CMD_SP_CHOP, "斩骨")
+    async def handle_sp_chop(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        # 原版 linggenjuexing.js:1029：阶段 2 时 #斩骨 自动转「舍骨入血」
+        kind = "ultimate" if sp_mod.stage_of(doc) == 2 else "nirvana"
+        result = sp_mod.start(doc, kind, via_chop=(kind == "ultimate"))
+        async for r in self._sp_finish(event, doc, result, "斩骨涅槃"):
+            yield r
+
+    @filter.command(CMD_SP_CHOP_NIRVANA, "斩骨涅槃")
+    async def handle_sp_chop_nirvana(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        result = sp_mod.start(doc, "nirvana")   # 恒走斩骨线，不被阶段 2 复用
+        async for r in self._sp_finish(event, doc, result, "斩骨涅槃"):
+            yield r
+
+    @filter.command(CMD_SP_ULTIMATE, "舍骨入血")
+    async def handle_sp_ultimate(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        result = sp_mod.start(doc, "ultimate")
+        async for r in self._sp_finish(event, doc, result, "舍骨入血"):
+            yield r
+
+    @filter.command(CMD_SP_TRIAL, "至尊试炼")
+    async def handle_sp_trial(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        result = sp_mod.trial(doc, self._stats(doc), self._sp_table(), random.Random())
+        async for r in self._sp_finish(event, doc, result, "至尊试炼"):
+            yield r
+
+    @filter.command(CMD_SP_LEARN, "参悟至尊骨")
+    async def handle_sp_learn(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        result = sp_mod.comprehend(doc, inv, "至尊骨")
+        async for r in self._sp_finish(event, doc, result, "参悟至尊骨"):
+            yield r
+
+    @filter.command(CMD_SP_LEARN_NIRVANA, "参悟涅槃至尊骨")
+    async def handle_sp_learn_nirvana(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        result = sp_mod.comprehend(doc, inv, "涅槃至尊骨")
+        async for r in self._sp_finish(event, doc, result, "参悟涅槃至尊骨"):
+            yield r
+
+    @filter.command(CMD_SP_IMMORTAL, "孕育仙骨")
+    async def handle_sp_immortal(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        result = sp_mod.immortal_bone(doc, inv)
+        async for r in self._sp_finish(event, doc, result, "孕育仙骨"):
+            yield r
+
+    @filter.command(CMD_SP_PUPIL, "重瞳开天")
+    async def handle_sp_pupil(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        result = sp_mod.double_pupil(doc, inv)
+        async for r in self._sp_finish(event, doc, result, "重瞳开天"):
+            yield r
+
+    @filter.command(CMD_SP_MERGE, "瞳骨合一")
+    async def handle_sp_merge(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        result = sp_mod.merge(doc)
+        async for r in self._sp_finish(event, doc, result, "瞳骨合一"):
             yield r

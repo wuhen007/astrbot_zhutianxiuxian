@@ -182,8 +182,13 @@ def trib_run(doc: PlayerDoc, stats: Any, rng: random.Random) -> tuple[bool, str]
         sy_red = float(_sy.trib_reduction(doc))    # W8-B4 岁云：20%~85% 渡劫减伤 + 七夜祈愿
     except Exception:
         sy_red = 0.0
-    if sy_red:
-        prob = min(0.99, prob * (1 + sy_red))
+    try:
+        from . import supreme as _sp
+        sp_red = float(_sp.trib_reduction(doc))    # W8-B1b：至尊体 25%/40%/65%，重瞳保底 50%
+    except Exception:
+        sp_red = 0.0
+    if sy_red or sp_red:
+        prob = min(0.99, prob * (1 + sy_red + sp_red))
     ok = rng.random() < prob
     if ok:
         doc.ext["power"] = 2

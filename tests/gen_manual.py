@@ -124,6 +124,10 @@ def main() -> int:
                     "handle_dz_repair", "handle_dz_prove", "handle_dz_reprove",
                     "handle_dz_charge", "handle_dz_charge_extreme", "handle_dz_guard",
                     "handle_dz_unguard", "handle_dz_heart")),
+        ("至尊线", ("handle_sp_panel", "handle_sp_rules", "handle_sp_inherit",
+                  "handle_sp_chop", "handle_sp_chop_nirvana", "handle_sp_ultimate",
+                  "handle_sp_trial", "handle_sp_learn", "handle_sp_learn_nirvana",
+                  "handle_sp_immortal", "handle_sp_pupil", "handle_sp_merge")),
         ("帮助", ("handle_help",)),
     ]
     grouped = {}
