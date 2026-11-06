@@ -5221,6 +5221,233 @@ async def main():
     assert ok41 and msg41
     print("W8-C1 bengming ok")
 
+    # ============================================================ 42. W8-C2 先天至宝·权柄
+    from core import xtzb as xt42, equipment as eq42, trib as trib42, cultivate as cul42
+    from core import yuanshen as ys42, zhengdao as dz42
+    from core.combat.loadout import build_fighter as bf42
+    import json as _json42
+    from types import SimpleNamespace
+
+    t42 = 1_800_000.0
+
+    class _Win42:
+        def random(self):
+            return 0.0
+        def choice(self, seq):
+            return seq[0]
+        def randint(self, a, b):
+            return a
+
+    class _Lose42:
+        def random(self):
+            return 1.0
+
+    w42 = xt42.world_of({})
+    d42 = PlayerDoc(uid="w8xt1", name="先天", realm_index=30, physique_index=30,
+                    exp=10 ** 10, stones=10 ** 8, ext={"linggen": {"name": "木"}})
+    d42b = PlayerDoc(uid="w8xt2", name="旁人", realm_index=30, physique_index=30,
+                     exp=10 ** 10, stones=10 ** 8, ext={})
+    inv42 = {"先天道痕": 100, "灵宝残片": 4, "界核": 20, "宇宙核心": 3,
+             "鸿蒙道火": 200, "太初魂晶": 10, "凡铁": 5}
+
+    # ① 目录 23 件 / 24 个 CD key / 九宝 / 5 件信物表 / 孤儿指令不注册
+    assert len(xt42.CATALOG) == 23 and len(xt42.NAMES) == 23
+    assert len(xt42.CD) == 24 and "图中巡游" in xt42.CD
+    assert "图中巡游" not in xt42.AUTH_FLAG
+    assert len(xt42.ETERNAL_COMPONENTS) == 9
+    assert len(xt42.ALIASES) == 6 and len(xt42.FLAGS) == 10
+    with (PLUGIN / 'data/item/至宝信物.json').open(encoding='utf-8') as _f42:
+        tbl42 = _json42.load(_f42)
+    assert len(tbl42) == 5 and {e['name'] for e in tbl42} == set(xt42.SIGILS)
+    assert xt42._parse_item("凡铁 *12") == ("凡铁", 12)
+    assert "23 件" in xt42.catalog() and "混沌珠" in xt42.catalog()
+    assert "盘古幡" in xt42.catalog("盘古幡") and "CD" in xt42.catalog("盘古幡")
+
+    # ② 择主：门槛 / 全服唯一 / 第二人只得 7 日投影（投影属性为 0）
+    ok42, msg42, _ = xt42.claim(d42, "不存在的至宝", inv42, w42, t42, _Win42())
+    assert not ok42
+    ok42, msg42, _ = xt42.claim(d42, "虚天舟", inv42, w42, t42, _Win42())
+    assert not ok42 and "虚天宝库" in msg42
+    ok42, msg42, _ = xt42.claim(d42, "混沌珠", {"先天道痕": 3}, w42, t42, _Win42())
+    assert not ok42 and "先天道痕" in msg42
+    ok42, msg42, dl42 = xt42.claim(d42, "混沌珠", inv42, w42, t42, _Win42())
+    assert ok42 and dl42["先天道痕"] == -xt42.CLAIM_COST
+    assert w42["owners"]["混沌珠"]["uid"] == "w8xt1"
+    assert xt42.current(d42, t42) == "混沌珠"
+    ok42, msg42, _ = xt42.claim(d42b, "混沌珠", {"先天道痕": 100}, w42, t42 + 10, _Win42())
+    assert ok42 and "投影" in msg42
+    assert xt42.state_of(d42b, t42 + 10)["projection"]["混沌珠"] > t42
+    assert w42["owners"]["混沌珠"]["uid"] == "w8xt1"
+    assert xt42.bonus(d42b, t42 + 10)[0] == 0.0
+
+    # ③ 执掌 / 移交：全服 owners 迁移 + CD 状态迁移 + 投影标记撤销
+    st42 = xt42.state_of(d42, t42)
+    st42["owned"].append("盘古幡")
+    xt42.save(d42, st42)
+    ok42, _, _ = xt42.equip(d42, "盘古幡", w42, t42)
+    assert ok42 and xt42.current(d42, t42) == "盘古幡"
+    ok42, msg42, _ = xt42.equip(d42, "混沌钟", w42, t42)
+    assert not ok42 and "纳戒" in msg42
+    ok42, _, _ = xt42.transfer(d42, "w8xt1", "混沌珠", w42, d42b, t42)
+    assert not ok42
+    ok42, msg42, _ = xt42.transfer(d42, "w8xt2", "混沌珠", w42, d42b, t42)
+    assert ok42 and w42["owners"]["混沌珠"]["uid"] == "w8xt2"
+    assert "混沌珠" not in xt42.state_of(d42, t42)["owned"]
+    assert xt42.current(d42b, t42) == "混沌珠"
+    assert "混沌珠" not in xt42.state_of(d42b, t42)["projection"]
+
+    # ④ 统一网关：未持有拒绝 / CD / 过期清理
+    ok42, msg42, _ = xt42.prepare(d42, w42, "东皇镇世", t42)
+    assert not ok42 and "执掌" in msg42
+    ok42, msg42, _ = xt42.prepare(d42, w42, "开天", t42)
+    assert ok42 and "盘古开天待用" in xt42.state_of(d42, t42)["flags"]
+    ok42, msg42, _ = xt42.prepare(d42, w42, "开天", t42 + 1)
+    assert not ok42 and "冷却" in msg42
+    st42 = xt42.state_of(d42, t42 + xt42.CD["开天"] + 1)
+    assert "开天" not in st42["cd"] and not st42["flags"]
+
+    # ⑤ 被动 + 蓄势 → combat()；过期自动失效；bonus / yield / guard
+    st42 = xt42.state_of(d42, t42)
+    st42["current"] = "盘古幡"
+    st42["flags"] = {"盘古开天待用": t42 + 100, "诛仙剑阵待用": t42 + 100}
+    xt42.save(d42, st42)
+    c42 = xt42.combat(d42, t42)
+    assert c42["dealt"] >= 0.30 + 0.60 + 0.50
+    assert xt42.bonus(d42, t42) == (xt42.FLAT_ALL, xt42.FLAT_ALL,
+                                   xt42.FLAT_ALL, xt42.BAO_FLAT)
+    assert xt42.yield_mult(d42, "raid", t42) > 1.0
+    assert xt42.guard_mult(d42, t42) == 1.0
+    assert xt42.combat(d42, t42 + 200)["dealt"] == 0.30
+
+    # ⑥ 混沌珠三权柄：复制 / 演化 / 变幻，信物与至宝禁止复制
+    inv42c = {"先天道痕": 10, "凡铁": 5, "太初魂晶": 3, "灵宝残片": 2}
+    ok42, _, dl42 = xt42.chaos_copy(d42b, inv42c, w42, "凡铁 *3", t42)
+    assert ok42 and dl42 == {"凡铁": 3}
+    t42b = t42 + xt42.CD["混沌复制"] + 1   # 越过第一次复制的 12h CD
+    ok42, msg42, _ = xt42.chaos_copy(d42b, inv42c, w42, "先天道痕*1", t42b)
+    assert not ok42 and "不可复制" in msg42
+    ok42, _, dl42 = xt42.chaos_evolve(d42b, inv42c, w42, "太初魂晶*3", t42, _Win42())
+    assert ok42 and dl42["太初魂晶"] == -3 and dl42["先天道痕"] == 3
+    ok42, _, dl42 = xt42.chaos_transform(d42b, inv42c, w42, "凡铁*2", t42, _Win42(), {}.get)
+    assert ok42 and dl42["凡铁"] == -2
+    assert sum(v for k, v in dl42.items() if k != "凡铁") == 2
+
+    # ⑦ 世界级：人皇敕令 + 每人一次借气运 / 山河投影显式收获
+    st42 = xt42.state_of(d42, t42)
+    st42["owned"].append("崆峒印")
+    st42["current"] = "崆峒印"
+    xt42.save(d42, st42)
+    ok42, _, _ = xt42.decree(d42, w42, "修炼", t42)
+    assert ok42 and xt42.decree_active(w42, t42)
+    exp0_42 = d42.exp
+    ok42, _, _ = xt42.borrow_decree(d42, w42, t42)
+    assert ok42 and d42.exp > exp0_42
+    ok42, msg42, _ = xt42.borrow_decree(d42, w42, t42 + 1)
+    assert not ok42 and "1 次" in msg42
+    st42 = xt42.state_of(d42, t42)
+    st42["owned"].append("山河社稷图")
+    st42["current"] = "山河社稷图"
+    xt42.save(d42, st42)
+    ok42, _, _ = xt42.capture_landscape(d42, w42, "灵界裂缝", t42)
+    assert ok42 and len(w42["landscapes"]) == 1
+    exp0_42 = d42.exp
+    ok42, _, _ = xt42.landscape_harvest(d42, w42, t42 + 3 * 3600)
+    assert ok42 and d42.exp > exp0_42
+    ok42, _, _ = xt42.landscape_harvest(d42, w42, t42 + 3 * 3600)
+    assert not ok42
+
+    # ⑧ 立即结算：回春祛道伤 / 淬神涨元神上限 / 菩提顿悟 / 太极双相
+    st42 = xt42.state_of(d42, t42)
+    st42["owned"].append("造化仙池")
+    st42["current"] = "造化仙池"
+    xt42.save(d42, st42)
+    dz42.add_wounds(d42, 2.0, "自检", now=t42)
+    ok42, _, _ = xt42.creation_spring(d42, w42, t42)
+    assert ok42 and dz42.peek(d42) == 0.0
+    assert xt42.state_of(d42, t42)["potential"] == 500
+    st42 = xt42.state_of(d42, t42)
+    st42["owned"].append("万劫天碑")
+    st42["current"] = "万劫天碑"
+    xt42.save(d42, st42)
+    y42 = ys42.ensure(d42)
+    y42["max"], y42["cur"] = 1000, 100
+    ys42.save(d42, y42)
+    ok42, _, _ = xt42.temper_spirit(d42, w42, t42)
+    assert ok42 and ys42.max_of(d42) == 1100 and xt42.guard_mult(d42, t42) < 1.0
+    st42 = xt42.state_of(d42, t42)
+    st42["owned"].append("菩提祖树")
+    st42["current"] = "菩提祖树"
+    xt42.save(d42, st42)
+    exp0_42 = d42.exp
+    ok42, _, _ = xt42.bodhi(d42, w42, t42)
+    assert ok42 and d42.exp > exp0_42
+    st42 = xt42.state_of(d42, t42)
+    st42["owned"].append("太极图")
+    st42["current"] = "太极图"
+    xt42.save(d42, st42)
+    ok42, _, _ = xt42.switch_taiji(d42, w42, "阳", t42)
+    assert ok42 and xt42.combat(d42, t42)["lifesteal"] >= 0.25
+    ok42, _, _ = xt42.switch_taiji(d42, w42, "阴", t42)
+    assert ok42 and xt42.combat(d42, t42)["reflect"] >= 0.30
+
+    # ⑨ 永恒仙图：九宝齐聚 + 三材 → 孕育 → 成形 → 古史改写（每条一次）
+    st42 = xt42.state_of(d42, t42)
+    for _n42 in xt42.ETERNAL_COMPONENTS:
+        if _n42 not in st42["owned"]:
+            st42["owned"].append(_n42)
+    xt42.save(d42, st42)
+    ok42, msg42, _ = xt42.synthesize_eternal(d42, inv42c, w42, t42)
+    assert not ok42 and "材料不足" in msg42
+    ok42, _, dl42 = xt42.synthesize_eternal(d42, inv42, w42, t42)
+    assert ok42 and dl42["界核"] == -9 and w42["eternal"]["status"] == "gestating"
+    ok42, msg42, _ = xt42.synthesize_eternal(d42, inv42, w42, t42 + 1)
+    assert ok42 and "孕育" in msg42
+    ok42, _, _ = xt42.synthesize_eternal(d42, inv42, w42,
+                                         t42 + xt42.ETERNAL_GESTATION + 2)
+    assert ok42 and w42["eternal"]["status"] == "formed"
+    xt42.note_erasure(d42, "自检身灭", t42)
+    ok42, msg42, _ = xt42.eternal_history(d42, t42)
+    assert ok42 and "自检身灭" in msg42
+    ok42, _, _ = xt42.eternal_rewrite(d42, w42, "1", t42)
+    assert ok42 and xt42.state_of(d42, t42)["history"][-1]["state"] == "rewritten"
+    ok42, _, _ = xt42.eternal_rewrite(d42, w42, "1", t42 + 1)
+    assert not ok42
+
+    # ⑩ 消费点：装备聚合 / 战斗装配 / 渡劫减伤 / 闭关缩时 / 投放 / 面板
+    bare42 = d42.model_copy(deep=True)
+    st42 = xt42.state_of(bare42, t42)
+    st42["current"] = ""
+    xt42.save(bare42, st42)
+    lookup42 = lambda n: next((e for e in tbl42 if e['name'] == n), None)
+    assert eq42.aggregate(d42, level_table, lookup42).atk > \
+        eq42.aggregate(bare42, level_table, lookup42).atk
+    f42 = bf42(d42, "先天", 10000, 10000, 100000, 0.1, {}.get)
+    assert float(f42.eff("dmg_dealt_mult", 1.0)) > 1.0 or f42.effects.get("shield", 0) > 0
+    stats42 = SimpleNamespace(atk=10 ** 9, defense=10 ** 9, hp=10 ** 10)
+    tower42 = d42.model_copy(deep=True)
+    st42 = xt42.state_of(tower42, t42)
+    st42["current"] = "天地玄黄玲珑塔"
+    xt42.save(tower42, st42)
+    base42b = bare42.model_copy(deep=True)
+    ok_a42, _ = trib42.trib_run(base42b, stats42, _Lose42())
+    ok_b42, _ = trib42.trib_run(tower42, stats42, _Lose42())
+    assert not ok_a42 and not ok_b42 and tower42.exp > base42b.exp
+    d42d = PlayerDoc(uid="w8xt3", name="闭关", realm_index=10,
+                     state="闭关中", state_start=t42, ext={})
+    d42e = d42d.model_copy(deep=True)
+    st42 = xt42.state_of(d42e, t42)
+    st42["current"] = "混沌钟"
+    xt42.save(d42e, st42)
+    ok42, _, out_d42 = cul42.end_cultivate(d42d, t42 + 120 * 60, 100, 7200)
+    ok42, _, out_e42 = cul42.end_cultivate(d42e, t42 + 120 * 60, 100, 7200)
+    assert ok42 and out_e42.exp > out_d42.exp
+    drops42 = [xt42.roll_drop(_random.Random(i)) for i in range(200)]
+    assert all(x is None or set(x) <= set(xt42.SIGILS) for x in drops42) and any(drops42)
+    assert "先天至宝" in xt42.panel(d42, w42, t42)
+    assert "#至宝择主" in xt42.help_text() and len(xt42.help_text().split("\n")) >= 10
+    assert "每纪元" in xt42.rules_text() and "孤儿" in xt42.rules_text()
+    print("W8-C2 xtzb ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

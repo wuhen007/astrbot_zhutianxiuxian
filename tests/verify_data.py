@@ -15,7 +15,8 @@ PREFIX = "zhutianxiuxian1.0-master/resources/data/"
 
 
 def load_count(raw: bytes) -> int:
-    d = json.loads(raw.decode("utf-8"))
+    # data/cmd_config.json 是 UTF-8 BOM（面板配置），用 utf-8-sig 兼容两类文件
+    d = json.loads(raw.decode("utf-8-sig"))
     if isinstance(d, (list, dict)):
         return len(d)
     return 1

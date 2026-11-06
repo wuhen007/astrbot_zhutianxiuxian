@@ -232,6 +232,25 @@ def build_fighter(
                                               * bm["dmg_taken_mult"])
     except Exception:
         pass
+    # W8-C2 先天至宝：执掌被动 + 6h 蓄势窗口（原版 17 个战斗钩子收敛为单一出口）
+    try:
+        from .. import xtzb as xt_mod
+        cx = xt_mod.combat(doc)
+        if cx.get("dealt"):
+            f.effects["dmg_dealt_mult"] = float(f.eff("dmg_dealt_mult", 1.0)) * (1 + cx["dealt"])
+        if cx.get("taken"):
+            f.effects["dmg_taken_mult"] = max(0.15, float(f.eff("dmg_taken_mult", 1.0))
+                                              * (1 - cx["taken"]))
+        if cx.get("shield"):
+            f.effects["shield"] = int(f.effects.get("shield", 0) or 0) + int(f.hp_max * cx["shield"])
+        if cx.get("reflect"):
+            f.effects["reflect"] = max(float(f.eff("reflect", 0.0) or 0.0), cx["reflect"])
+        if cx.get("lifesteal"):
+            f.effects["lifesteal"] = float(f.eff("lifesteal", 0.0) or 0.0) + cx["lifesteal"]
+        if cx.get("revive"):
+            f.effects["revive"] = cx["revive"]
+    except Exception:
+        pass
     apply_proficiency(f, doc)   # W7-0：三乘区 + 档位共鸣，PvP/PvE 同源
     if (int(getattr(doc, "realm_index", 0) or 0) >= 10
             and int(getattr(doc, "physique_index", 0) or 0) >= 10):

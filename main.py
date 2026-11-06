@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, authority as authority_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, authority as authority_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -181,7 +181,7 @@ CMD_MIRROR_CHOICE = "#选择"
 CMD_MIRROR_EXIT = "#退出投影"
 CMD_MIRROR_AVATAR = "#诸天化身"
 CMD_MIRROR_LOAD = "#装载化身"
-CMD_XT_USE = "#使用诸天镜"
+CMD_ZTJ_USE = "#使用诸天镜"
 CMD_UNI = "#大宇宙"
 CMD_UNI_ASCEND = "#升格大宇宙"
 CMD_UNI_LAW = "#完善宇宙法则"
@@ -592,6 +592,53 @@ CMD_BM_ULT_W = "#引雷淬火"
 CMD_BM_ULT_A = "#玄铁精炼"
 CMD_BM_ULT_T = "#法则滋养"
 CMD_BM_BATTLE = "#召唤灵体战斗"
+# W8-C2：先天至宝 · 权柄（原版 InnateTreasureAuthorities.js 36 条 rule + 6 组别名 + 4 条补位）
+CMD_XT_CATALOG = "#至宝图鉴"
+CMD_XT_CATALOG_ALIAS = "#先天至宝图鉴"
+CMD_XT_PANEL = "#先天至宝"
+CMD_XT_HELP = "#至宝帮助"
+CMD_XT_RULES = "#至宝规则"
+CMD_XT_CLAIM = "#至宝择主"
+CMD_XT_EQUIP = "#执掌先天至宝"
+CMD_XT_TRANSFER = "#移交至宝归属"
+CMD_XT_GUARD = "#玄黄护道"
+CMD_XT_COPY = "#混沌复制"
+CMD_XT_EVOLVE = "#混沌演化"
+CMD_XT_TRANSFORM = "#混沌变幻"
+CMD_XT_FUSE = "#炼妖融合"
+CMD_XT_LANDSCAPE = "#收摄山河"
+CMD_XT_LANDSCAPE_INVITE = "#邀请山河投影"
+CMD_XT_LANDSCAPE_HARVEST = "#山河收获"
+CMD_XT_PANGU = "#开天"
+CMD_XT_ZHUXIAN = "#布诛仙剑阵"
+CMD_XT_DONGHUANG = "#东皇镇世"
+CMD_XT_CUT_TIME = "#截断岁月"
+CMD_XT_DECREE = "#人皇敕令"
+CMD_XT_BORROW = "#借人皇气运修炼"
+CMD_XT_REINC = "#执掌轮回"
+CMD_XT_TAIJI = "#切换太极"
+CMD_XT_REVERSE = "#阴阳逆转"
+CMD_XT_SHIP_INVITE = "#邀请登舟"
+CMD_XT_SHIP_ACCEPT = "#同意登舟"
+CMD_XT_SHIP_PANEL = "#虚天舟乘员"
+CMD_XT_SHIP_LEAVE = "#离开虚天舟"
+CMD_XT_TAICHU = "#太初一斩"
+CMD_XT_TAICHU_ALIAS = "#太初斩道"
+CMD_XT_WULIANG = "#无量护身"
+CMD_XT_WULIANG_ALIAS = "#无量封界"
+CMD_XT_STAR = "#星辰护界"
+CMD_XT_STAR_ALIAS = "#周天列阵"
+CMD_XT_SPRING = "#造化回春"
+CMD_XT_FURNACE = "#万道开炉"
+CMD_XT_BODHI = "#菩提悟道"
+CMD_XT_BODHI_ALIAS = "#菩提顿悟"
+CMD_XT_CAUSALITY = "#因果净照"
+CMD_XT_CAUSALITY_ALIAS = "#燃灯解因"
+CMD_XT_TEMPER = "#万劫淬神"
+CMD_XT_DINGHAI = "#演化诸天"
+CMD_XT_ETERNAL = "#合成永恒仙图"
+CMD_XT_HISTORY = "#永恒古史"
+CMD_XT_REWRITE = "#永恒改命"
 # W7-4：养成深度（灵根觉醒 / 寿元救援 / 帝兵铭文 / 职业产线 / 道法卡）
 CMD_LG_AWAKEN = "#灵根觉醒"
 CMD_RESCUE = "#轮回救人"
@@ -677,7 +724,7 @@ ITEM_TABLES = (
     "丹药列表", "道具列表", "材料列表", "草药列表", "装备列表", "功法列表",
     "特殊装备列表", "食材列表", "宝石", "盒子列表", "帝兵列表", "锻造杂类",
     "锻造武器", "锻造护具", "锻造宝物", "锻造材料", "炼丹师丹药", "常驻", "限定",
-    "仙宠列表", "仙宠口粮列表", "精神宇宙掉落", "花粉", "异果", "本命材料",
+    "仙宠列表", "仙宠口粮列表", "精神宇宙掉落", "花粉", "异果", "本命材料", "至宝信物",
 )
 
 
@@ -1594,6 +1641,26 @@ class ZhutianPlugin(Star):
                 (f"{CMD_BM_SHEATH_ON} / {CMD_BM_SHEATH_OFF}", "武器形态可逆切换：攻 ×0.4 ⇄ ×2.5、防 ×1.6 ⇄ ×0.625"),
                 (f"{CMD_BM_ULT_W}|#玄铁精炼|#法则滋养 *N", "终极强化：成功率随品质/成功次数衰减，失败攒残响"),
                 (f"{CMD_BM_BATTLE} 剑灵|护灵|宝灵", "6 回合器灵对战，胜利随机得 1 件材料"),
+            ]},
+            {"title": "先天至宝", "lines": [
+                (f"{CMD_XT_CATALOG} [名]", f"{len(xt_mod.CATALOG)} 件至宝图鉴 / 单件详情（别名 #先天至宝图鉴）"),
+                (CMD_XT_PANEL, "执掌状态：被动 / 纳戒 / 冷却 / 蓄势 / 全服敕令"),
+                (CMD_XT_HELP, "先天至宝全部指令一览"),
+                (CMD_XT_RULES, "唯一归属 / CD / 蓄势窗口 / 永恒仙图合成规则"),
+                (f"{CMD_XT_CLAIM} 名", "30 枚先天道痕 + 第 13 境，单人守护灵挑战夺本体"),
+                (f"{CMD_XT_EQUIP} 名", "切换执掌（一人同时只 1 件）"),
+                (f"{CMD_XT_TRANSFER} @人 名", "全服归属移交，CD / 蓄势一并迁移"),
+                (f"{CMD_XT_COPY}|{CMD_XT_EVOLVE}|{CMD_XT_TRANSFORM} 物品*数", "混沌珠三权柄：复制 / 演化 / 变幻"),
+                (f"{CMD_XT_TAIJI} 阴|阳 / {CMD_XT_REVERSE}", "太极图：反击 ⇄ 吸血 / 首死转生"),
+                (f"{CMD_XT_PANGU} / {CMD_XT_ZHUXIAN} / {CMD_XT_DONGHUANG}", "三大蓄势权柄：6 小时内战斗生效"),
+                (f"{CMD_XT_LANDSCAPE} 灵界裂缝|副本 / {CMD_XT_LANDSCAPE_HARVEST}", "山河投影 6 小时，显式领取修为与灵石"),
+                (f"{CMD_XT_DECREE} 修炼|历练 / {CMD_XT_BORROW}", "人皇敕令全服 24h；每人可借 1200 分钟闭关收益"),
+                (f"{CMD_XT_CUT_TIME} / {CMD_XT_GUARD} / {CMD_XT_REINC}", "截断岁月 / 玄黄护道 / 执掌轮回"),
+                (f"{CMD_XT_SHIP_INVITE} @人 / {CMD_XT_SHIP_ACCEPT} / {CMD_XT_SHIP_PANEL}", "虚天舟乘员（≤3 人）"),
+                (f"{CMD_XT_TAICHU}|{CMD_XT_WULIANG}|{CMD_XT_STAR}|{CMD_XT_DINGHAI}", "九宝蓄势：首击 / 减伤 / 护盾 / 反噬"),
+                (f"{CMD_XT_SPRING} / {CMD_XT_FURNACE} / {CMD_XT_BODHI}", "回春祛道伤 / 开炉增炼丹 / 菩提顿悟"),
+                (f"{CMD_XT_CAUSALITY} / {CMD_XT_TEMPER}", "燃灯解因消因果债 / 淬神涨元神上限"),
+                (f"{CMD_XT_ETERNAL} / {CMD_XT_HISTORY} / {CMD_XT_REWRITE} 编号", "九宝合成永恒仙图 / 古史改写"),
             ]},
         ]
 
@@ -5098,7 +5165,7 @@ class ZhutianPlugin(Star):
         d.ext["zhutian"] = zt
         return d
 
-    @filter.command(CMD_XT_USE, "使用诸天镜（绑定）")
+    @filter.command(CMD_ZTJ_USE, "使用诸天镜（绑定）")
     async def handle_xt_bind(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
@@ -12454,7 +12521,10 @@ class ZhutianPlugin(Star):
     async def _settle_explore(self, doc: PlayerDoc, sess: secret.Session, reason: str) -> str:
         """发放探索收益并清会话（事务：灵石 + 物品 + 状态复位）。"""
         d = doc.model_copy(deep=True)
-        d.stones += sess.stones
+        # W8-C2：盘古幡 / 炼妖壶 / 山河社稷图的收益被动在秘境结算兑现（取 max 不叠乘）
+        xt_mult = max(xt_mod.yield_mult(d, k) for k in ("dungeon", "raid", "smallworld", "treasure"))
+        stones_out = int(sess.stones * xt_mult)
+        d.stones += stones_out
         d.state = "空闲"
         d.state_start = 0.0
         d.ext.pop("explore", None)
@@ -12489,6 +12559,11 @@ class ZhutianPlugin(Star):
         bm_drop = bm_mod.roll_drop(random.Random())
         if bm_drop:
             items_out[bm_drop] = int(items_out.get(bm_drop, 0) or 0) + 1
+        # W8-C2：先天道痕 12% 投放（原版 22 件本体只靠 24h 全服择主事件，本移植补通道）
+        xt_drop = xt_mod.roll_drop(random.Random())
+        if xt_drop:
+            for _k, _v in xt_drop.items():
+                items_out[_k] = int(items_out.get(_k, 0) or 0) + int(_v)
         async with self.db.transaction():
             await self.db.save_player(d.model_dump())
             if items_out:
@@ -12499,9 +12574,12 @@ class ZhutianPlugin(Star):
                     bonus = 5000 * sess.boss_kills
                     await self.db.update_sect(sess.sect_name, sdoc["level"], sdoc["fund"] + bonus)
                     fund_note = f"\n宗门基金 +{bonus}（守关 Boss ×{sess.boss_kills}），现 {sdoc['fund'] + bonus}"
+        if xt_mult > 1:
+            dungeon_note = (dungeon_note + "\n" if dungeon_note else "") + \
+                f"【先天至宝】灵石 ×{xt_mult:.1f}（执掌被动）"
         lines = [
             f"【秘境结算 · {sess.place}】（{reason}，共探 {sess.floor} 层）",
-            f"灵石 +{sess.stones}",
+            f"灵石 +{stones_out}",
         ]
         if items_out:
             lines.append("物品：" + "、".join(f"{n}×{q}" for n, q in items_out.items()))
@@ -12512,6 +12590,9 @@ class ZhutianPlugin(Star):
                              + "（#至尊传承 / #重瞳开天 / #孕育仙骨）")
             if bm_drop:
                 lines.append(f"【本命遗珍】{bm_drop}×1（秘境偶得的炼器材料）")
+            if xt_drop:
+                lines.append(f"【先天道痕】{'、'.join(f'{k}×{v}' for k, v in xt_drop.items())}"
+                             + "（#至宝择主 争夺先天至宝）")
         else:
             lines.append("物品：无")
         if dungeon_note:
@@ -16246,5 +16327,313 @@ class ZhutianPlugin(Star):
             return
         async for r in self._bm_dispatch(event, "器灵对战",
                          lambda d, inv: bm_mod.spirit_battle(d, part, random.Random())):
+            yield r
+
+    # ── W8-C2 先天至宝 · 权柄（36 条原版 rule + 6 组别名 + 4 条补位） ──────
+    @staticmethod
+    def _xt_clean(arg: str) -> str:
+        """去掉 QQ 官方 @ 群员留下的文本标记，只留指令参数。"""
+        import re
+        return re.sub(r"<[^>]*>", "", arg or "").strip()
+
+    async def _xt_text(self, event, title, fn):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        world = xt_mod.world_of(await self.db.get_calamity())
+        async for r in self._smart(event, fn(doc, world, time.time()), title):
+            yield r
+
+    async def _xt_dispatch(self, event, title, fn, need_inv=False):
+        """统一分发：全服状态 + 玩家档 + 物品增减（复用 B6 的事务落库）。"""
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid) if need_inv else {}
+        state = await self.db.get_calamity()
+        world = xt_mod.world_of(state)
+        now = time.time()
+        result = fn(doc, inv, world, now)
+        xt_mod.set_world(state, world)
+        await self.db.save_calamity(state)
+        async for r in self._dz_finish(event, doc, result, title):
+            yield r
+
+    @filter.command(CMD_XT_CATALOG, "23 件先天至宝图鉴 / 单件详情（别名 #先天至宝图鉴）", alias={CMD_XT_CATALOG_ALIAS})
+    async def handle_xt_catalog(self, event: AstrMessageEvent, arg: str = ""):
+        name = self._xt_clean(arg)
+        async for r in self._xt_text(event, "先天至宝图鉴",
+                                     lambda d, w, t: xt_mod.catalog(name)):
+            yield r
+
+    @filter.command(CMD_XT_PANEL, "执掌状态：被动 / 纳戒 / 冷却 / 蓄势 / 全服敕令")
+    async def handle_xt_panel(self, event: AstrMessageEvent):
+        async for r in self._xt_text(event, "先天至宝", lambda d, w, t: xt_mod.panel(d, w, t)):
+            yield r
+
+    @filter.command(CMD_XT_HELP, "先天至宝全部指令一览")
+    async def handle_xt_help(self, event: AstrMessageEvent):
+        async for r in self._xt_text(event, "至宝帮助", lambda d, w, t: xt_mod.help_text()):
+            yield r
+
+    @filter.command(CMD_XT_RULES, "唯一归属 / CD / 蓄势窗口 / 永恒仙图合成规则")
+    async def handle_xt_rules(self, event: AstrMessageEvent):
+        async for r in self._xt_text(event, "至宝规则", lambda d, w, t: xt_mod.rules_text()):
+            yield r
+
+    @filter.command(CMD_XT_CLAIM, "30 先天道痕 + 第 13 境，单人守护灵挑战夺本体")
+    async def handle_xt_claim(self, event: AstrMessageEvent, arg: str = ""):
+        name = self._xt_clean(arg)
+        async for r in self._xt_dispatch(event, "至宝择主",
+                lambda d, inv, w, t: xt_mod.claim(d, name, inv, w, t, random.Random()), True):
+            yield r
+
+    @filter.command(CMD_XT_EQUIP, "切换执掌（一人同时只可执掌 1 件）")
+    async def handle_xt_equip(self, event: AstrMessageEvent, arg: str = ""):
+        name = self._xt_clean(arg)
+        async for r in self._xt_dispatch(event, "执掌先天至宝",
+                lambda d, inv, w, t: xt_mod.equip(d, name, w, t)):
+            yield r
+
+    @filter.command(CMD_XT_TRANSFER, "@道友 至宝名：全服归属移交，CD 与蓄势一并迁移")
+    async def handle_xt_transfer(self, event: AstrMessageEvent, arg: str = ""):
+        """移交要同时写源/目标两份档，单独走一个事务。"""
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        target = self._at_target(event)
+        name = self._xt_clean(arg)
+        if not target:
+            yield event.plain_result(f"格式：{CMD_XT_TRANSFER} @道友 至宝名")
+            return
+        trow = await self.db.get_player(target)
+        tdoc = PlayerDoc(**trow) if trow else None
+        state = await self.db.get_calamity()
+        world = xt_mod.world_of(state)
+        result = xt_mod.transfer(doc, target, name, world, tdoc, time.time())
+        xt_mod.set_world(state, world)
+        await self.db.save_calamity(state)
+        if tdoc is not None:
+            await self.db.save_player(tdoc.model_dump())
+        async for r in self._dz_finish(event, doc, result, "移交至宝归属"):
+            yield r
+
+    @filter.command(CMD_XT_GUARD, "蓄势：渡劫伤害 / 内景地失败率 -30%")
+    async def handle_xt_guard(self, event: AstrMessageEvent):
+        async for r in self._xt_dispatch(event, "玄黄护道",
+                lambda d, inv, w, t: xt_mod.prepare(d, w, "玄黄护道", t)):
+            yield r
+
+    @filter.command(CMD_XT_COPY, "物品*数量：复制纳戒物品（至宝与信物不可复制）")
+    async def handle_xt_copy(self, event: AstrMessageEvent, arg: str = ""):
+        a = self._xt_clean(arg)
+        async for r in self._xt_dispatch(event, "混沌复制",
+                lambda d, inv, w, t: xt_mod.chaos_copy(d, inv, w, a, t), True):
+            yield r
+
+    @filter.command(CMD_XT_EVOLVE, "材料*数量：混沌演化，50% 概率蜕变为先天道痕")
+    async def handle_xt_evolve(self, event: AstrMessageEvent, arg: str = ""):
+        a = self._xt_clean(arg)
+        async for r in self._xt_dispatch(event, "混沌演化",
+                lambda d, inv, w, t: xt_mod.chaos_evolve(d, inv, w, a, t, random.Random()), True):
+            yield r
+
+    @filter.command(CMD_XT_TRANSFORM, "物品*数量：同类同阶随机变幻")
+    async def handle_xt_transform(self, event: AstrMessageEvent, arg: str = ""):
+        a = self._xt_clean(arg)
+        async for r in self._xt_dispatch(event, "混沌变幻",
+                lambda d, inv, w, t: xt_mod.chaos_transform(d, inv, w, a, t, random.Random(),
+                                                           self.item_index.get), True):
+            yield r
+
+    @filter.command(CMD_XT_FUSE, "副宠名：消耗副宠，主宠继承 50% 能力（汲取 +5%/次）")
+    async def handle_xt_fuse(self, event: AstrMessageEvent, arg: str = ""):
+        a = self._xt_clean(arg)
+        async for r in self._xt_dispatch(event, "炼妖融合",
+                lambda d, inv, w, t: xt_mod.fuse_pet(d, inv, w, a, t), True):
+            yield r
+
+    @filter.command(CMD_XT_LANDSCAPE, "灵界裂缝|副本：展开 6 小时山河投影")
+    async def handle_xt_landscape(self, event: AstrMessageEvent, arg: str = ""):
+        a = self._xt_clean(arg)
+        async for r in self._xt_dispatch(event, "收摄山河",
+                lambda d, inv, w, t: xt_mod.capture_landscape(d, w, a, t)):
+            yield r
+
+    @filter.command(CMD_XT_LANDSCAPE_INVITE, "@道友：共享山河投影（最多 2 人）")
+    async def handle_xt_landscape_invite(self, event: AstrMessageEvent, arg: str = ""):
+        who = self._at_target(event) or self._xt_clean(arg)
+        async for r in self._xt_dispatch(event, "邀请山河投影",
+                lambda d, inv, w, t: xt_mod.invite_landscape(d, w, who, t)):
+            yield r
+
+    @filter.command(CMD_XT_LANDSCAPE_HARVEST, "领取山河投影累计修为与灵石")
+    async def handle_xt_landscape_harvest(self, event: AstrMessageEvent):
+        async for r in self._xt_dispatch(event, "山河收获",
+                lambda d, inv, w, t: xt_mod.landscape_harvest(d, w, t)):
+            yield r
+
+    @filter.command(CMD_XT_PANGU, "蓄势：敌防御归零 + 削血 + 洗劫翻倍")
+    async def handle_xt_pangu(self, event: AstrMessageEvent):
+        async for r in self._xt_dispatch(event, "开天",
+                lambda d, inv, w, t: xt_mod.prepare(d, w, "开天", t)):
+            yield r
+
+    @filter.command(CMD_XT_ZHUXIAN, "蓄势：诛仙四剑，增伤 50% + 反噬 20%")
+    async def handle_xt_zhuxian(self, event: AstrMessageEvent):
+        async for r in self._xt_dispatch(event, "布诛仙剑阵",
+                lambda d, inv, w, t: xt_mod.prepare(d, w, "布诛仙剑阵", t)):
+            yield r
+
+    @filter.command(CMD_XT_DONGHUANG, "蓄势：镇世三回合，受伤 -30%")
+    async def handle_xt_donghuang(self, event: AstrMessageEvent):
+        async for r in self._xt_dispatch(event, "东皇镇世",
+                lambda d, inv, w, t: xt_mod.prepare(d, w, "东皇镇世", t)):
+            yield r
+
+    @filter.command(CMD_XT_CUT_TIME, "截断闭关计时，立即抵达结算时刻")
+    async def handle_xt_cut_time(self, event: AstrMessageEvent):
+        async for r in self._xt_dispatch(event, "截断岁月",
+                lambda d, inv, w, t: xt_mod.cut_time(d, w, t)):
+            yield r
+
+    @filter.command(CMD_XT_DECREE, "修炼|历练：全服位面敕令 24 小时")
+    async def handle_xt_decree(self, event: AstrMessageEvent, arg: str = ""):
+        a = self._xt_clean(arg)
+        async for r in self._xt_dispatch(event, "人皇敕令",
+                lambda d, inv, w, t: xt_mod.decree(d, w, a, t)):
+            yield r
+
+    @filter.command(CMD_XT_BORROW, "领 1200 分钟闭关收益（每人每敕令 1 次）")
+    async def handle_xt_borrow(self, event: AstrMessageEvent):
+        async for r in self._xt_dispatch(event, "借人皇气运修炼",
+                lambda d, inv, w, t: xt_mod.borrow_decree(d, w, t)):
+            yield r
+
+    @filter.command(CMD_XT_REINC, "@道友：24 小时免疫强制寿元轮回")
+    async def handle_xt_reinc(self, event: AstrMessageEvent, arg: str = ""):
+        who = self._at_target(event) or self._xt_clean(arg) or ""
+        async for r in self._xt_dispatch(event, "执掌轮回",
+                lambda d, inv, w, t: xt_mod.protect_reincarnation(d, w, who, t)):
+            yield r
+
+    @filter.command(CMD_XT_TAIJI, "阴|阳：化伤反击 30% ⇄ 吸血 25%（无 CD）")
+    async def handle_xt_taiji(self, event: AstrMessageEvent, arg: str = ""):
+        a = self._xt_clean(arg)
+        async for r in self._xt_dispatch(event, "切换太极",
+                lambda d, inv, w, t: xt_mod.switch_taiji(d, w, a, t)):
+            yield r
+
+    @filter.command(CMD_XT_REVERSE, "蓄势：首次致命伤害转治疗并等量返还")
+    async def handle_xt_reverse(self, event: AstrMessageEvent):
+        async for r in self._xt_dispatch(event, "阴阳逆转",
+                lambda d, inv, w, t: xt_mod.prepare(d, w, "阴阳逆转", t)):
+            yield r
+
+    @filter.command(CMD_XT_SHIP_INVITE, "@道友：登舟（乘员 ≤3 人）")
+    async def handle_xt_ship_invite(self, event: AstrMessageEvent, arg: str = ""):
+        who = self._at_target(event) or self._xt_clean(arg)
+        async for r in self._xt_dispatch(event, "邀请登舟",
+                lambda d, inv, w, t: xt_mod.ship_invite(d, w, who, t)):
+            yield r
+
+    @filter.command(CMD_XT_SHIP_ACCEPT, "就座，6 小时内穿梭耗时 -40%")
+    async def handle_xt_ship_accept(self, event: AstrMessageEvent):
+        async for r in self._xt_dispatch(event, "同意登舟",
+                lambda d, inv, w, t: xt_mod.ship_accept(d, t)):
+            yield r
+
+    @filter.command(CMD_XT_SHIP_PANEL, "查看虚天舟乘员名单")
+    async def handle_xt_ship_panel(self, event: AstrMessageEvent):
+        async for r in self._xt_dispatch(event, "虚天舟乘员",
+                lambda d, inv, w, t: xt_mod.ship_panel(d, t)):
+            yield r
+
+    @filter.command(CMD_XT_SHIP_LEAVE, "离舟并清空乘员")
+    async def handle_xt_ship_leave(self, event: AstrMessageEvent):
+        async for r in self._xt_dispatch(event, "离开虚天舟",
+                lambda d, inv, w, t: xt_mod.ship_leave(d, t)):
+            yield r
+
+    @filter.command(CMD_XT_TAICHU, "蓄势：首击 ×2.5（别名 #太初斩道）", alias={CMD_XT_TAICHU_ALIAS})
+    async def handle_xt_taichu(self, event: AstrMessageEvent):
+        async for r in self._xt_dispatch(event, "太初一斩",
+                lambda d, inv, w, t: xt_mod.prepare(d, w, "太初一斩", t)):
+            yield r
+
+    @filter.command(CMD_XT_WULIANG, "蓄势：前三次受击 -20%（别名 #无量封界）", alias={CMD_XT_WULIANG_ALIAS})
+    async def handle_xt_wuliang(self, event: AstrMessageEvent):
+        async for r in self._xt_dispatch(event, "无量护身",
+                lambda d, inv, w, t: xt_mod.prepare(d, w, "无量护身", t)):
+            yield r
+
+    @filter.command(CMD_XT_STAR, "蓄势：25% 最大生命护盾（别名 #周天列阵）", alias={CMD_XT_STAR_ALIAS})
+    async def handle_xt_star(self, event: AstrMessageEvent):
+        async for r in self._xt_dispatch(event, "星辰护界",
+                lambda d, inv, w, t: xt_mod.prepare(d, w, "星辰护界", t)):
+            yield r
+
+    @filter.command(CMD_XT_SPRING, "生命本源复满 / 道伤尽祛 / 元神回满 / 仙道潜力 +500")
+    async def handle_xt_spring(self, event: AstrMessageEvent):
+        async for r in self._xt_dispatch(event, "造化回春",
+                lambda d, inv, w, t: xt_mod.creation_spring(d, w, t)):
+            yield r
+
+    @filter.command(CMD_XT_FURNACE, "蓄势：下次炼丹 / 炼器产出 +100%")
+    async def handle_xt_furnace(self, event: AstrMessageEvent):
+        async for r in self._xt_dispatch(event, "万道开炉",
+                lambda d, inv, w, t: xt_mod.prepare(d, w, "万道开炉", t)):
+            yield r
+
+    @filter.command(CMD_XT_BODHI, "72 时辰闭关顿悟（收益 ×2，别名 #菩提顿悟）", alias={CMD_XT_BODHI_ALIAS})
+    async def handle_xt_bodhi(self, event: AstrMessageEvent):
+        async for r in self._xt_dispatch(event, "菩提悟道",
+                lambda d, inv, w, t: xt_mod.bodhi(d, w, t)):
+            yield r
+
+    @filter.command(CMD_XT_CAUSALITY, "燃灯解因，消减 40 点因果债（别名 #燃灯解因）", alias={CMD_XT_CAUSALITY_ALIAS})
+    async def handle_xt_causality(self, event: AstrMessageEvent):
+        async for r in self._xt_dispatch(event, "因果净照",
+                lambda d, inv, w, t: xt_mod.cleanse_causality(d, w, t)):
+            yield r
+
+    @filter.command(CMD_XT_TEMPER, "元神上限 +10% / 回 50% 元神，次数不限")
+    async def handle_xt_temper(self, event: AstrMessageEvent):
+        async for r in self._xt_dispatch(event, "万劫淬神",
+                lambda d, inv, w, t: xt_mod.temper_spirit(d, w, t)):
+            yield r
+
+    @filter.command(CMD_XT_DINGHAI, "蓄势：50% 护盾 + 30% 反噬")
+    async def handle_xt_dinghai(self, event: AstrMessageEvent):
+        async for r in self._xt_dispatch(event, "演化诸天",
+                lambda d, inv, w, t: xt_mod.prepare(d, w, "演化诸天", t)):
+            yield r
+
+    @filter.command(CMD_XT_ETERNAL, "九宝齐聚 + 三材，孕育 / 成形全服唯一大道至宝")
+    async def handle_xt_eternal(self, event: AstrMessageEvent):
+        async for r in self._xt_dispatch(event, "合成永恒仙图",
+                lambda d, inv, w, t: xt_mod.synthesize_eternal(d, inv, w, t), True):
+            yield r
+
+    @filter.command(CMD_XT_HISTORY, "列出可改写的「身灭道消」记录")
+    async def handle_xt_history(self, event: AstrMessageEvent):
+        async for r in self._xt_dispatch(event, "永恒古史",
+                lambda d, inv, w, t: xt_mod.eternal_history(d, t)):
+            yield r
+
+    @filter.command(CMD_XT_REWRITE, "编号：回滚该快照（每条仅一次，CD 10 天）")
+    async def handle_xt_rewrite(self, event: AstrMessageEvent, arg: str = ""):
+        a = self._xt_clean(arg)
+        async for r in self._xt_dispatch(event, "永恒改命",
+                lambda d, inv, w, t: xt_mod.eternal_rewrite(d, w, a, t)):
             yield r
 

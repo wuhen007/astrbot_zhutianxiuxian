@@ -108,6 +108,14 @@ def end_cultivate(
         return True, "闭关不足一个周期（30 分钟），未能有所精进。", d
 
     gained = int(floored * exp_per_min)
+    # W8-C2 先天至宝：崆峒印/菩提祖树修炼倍率，或东皇钟/混沌钟/虚天舟的计时缩短
+    try:
+        from . import xtzb as _xt
+        xt_mult = max(_xt.yield_mult(d, "cultivate"), 1.0 / max(0.3, _xt.time_mult(d)))
+        if xt_mult > 1:
+            gained = int(gained * xt_mult)
+    except Exception:
+        pass
     # 丹药 buff（原版 dy 体系）：炼神之力 → 修为转血气；辟谷/炼神次数各消耗 1
     buffs = dict(d.ext.get("buffs") or {})
     big = buffs.get("biguan") if isinstance(buffs.get("biguan"), dict) else {}

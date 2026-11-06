@@ -254,6 +254,17 @@ def aggregate(
     except Exception:
         pass
 
+    # W8-C2 先天至宝：执掌本体固定三维 + 暴击（原版 1 亿 ÷1000；七日投影属性为 0）
+    try:
+        from . import xtzb as _xt
+        xt_atk, xt_def, xt_hp, xt_bao = _xt.bonus(doc)
+        flat["atk"] += xt_atk
+        flat["def"] += xt_def
+        flat["hp"] += xt_hp
+        dt_bao += xt_bao
+    except Exception:
+        pass
+
     # W8-B6 道伤：三维 -5%/层（下限 0.7），作用于主体乘区、不削岁云云月之莲固定加成
     dz_mult = 1.0
     try:

@@ -187,8 +187,13 @@ def trib_run(doc: PlayerDoc, stats: Any, rng: random.Random) -> tuple[bool, str]
         sp_red = float(_sp.trib_reduction(doc))    # W8-B1b：至尊体 25%/40%/65%，重瞳保底 50%
     except Exception:
         sp_red = 0.0
-    if sy_red or sp_red:
-        prob = min(0.99, prob * (1 + sy_red + sp_red))
+    try:
+        from . import xtzb as _xt
+        xt_red = max(0.0, 1.0 - float(_xt.guard_mult(doc)))  # W8-C2：玲珑塔/万劫天碑/玄黄护道
+    except Exception:
+        xt_red = 0.0
+    if sy_red or sp_red or xt_red:
+        prob = min(0.99, prob * (1 + sy_red + sp_red + xt_red))
     ok = rng.random() < prob
     if ok:
         doc.ext["power"] = 2
@@ -203,7 +208,7 @@ def trib_run(doc: PlayerDoc, stats: Any, rng: random.Random) -> tuple[bool, str]
                       f"雷抗 {x:.1f}｜需渡 {rounds} 道雷劫｜成功率 {prob:.0%}\n"
                       f"天雷淬体，元神化真——双重真劫皆渡！\n"
                       f"肉身与元神已臻圆满，可感应仙门 #登仙。")
-    cost = int(doc.exp * 0.25 * (1 - min(0.8, sy_red)))
+    cost = int(doc.exp * 0.25 * (1 - min(0.8, sy_red + xt_red)))
     doc.exp = max(0, doc.exp - cost)
     doc.ext["hp"] = 1
     doc.ext["spirit_fail_ts"] = time.time()
@@ -213,6 +218,11 @@ def trib_run(doc: PlayerDoc, stats: Any, rng: random.Random) -> tuple[bool, str]
         wnote = f"｜道伤 +1（现 {wound:.1f}）"
     except Exception:
         wnote = ""
+    try:
+        from . import xtzb as _xt
+        _xt.note_erasure(doc, "无妄真劫 · 身灭道消", time.time())  # W8-C2：永恒改命可回滚
+    except Exception:
+        pass
     return False, (f"≡≡≡ 无妄真劫启 ≡≡≡\n"
                    f"雷抗 {x:.1f}｜需渡 {rounds} 道雷劫｜成功率 {prob:.0%}\n"
                    f"雷劫轰落，肉身崩碎、元神重创——渡劫失败！\n"

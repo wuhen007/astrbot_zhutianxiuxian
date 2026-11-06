@@ -136,6 +136,17 @@ def main() -> int:
                   "handle_bm_status_w", "handle_bm_status_a", "handle_bm_status_t", "handle_bm_temper_base", "handle_bm_temper_w", "handle_bm_temper_a",
                   "handle_bm_temper_t", "handle_bm_resonance_w", "handle_bm_resonance_a", "handle_bm_resonance_t", "handle_bm_sheath_on", "handle_bm_sheath_off",
                   "handle_bm_ultimate", "handle_bm_battle")),
+        ("先天至宝", ("handle_xt_catalog", "handle_xt_panel", "handle_xt_help", "handle_xt_rules",
+                  "handle_xt_claim", "handle_xt_equip", "handle_xt_transfer", "handle_xt_guard",
+                  "handle_xt_copy", "handle_xt_evolve", "handle_xt_transform", "handle_xt_fuse",
+                  "handle_xt_landscape", "handle_xt_landscape_invite", "handle_xt_landscape_harvest",
+                  "handle_xt_pangu", "handle_xt_zhuxian", "handle_xt_donghuang", "handle_xt_cut_time",
+                  "handle_xt_decree", "handle_xt_borrow", "handle_xt_reinc", "handle_xt_taiji",
+                  "handle_xt_reverse", "handle_xt_ship_invite", "handle_xt_ship_accept",
+                  "handle_xt_ship_panel", "handle_xt_ship_leave", "handle_xt_taichu",
+                  "handle_xt_wuliang", "handle_xt_star", "handle_xt_spring", "handle_xt_furnace",
+                  "handle_xt_bodhi", "handle_xt_causality", "handle_xt_temper", "handle_xt_dinghai",
+                  "handle_xt_eternal", "handle_xt_history", "handle_xt_rewrite")),
         ("帮助", ("handle_help",)),
     ]
     grouped = {}
