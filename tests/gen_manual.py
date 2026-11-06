@@ -128,6 +128,14 @@ def main() -> int:
                   "handle_sp_chop", "handle_sp_chop_nirvana", "handle_sp_ultimate",
                   "handle_sp_trial", "handle_sp_learn", "handle_sp_learn_nirvana",
                   "handle_sp_immortal", "handle_sp_pupil", "handle_sp_merge")),
+        ("本命法宝", ("handle_bm_help", "handle_bm_panel", "handle_bm_rules", "handle_bm_mats", "handle_bm_refine_w", "handle_bm_refine_a", "handle_bm_refine_t", "handle_bm_repair_w",
+                  "handle_bm_repair_a", "handle_bm_repair_t", "handle_bm_quench_w", "handle_bm_quench_a", "handle_bm_quench_t", "handle_bm_ascend_w",
+                  "handle_bm_ascend_a", "handle_bm_ascend_t", "handle_bm_embed_1", "handle_bm_embed_2", "handle_bm_embed_3", "handle_bm_embed_4",
+                  "handle_bm_embed_5", "handle_bm_embed_6", "handle_bm_embed_all", "handle_bm_summon_w", "handle_bm_summon_a", "handle_bm_summon_t",
+                  "handle_bm_name_w", "handle_bm_name_a", "handle_bm_name_t", "handle_bm_gender_w", "handle_bm_gender_a", "handle_bm_gender_t",
+                  "handle_bm_status_w", "handle_bm_status_a", "handle_bm_status_t", "handle_bm_temper_base", "handle_bm_temper_w", "handle_bm_temper_a",
+                  "handle_bm_temper_t", "handle_bm_resonance_w", "handle_bm_resonance_a", "handle_bm_resonance_t", "handle_bm_sheath_on", "handle_bm_sheath_off",
+                  "handle_bm_ultimate", "handle_bm_battle")),
         ("帮助", ("handle_help",)),
     ]
     grouped = {}

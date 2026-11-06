@@ -243,6 +243,17 @@ def aggregate(
 
     flat["hp"] += lg_flat
 
+    # W8-C1 本命法宝：三器 flat 三维 + 暴击（原版数值 ÷1000 折算，含共鸣临时三维）
+    try:
+        from . import bengming as _bm
+        bm_atk, bm_def, bm_hp, bm_bao = _bm.bonus(doc)
+        flat["atk"] += bm_atk
+        flat["def"] += bm_def
+        flat["hp"] += bm_hp
+        dt_bao += bm_bao
+    except Exception:
+        pass
+
     # W8-B6 道伤：三维 -5%/层（下限 0.7），作用于主体乘区、不削岁云云月之莲固定加成
     dz_mult = 1.0
     try:

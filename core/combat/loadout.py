@@ -221,6 +221,17 @@ def build_fighter(
             f.effects["dmg_dealt_mult"] = float(f.eff("dmg_dealt_mult", 1.0)) * (1 + bonus)
     except Exception:
         pass
+    # W8-C1 本命法宝：剑境共鸣（1h）增伤/减伤 + 天赋乘区（原版把这些写进临时属性却无消费者）
+    try:
+        from .. import bengming as bm_mod
+        bm = bm_mod.combat(doc)
+        if bm.get("dmg_dealt_mult"):
+            f.effects["dmg_dealt_mult"] = float(f.eff("dmg_dealt_mult", 1.0)) * bm["dmg_dealt_mult"]
+        if bm.get("dmg_taken_mult"):
+            f.effects["dmg_taken_mult"] = max(0.15, float(f.eff("dmg_taken_mult", 1.0))
+                                              * bm["dmg_taken_mult"])
+    except Exception:
+        pass
     apply_proficiency(f, doc)   # W7-0：三乘区 + 档位共鸣，PvP/PvE 同源
     if (int(getattr(doc, "realm_index", 0) or 0) >= 10
             and int(getattr(doc, "physique_index", 0) or 0) >= 10):

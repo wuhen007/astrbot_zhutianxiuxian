@@ -5098,6 +5098,129 @@ async def main():
     assert sp40.equivalent_level(d40) == 0        # 原版三体系无至尊：不注册第三轨
     print("W8-B1b supreme path ok")
 
+    # ============================================================ 41. W8-C1 本命法宝
+    from core import bengming as bm41
+    from core import equipment as eq41
+    import json as _json41
+
+    t41 = time.time()
+    d41 = PlayerDoc(uid="w8bm1", name="本命", realm_index=30, physique_index=30,
+                    exp=10 ** 10, stones=10 ** 8,
+                    ext={"equipment": {"武器": "凡剑", "护具": "布衣"}})
+    inv41 = {n: 40 for n in bm41.ALL_MATS}
+    r41 = _random.Random(7)
+
+    # ① 材料表 20 件（四类）与参数解析
+    with (PLUGIN / 'data/item/本命材料.json').open(encoding='utf-8') as _f41:
+        tbl41 = _json41.load(_f41)
+    assert len(tbl41) == 20 and len(bm41.ALL_MATS) == 20
+    assert {e['name'] for e in tbl41} == set(bm41.ALL_MATS)
+    assert {e['type'] for e in tbl41} == {"本命核心", "本命辅材", "本命淬炼", "本命修复"}
+    assert bm41.parse_arg("五行聚灵晶 *12") == ("五行聚灵晶", 10)
+    assert bm41.parse_arg("劫火红绒*3") == ("劫火红绒", 3)
+    assert bm41.parse_embed_key("#一键宝灵灵纹镶嵌") == "宝灵灵纹"
+    assert bm41.parse_ultimate_key("#玄铁精炼*5") == ("玄铁精炼", 5)
+    assert bm41.parse_battle_part("护灵 3") == "护具"
+
+    # ② 炼化：恒定失败累积感应，满 1000 必成；重复炼化拒绝
+    class _F41:
+        def random(self):
+            return 0.999
+
+    st41 = bm41.state_of(d41)
+    st41["武器"]["sense"] = 999
+    bm41.set_state(d41, st41)
+    bm41.refine(d41, "武器", _F41())
+    ok41, msg41, _ = bm41.refine(d41, "武器", _F41())
+    assert ok41 and bm41.state_of(d41)["武器"]["refined"] == 1 and "功成" in msg41
+    ok41, msg41, _ = bm41.refine(d41, "武器", r41)
+    assert not ok41 and "已炼化" in msg41
+
+    # ③ 淬炼：批量上限、达上限不扣料；升华 100% 且重置强化计数
+    ok41, msg41, dl41 = bm41.quench(d41, "武器", "五行聚灵晶", 10, inv41, r41)
+    assert ok41 and 0 < -dl41["五行聚灵晶"] <= 10
+    inv41["五行聚灵晶"] += dl41["五行聚灵晶"]
+    assert bm41.state_of(d41)["武器"]["quench"] >= bm41.QUENCH_CAP["武器"][1]
+    ok41, msg41, dl41 = bm41.quench(d41, "武器", "五行聚灵晶", 3, inv41, r41)
+    assert not ok41 and not dl41 and "升华" in msg41
+    ok41, msg41, _ = bm41.ascend(d41, "武器")
+    assert ok41 and bm41.state_of(d41)["武器"]["level"] == 2
+    assert bm41.state_of(d41)["武器"]["ult_success"] == 0
+
+    # ④ 终境升华门禁：淬炼值满但魂魄未满 → 拒绝
+    st41 = bm41.state_of(d41)
+    lv41 = len(bm41.LEVELS["武器"]) - 2
+    st41["武器"]["level"] = lv41
+    st41["武器"]["quench"] = bm41.QUENCH_CAP["武器"][lv41]
+    bm41.set_state(d41, st41)
+    ok41, msg41, _ = bm41.ascend(d41, "武器")
+    assert not ok41 and "终境升华条件不足" in msg41
+
+    # ⑤ 六类镶嵌：同名唯一 / core 3 / aux 7 / 阶段奖励 / 一键 10 种 key
+    ok41, msg41, dl41 = bm41.embed(d41, "武器", "core", "太初魂晶", inv41)
+    assert ok41 and dl41 == {"太初魂晶": -1}
+    inv41["太初魂晶"] -= 1
+    ok41, msg41, _ = bm41.embed(d41, "武器", "core", "太初魂晶", inv41)
+    assert not ok41 and "已镶过" in msg41
+    assert len(bm41.EMBED_TARGETS) == 10
+    ok41, msg41, dl41 = bm41.embed_all(d41, "本命武器", inv41)
+    assert ok41
+    for _k41, _v41 in dl41.items():
+        inv41[_k41] += _v41
+    w41 = bm41.state_of(d41)["武器"]
+    assert len(w41["core"]) == 3 and len(w41["aux"]) == 7 and bm41.complete(w41)
+    assert w41["spirit"]["affinity"] >= 120 and w41["sense"] == 1000
+    assert w41["spirit"]["talent"] in bm41.TALENTS
+
+    # ⑥ 器灵：召唤→命名→性别→磨合→共鸣（1h 内进战斗乘区，过期清空）
+    ok41, msg41, _ = bm41.summon(d41, "武器", r41)
+    assert ok41 and "命名" in msg41
+    ok41, _, _ = bm41.name_spirit(d41, "武器", "霜华")
+    assert ok41
+    ok41, _, _ = bm41.set_gender(d41, "武器", "女")
+    assert ok41 and bm41.state_of(d41)["武器"]["spirit"]["atk"] > 0
+    ok41, _, _ = bm41.temper(d41, "武器", r41)
+    assert ok41
+    ok41, _, _ = bm41.resonance(d41, "武器", t41)
+    assert ok41
+    assert bm41.combat(d41, t41 + 10).get("dmg_dealt_mult", 1.0) > 1.0
+    assert bm41.combat(d41, t41 + bm41.RESONANCE_SECONDS + 1) == {}
+
+    # ⑦ 化剑为鞘可逆且三维按形态变化
+    a0_41, f0_41 = bm41.bonus(d41, t41 + 10)[0], bm41.bonus(d41, t41 + 10)[1]
+    ok41, _, _ = bm41.sheath(d41, True)
+    assert ok41
+    assert bm41.bonus(d41, t41 + 10)[0] < a0_41
+    assert bm41.bonus(d41, t41 + 10)[1] > f0_41
+    ok41, _, _ = bm41.sheath(d41, False)
+    assert ok41 and bm41.state_of(d41)["武器"]["sheath"] == 0
+
+    # ⑧ 终极强化：成功率随成功次数衰减；残响与消耗
+    c0_41 = bm41.ultimate_chance(bm41.state_of(d41)["武器"])
+    ok41, msg41, dl41 = bm41.ultimate(d41, "引雷淬火", 5, inv41, r41)
+    assert ok41 and dl41 == {"劫火红绒": -5}
+    assert bm41.ultimate_chance(bm41.state_of(d41)["武器"]) <= c0_41
+
+    # ⑨ 属性确实进 equipment.aggregate（未炼化 vs 已炼化）
+    lookup41 = lambda n: next((e for e in tbl41 if e['name'] == n), None)
+    bare41 = d41.model_copy(deep=True)
+    bst41 = bm41.state_of(bare41)
+    for _p41 in bm41.PARTS:
+        bst41[_p41]["refined"] = 0
+    bm41.set_state(bare41, bst41)
+    assert eq41.aggregate(d41, level_table, lookup41).atk > \
+        eq41.aggregate(bare41, level_table, lookup41).atk
+
+    # ⑩ 投放 / 面板 / 规则 / 器灵对战
+    drops41 = [bm41.roll_drop(_random.Random(i)) for i in range(200)]
+    assert all(x is None or x in bm41.ALL_MATS for x in drops41) and any(drops41)
+    assert len(bm41.panel(d41, t41 + 10).split("\n")) >= 5
+    assert "无 CD" in bm41.rules_text() and "20 件" in bm41.materials_text()
+    assert "#一键本命镶嵌" in bm41.help_text()
+    ok41, msg41, _ = bm41.spirit_battle(d41, "武器", r41)
+    assert ok41 and msg41
+    print("W8-C1 bengming ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

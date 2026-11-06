@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, authority as authority_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, authority as authority_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -533,6 +533,65 @@ CMD_SP_LEARN_NIRVANA = "#参悟涅槃至尊骨"
 CMD_SP_IMMORTAL = "#孕育仙骨"
 CMD_SP_PUPIL = "#重瞳开天"
 CMD_SP_MERGE = "#瞳骨合一"
+# W8-C1：本命法宝（原版 43 条 reg；三器 / 六类镶嵌 / 器灵 / 共鸣 / 形态）
+CMD_BM_HELP = "#本命帮助"
+CMD_BM_PANEL = "#本命状态"
+CMD_BM_PANEL_ALIAS = "#我的本命"
+CMD_BM_RULES = "#本命规则"
+CMD_BM_MATS = "#本命材料"
+CMD_BM_REFINE_W = "#炼化本命武器"
+CMD_BM_REFINE_A = "#炼化本命护具"
+CMD_BM_REFINE_T = "#炼化本命法宝"
+CMD_BM_REPAIR_W = "#修复爱剑"
+CMD_BM_REPAIR_A = "#修复护具"
+CMD_BM_REPAIR_T = "#温养法宝"
+CMD_BM_QUENCH_W = "#淬炼剑身"
+CMD_BM_QUENCH_A = "#淬炼护具"
+CMD_BM_QUENCH_T = "#淬炼法宝"
+CMD_BM_ASCEND_W = "#升华本命剑"
+CMD_BM_ASCEND_A = "#升华本命护具"
+CMD_BM_ASCEND_T = "#升华本命法宝"
+CMD_BM_EMBED_CORE_W = "#剑魂镶嵌"
+CMD_BM_EMBED_CORE_A = "#护灵核心镶嵌"
+CMD_BM_EMBED_CORE_T = "#宝灵灵韵镶嵌"
+CMD_BM_EMBED_AUX_W = "#剑魄镶嵌"
+CMD_BM_EMBED_AUX_A = "#护灵辅魂镶嵌"
+CMD_BM_EMBED_AUX_T = "#宝灵灵纹镶嵌"
+CMD_BM_EMBED_ALL = "#一键本命镶嵌"
+CMD_BM_EMBED_ALL_1 = "#一键本命武器镶嵌"
+CMD_BM_EMBED_ALL_2 = "#一键本命护具镶嵌"
+CMD_BM_EMBED_ALL_3 = "#一键本命法宝镶嵌"
+CMD_BM_EMBED_ALL_4 = "#一键剑魂镶嵌"
+CMD_BM_EMBED_ALL_5 = "#一键剑魄镶嵌"
+CMD_BM_EMBED_ALL_6 = "#一键护灵核心镶嵌"
+CMD_BM_EMBED_ALL_7 = "#一键护灵辅魂镶嵌"
+CMD_BM_EMBED_ALL_8 = "#一键宝灵灵韵镶嵌"
+CMD_BM_EMBED_ALL_9 = "#一键宝灵灵纹镶嵌"
+CMD_BM_SUMMON_W = "#召唤剑灵"
+CMD_BM_SUMMON_A = "#召唤护灵"
+CMD_BM_SUMMON_T = "#召唤宝灵"
+CMD_BM_NAME_W = "#剑灵命名"
+CMD_BM_NAME_A = "#护灵命名"
+CMD_BM_NAME_T = "#宝灵命名"
+CMD_BM_GENDER_W = "#剑灵性别"
+CMD_BM_GENDER_A = "#护灵性别"
+CMD_BM_GENDER_T = "#宝灵性别"
+CMD_BM_STATUS_W = "#剑灵状态"
+CMD_BM_STATUS_A = "#护灵状态"
+CMD_BM_STATUS_T = "#宝灵状态"
+CMD_BM_TEMPER_BASE = "#磨合心性"
+CMD_BM_TEMPER_W = "#磨合剑灵"
+CMD_BM_TEMPER_A = "#磨合护灵"
+CMD_BM_TEMPER_T = "#磨合宝灵"
+CMD_BM_RESONANCE_W = "#剑境共鸣"
+CMD_BM_RESONANCE_A = "#护境共鸣"
+CMD_BM_RESONANCE_T = "#宝境共鸣"
+CMD_BM_SHEATH_ON = "#化剑为鞘"
+CMD_BM_SHEATH_OFF = "#化鞘为剑"
+CMD_BM_ULT_W = "#引雷淬火"
+CMD_BM_ULT_A = "#玄铁精炼"
+CMD_BM_ULT_T = "#法则滋养"
+CMD_BM_BATTLE = "#召唤灵体战斗"
 # W7-4：养成深度（灵根觉醒 / 寿元救援 / 帝兵铭文 / 职业产线 / 道法卡）
 CMD_LG_AWAKEN = "#灵根觉醒"
 CMD_RESCUE = "#轮回救人"
@@ -618,7 +677,7 @@ ITEM_TABLES = (
     "丹药列表", "道具列表", "材料列表", "草药列表", "装备列表", "功法列表",
     "特殊装备列表", "食材列表", "宝石", "盒子列表", "帝兵列表", "锻造杂类",
     "锻造武器", "锻造护具", "锻造宝物", "锻造材料", "炼丹师丹药", "常驻", "限定",
-    "仙宠列表", "仙宠口粮列表", "精神宇宙掉落", "花粉", "异果",
+    "仙宠列表", "仙宠口粮列表", "精神宇宙掉落", "花粉", "异果", "本命材料",
 )
 
 
@@ -1517,6 +1576,24 @@ class ZhutianPlugin(Star):
                 (CMD_SP_IMMORTAL, "仙王残魂×3 + 世界石×1 + 五行涅槃法 + 本源满值，孕育仙骨"),
                 (CMD_SP_PUPIL, "第 6 境 + 重瞳本源×1，开启重瞳"),
                 (CMD_SP_MERGE, "阶段≥2 + 重瞳 + 仙骨 → 瞳照上苍·不朽轮回"),
+            ]},
+            {"title": "本命法宝", "lines": [
+                (CMD_BM_HELP, "本命帮助全文（发这一条看全部指令）"),
+                (CMD_BM_PANEL, "三器面板：品质 / 淬炼 / 魂魄 / 器灵 / 共鸣（别名 #我的本命）"),
+                (CMD_BM_RULES, "炼化→淬炼→升华→镶嵌→器灵→共鸣完整规则"),
+                (CMD_BM_MATS, "20 件材料名录与获取途径"),
+                (f"{CMD_BM_REFINE_W} / 护具 / 法宝", "炼化三器：无消耗无 CD，感应满 1000 必成"),
+                (f"{CMD_BM_QUENCH_W}|护具|法宝 材料名 *N", "淬炼：最多 10 件一批，攒淬炼值涨三维（五种异象）"),
+                (f"{CMD_BM_ASCEND_W}|护具|法宝", "升华：淬炼值达门槛 100% 进阶，末两档需魂魄圆满"),
+                (f"{CMD_BM_REPAIR_W} / #修复护具 / #温养法宝 材料名", "回耐久、涨器灵契合与心情"),
+                ("#剑魂/剑魄/护灵核心/护灵辅魂/宝灵灵韵/宝灵灵纹镶嵌 材料名", "六类槽：核心 3 格、辅材 7 格，同名唯一"),
+                (CMD_BM_EMBED_ALL, "一键镶嵌全六槽；另有 #一键剑魂镶嵌 等 9 种定向写法"),
+                ("#召唤剑灵/护灵/宝灵 → #剑灵命名 → #剑灵性别", "魂魄圆满后唤醒器灵，性别觉醒给实数加成"),
+                (f"{CMD_BM_TEMPER_BASE} / #磨合剑灵/护灵/宝灵", "涨契合度（7 阶段），心情影响事件权重"),
+                ("#剑境共鸣 / #护境共鸣 / #宝境共鸣", "契合≥100 触发 1 小时临时三维 + 战斗乘区"),
+                (f"{CMD_BM_SHEATH_ON} / {CMD_BM_SHEATH_OFF}", "武器形态可逆切换：攻 ×0.4 ⇄ ×2.5、防 ×1.6 ⇄ ×0.625"),
+                (f"{CMD_BM_ULT_W}|#玄铁精炼|#法则滋养 *N", "终极强化：成功率随品质/成功次数衰减，失败攒残响"),
+                (f"{CMD_BM_BATTLE} 剑灵|护灵|宝灵", "6 回合器灵对战，胜利随机得 1 件材料"),
             ]},
         ]
 
@@ -12408,6 +12485,10 @@ class ZhutianPlugin(Star):
         if sp_drop:
             for _k, _v in sp_drop.items():
                 items_out[_k] = int(items_out.get(_k, 0) or 0) + int(_v)
+        # W8-C1：本命材料 12% 随机投放 1 件（原版无任何发放点，不补则整套系统不可玩）
+        bm_drop = bm_mod.roll_drop(random.Random())
+        if bm_drop:
+            items_out[bm_drop] = int(items_out.get(bm_drop, 0) or 0) + 1
         async with self.db.transaction():
             await self.db.save_player(d.model_dump())
             if items_out:
@@ -12429,6 +12510,8 @@ class ZhutianPlugin(Star):
             if sp_drop:
                 lines.append("【大荒遗泽】" + "、".join(f"{n}×{q}" for n, q in sp_drop.items())
                              + "（#至尊传承 / #重瞳开天 / #孕育仙骨）")
+            if bm_drop:
+                lines.append(f"【本命遗珍】{bm_drop}×1（秘境偶得的炼器材料）")
         else:
             lines.append("物品：无")
         if dungeon_note:
@@ -15901,3 +15984,267 @@ class ZhutianPlugin(Star):
         result = sp_mod.merge(doc)
         async for r in self._sp_finish(event, doc, result, "瞳骨合一"):
             yield r
+
+    # ── W8-C1 本命法宝：通用分发器（复用 B6 的统一事务落库） ──────────────
+    async def _bm_dispatch(self, event, title, fn, need_inv=False):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid) if need_inv else {}
+        result = fn(doc, inv)
+        async for r in self._dz_finish(event, doc, result, title):
+            yield r
+
+    async def _bm_text(self, event, title, fn):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, fn(doc), title):
+            yield r
+
+    @filter.command(CMD_BM_HELP, "本命帮助")
+    async def handle_bm_help(self, event: AstrMessageEvent):
+        async for r in self._bm_text(event, "本命帮助", lambda d: bm_mod.help_text()):
+            yield r
+
+    @filter.command(CMD_BM_PANEL, "本命状态", alias={CMD_BM_PANEL_ALIAS})
+    async def handle_bm_panel(self, event: AstrMessageEvent):
+        async for r in self._bm_text(event, "本命法宝", lambda d: bm_mod.panel(d)):
+            yield r
+
+    @filter.command(CMD_BM_RULES, "本命规则")
+    async def handle_bm_rules(self, event: AstrMessageEvent):
+        async for r in self._bm_text(event, "本命规则", lambda d: bm_mod.rules_text()):
+            yield r
+
+    @filter.command(CMD_BM_MATS, "本命材料")
+    async def handle_bm_mats(self, event: AstrMessageEvent):
+        async for r in self._bm_text(event, "本命材料名录", lambda d: bm_mod.materials_text()):
+            yield r
+
+    @filter.command(CMD_BM_REFINE_W, "炼化本命武器")
+    async def handle_bm_refine_w(self, event: AstrMessageEvent):
+        async for r in self._bm_dispatch(event, "炼化本命武器", lambda d, inv: bm_mod.refine(d, "武器", random.Random()), False):
+            yield r
+
+    @filter.command(CMD_BM_REFINE_A, "炼化本命护具")
+    async def handle_bm_refine_a(self, event: AstrMessageEvent):
+        async for r in self._bm_dispatch(event, "炼化本命护具", lambda d, inv: bm_mod.refine(d, "护具", random.Random()), False):
+            yield r
+
+    @filter.command(CMD_BM_REFINE_T, "炼化本命法宝")
+    async def handle_bm_refine_t(self, event: AstrMessageEvent):
+        async for r in self._bm_dispatch(event, "炼化本命法宝", lambda d, inv: bm_mod.refine(d, "法宝", random.Random()), False):
+            yield r
+
+    @filter.command(CMD_BM_REPAIR_W, "修复爱剑")
+    async def handle_bm_repair_w(self, event: AstrMessageEvent, arg: str = ""):
+        async for r in self._bm_dispatch(event, "修复爱剑", lambda d, inv: bm_mod.repair(d, "武器", bm_mod.parse_arg(arg)[0], inv, random.Random()), True):
+            yield r
+
+    @filter.command(CMD_BM_REPAIR_A, "修复护具")
+    async def handle_bm_repair_a(self, event: AstrMessageEvent, arg: str = ""):
+        async for r in self._bm_dispatch(event, "修复护具", lambda d, inv: bm_mod.repair(d, "护具", bm_mod.parse_arg(arg)[0], inv, random.Random()), True):
+            yield r
+
+    @filter.command(CMD_BM_REPAIR_T, "温养法宝")
+    async def handle_bm_repair_t(self, event: AstrMessageEvent, arg: str = ""):
+        async for r in self._bm_dispatch(event, "温养法宝", lambda d, inv: bm_mod.repair(d, "法宝", bm_mod.parse_arg(arg)[0], inv, random.Random()), True):
+            yield r
+
+    @filter.command(CMD_BM_QUENCH_W, "淬炼剑身")
+    async def handle_bm_quench_w(self, event: AstrMessageEvent, arg: str = ""):
+        mat, count = bm_mod.parse_arg(arg)
+        async for r in self._bm_dispatch(event, "淬炼剑身", lambda d, inv: bm_mod.quench(d, "武器", mat, count, inv, random.Random()), True):
+            yield r
+
+    @filter.command(CMD_BM_QUENCH_A, "淬炼护具")
+    async def handle_bm_quench_a(self, event: AstrMessageEvent, arg: str = ""):
+        mat, count = bm_mod.parse_arg(arg)
+        async for r in self._bm_dispatch(event, "淬炼护具", lambda d, inv: bm_mod.quench(d, "护具", mat, count, inv, random.Random()), True):
+            yield r
+
+    @filter.command(CMD_BM_QUENCH_T, "淬炼法宝")
+    async def handle_bm_quench_t(self, event: AstrMessageEvent, arg: str = ""):
+        mat, count = bm_mod.parse_arg(arg)
+        async for r in self._bm_dispatch(event, "淬炼法宝", lambda d, inv: bm_mod.quench(d, "法宝", mat, count, inv, random.Random()), True):
+            yield r
+
+    @filter.command(CMD_BM_ASCEND_W, "升华本命剑")
+    async def handle_bm_ascend_w(self, event: AstrMessageEvent):
+        async for r in self._bm_dispatch(event, "升华本命剑", lambda d, inv: bm_mod.ascend(d, "武器"), False):
+            yield r
+
+    @filter.command(CMD_BM_ASCEND_A, "升华本命护具")
+    async def handle_bm_ascend_a(self, event: AstrMessageEvent):
+        async for r in self._bm_dispatch(event, "升华本命护具", lambda d, inv: bm_mod.ascend(d, "护具"), False):
+            yield r
+
+    @filter.command(CMD_BM_ASCEND_T, "升华本命法宝")
+    async def handle_bm_ascend_t(self, event: AstrMessageEvent):
+        async for r in self._bm_dispatch(event, "升华本命法宝", lambda d, inv: bm_mod.ascend(d, "法宝"), False):
+            yield r
+
+    @filter.command(CMD_BM_EMBED_CORE_W, "剑魂镶嵌")
+    async def handle_bm_embed_1(self, event: AstrMessageEvent, arg: str = ""):
+        async for r in self._bm_dispatch(event, "剑魂镶嵌", lambda d, inv: bm_mod.embed(d, "武器", "core", bm_mod.parse_arg(arg)[0], inv), True):
+            yield r
+
+    @filter.command(CMD_BM_EMBED_CORE_A, "护灵核心镶嵌")
+    async def handle_bm_embed_2(self, event: AstrMessageEvent, arg: str = ""):
+        async for r in self._bm_dispatch(event, "护灵核心镶嵌", lambda d, inv: bm_mod.embed(d, "护具", "core", bm_mod.parse_arg(arg)[0], inv), True):
+            yield r
+
+    @filter.command(CMD_BM_EMBED_CORE_T, "宝灵灵韵镶嵌")
+    async def handle_bm_embed_3(self, event: AstrMessageEvent, arg: str = ""):
+        async for r in self._bm_dispatch(event, "宝灵灵韵镶嵌", lambda d, inv: bm_mod.embed(d, "法宝", "core", bm_mod.parse_arg(arg)[0], inv), True):
+            yield r
+
+    @filter.command(CMD_BM_EMBED_AUX_W, "剑魄镶嵌")
+    async def handle_bm_embed_4(self, event: AstrMessageEvent, arg: str = ""):
+        async for r in self._bm_dispatch(event, "剑魄镶嵌", lambda d, inv: bm_mod.embed(d, "武器", "aux", bm_mod.parse_arg(arg)[0], inv), True):
+            yield r
+
+    @filter.command(CMD_BM_EMBED_AUX_A, "护灵辅魂镶嵌")
+    async def handle_bm_embed_5(self, event: AstrMessageEvent, arg: str = ""):
+        async for r in self._bm_dispatch(event, "护灵辅魂镶嵌", lambda d, inv: bm_mod.embed(d, "护具", "aux", bm_mod.parse_arg(arg)[0], inv), True):
+            yield r
+
+    @filter.command(CMD_BM_EMBED_AUX_T, "宝灵灵纹镶嵌")
+    async def handle_bm_embed_6(self, event: AstrMessageEvent, arg: str = ""):
+        async for r in self._bm_dispatch(event, "宝灵灵纹镶嵌", lambda d, inv: bm_mod.embed(d, "法宝", "aux", bm_mod.parse_arg(arg)[0], inv), True):
+            yield r
+
+    @filter.command(CMD_BM_EMBED_ALL, "一键本命镶嵌", alias={CMD_BM_EMBED_ALL_1, CMD_BM_EMBED_ALL_2, CMD_BM_EMBED_ALL_3, CMD_BM_EMBED_ALL_4, CMD_BM_EMBED_ALL_5, CMD_BM_EMBED_ALL_6, CMD_BM_EMBED_ALL_7, CMD_BM_EMBED_ALL_8, CMD_BM_EMBED_ALL_9})
+    async def handle_bm_embed_all(self, event: AstrMessageEvent):
+        key = bm_mod.parse_embed_key(event.get_message_str())
+        async for r in self._bm_dispatch(event, "一键镶嵌", lambda d, inv: bm_mod.embed_all(d, key, inv), True):
+            yield r
+
+    @filter.command(CMD_BM_SUMMON_W, "召唤剑灵")
+    async def handle_bm_summon_w(self, event: AstrMessageEvent):
+        async for r in self._bm_dispatch(event, "召唤剑灵", lambda d, inv: bm_mod.summon(d, "武器", random.Random()), False):
+            yield r
+
+    @filter.command(CMD_BM_SUMMON_A, "召唤护灵")
+    async def handle_bm_summon_a(self, event: AstrMessageEvent):
+        async for r in self._bm_dispatch(event, "召唤护灵", lambda d, inv: bm_mod.summon(d, "护具", random.Random()), False):
+            yield r
+
+    @filter.command(CMD_BM_SUMMON_T, "召唤宝灵")
+    async def handle_bm_summon_t(self, event: AstrMessageEvent):
+        async for r in self._bm_dispatch(event, "召唤宝灵", lambda d, inv: bm_mod.summon(d, "法宝", random.Random()), False):
+            yield r
+
+    @filter.command(CMD_BM_NAME_W, "剑灵命名")
+    async def handle_bm_name_w(self, event: AstrMessageEvent, arg: str = ""):
+        async for r in self._bm_dispatch(event, "剑灵命名", lambda d, inv: bm_mod.name_spirit(d, "武器", arg), False):
+            yield r
+
+    @filter.command(CMD_BM_NAME_A, "护灵命名")
+    async def handle_bm_name_a(self, event: AstrMessageEvent, arg: str = ""):
+        async for r in self._bm_dispatch(event, "护灵命名", lambda d, inv: bm_mod.name_spirit(d, "护具", arg), False):
+            yield r
+
+    @filter.command(CMD_BM_NAME_T, "宝灵命名")
+    async def handle_bm_name_t(self, event: AstrMessageEvent, arg: str = ""):
+        async for r in self._bm_dispatch(event, "宝灵命名", lambda d, inv: bm_mod.name_spirit(d, "法宝", arg), False):
+            yield r
+
+    @filter.command(CMD_BM_GENDER_W, "剑灵性别")
+    async def handle_bm_gender_w(self, event: AstrMessageEvent, arg: str = ""):
+        async for r in self._bm_dispatch(event, "剑灵性别", lambda d, inv: bm_mod.set_gender(d, "武器", arg), False):
+            yield r
+
+    @filter.command(CMD_BM_GENDER_A, "护灵性别")
+    async def handle_bm_gender_a(self, event: AstrMessageEvent, arg: str = ""):
+        async for r in self._bm_dispatch(event, "护灵性别", lambda d, inv: bm_mod.set_gender(d, "护具", arg), False):
+            yield r
+
+    @filter.command(CMD_BM_GENDER_T, "宝灵性别")
+    async def handle_bm_gender_t(self, event: AstrMessageEvent, arg: str = ""):
+        async for r in self._bm_dispatch(event, "宝灵性别", lambda d, inv: bm_mod.set_gender(d, "法宝", arg), False):
+            yield r
+
+    @filter.command(CMD_BM_STATUS_W, "剑灵状态")
+    async def handle_bm_status_w(self, event: AstrMessageEvent):
+        async for r in self._bm_text(event, "剑灵状态", lambda d: bm_mod.spirit_status(d, "武器")):
+            yield r
+
+    @filter.command(CMD_BM_STATUS_A, "护灵状态")
+    async def handle_bm_status_a(self, event: AstrMessageEvent):
+        async for r in self._bm_text(event, "护灵状态", lambda d: bm_mod.spirit_status(d, "护具")):
+            yield r
+
+    @filter.command(CMD_BM_STATUS_T, "宝灵状态")
+    async def handle_bm_status_t(self, event: AstrMessageEvent):
+        async for r in self._bm_text(event, "宝灵状态", lambda d: bm_mod.spirit_status(d, "法宝")):
+            yield r
+
+    @filter.command(CMD_BM_TEMPER_BASE, "磨合心性")
+    async def handle_bm_temper_base(self, event: AstrMessageEvent):
+        async for r in self._bm_dispatch(event, "磨合心性", lambda d, inv: bm_mod.temper(d, "武器", random.Random()), False):
+            yield r
+
+    @filter.command(CMD_BM_TEMPER_W, "磨合剑灵")
+    async def handle_bm_temper_w(self, event: AstrMessageEvent):
+        async for r in self._bm_dispatch(event, "磨合剑灵", lambda d, inv: bm_mod.temper(d, "武器", random.Random()), False):
+            yield r
+
+    @filter.command(CMD_BM_TEMPER_A, "磨合护灵")
+    async def handle_bm_temper_a(self, event: AstrMessageEvent):
+        async for r in self._bm_dispatch(event, "磨合护灵", lambda d, inv: bm_mod.temper(d, "护具", random.Random()), False):
+            yield r
+
+    @filter.command(CMD_BM_TEMPER_T, "磨合宝灵")
+    async def handle_bm_temper_t(self, event: AstrMessageEvent):
+        async for r in self._bm_dispatch(event, "磨合宝灵", lambda d, inv: bm_mod.temper(d, "法宝", random.Random()), False):
+            yield r
+
+    @filter.command(CMD_BM_RESONANCE_W, "剑境共鸣")
+    async def handle_bm_resonance_w(self, event: AstrMessageEvent):
+        async for r in self._bm_dispatch(event, "剑境共鸣", lambda d, inv: bm_mod.resonance(d, "武器"), False):
+            yield r
+
+    @filter.command(CMD_BM_RESONANCE_A, "护境共鸣")
+    async def handle_bm_resonance_a(self, event: AstrMessageEvent):
+        async for r in self._bm_dispatch(event, "护境共鸣", lambda d, inv: bm_mod.resonance(d, "护具"), False):
+            yield r
+
+    @filter.command(CMD_BM_RESONANCE_T, "宝境共鸣")
+    async def handle_bm_resonance_t(self, event: AstrMessageEvent):
+        async for r in self._bm_dispatch(event, "宝境共鸣", lambda d, inv: bm_mod.resonance(d, "法宝"), False):
+            yield r
+
+    @filter.command(CMD_BM_SHEATH_ON, "化剑为鞘")
+    async def handle_bm_sheath_on(self, event: AstrMessageEvent):
+        async for r in self._bm_dispatch(event, "化剑为鞘", lambda d, inv: bm_mod.sheath(d, True), False):
+            yield r
+
+    @filter.command(CMD_BM_SHEATH_OFF, "化鞘为剑")
+    async def handle_bm_sheath_off(self, event: AstrMessageEvent):
+        async for r in self._bm_dispatch(event, "化鞘为剑", lambda d, inv: bm_mod.sheath(d, False), False):
+            yield r
+
+    @filter.command(CMD_BM_ULT_W, "引雷淬火", alias={CMD_BM_ULT_A, CMD_BM_ULT_T})
+    async def handle_bm_ultimate(self, event: AstrMessageEvent):
+        key, count = bm_mod.parse_ultimate_key(event.get_message_str())
+        async for r in self._bm_dispatch(event, "终极强化", lambda d, inv: bm_mod.ultimate(d, key, count, inv, random.Random()), True):
+            yield r
+
+    @filter.command(CMD_BM_BATTLE, "召唤灵体战斗")
+    async def handle_bm_battle(self, event: AstrMessageEvent, arg: str = ""):
+        part = bm_mod.parse_battle_part(arg)
+        if not part:
+            yield event.plain_result(f"格式：{CMD_BM_BATTLE} 剑灵|护灵|宝灵")
+            return
+        async for r in self._bm_dispatch(event, "器灵对战",
+                         lambda d, inv: bm_mod.spirit_battle(d, part, random.Random())):
+            yield r
+
