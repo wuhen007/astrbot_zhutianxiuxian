@@ -5748,6 +5748,167 @@ async def main():
     assert "庚金" not in dzl44.materials_text(look44, ["星银", "庚金"])
     print("W8-C4 duanzao ok")
 
+    # ── 45. W8-D1 灵园深化 / 环境 / 败天神殿 / 浇灌道具 / 仙兽驯服 / 仙宠岗位 ──
+    from core import xiaoshijie as xs45  # noqa: E402
+    rng45 = _random.Random(45)
+    t45 = 1_800_000.0
+
+    # ① 环境创造：映射 / 重复拒绝 / 未知道具
+    w45 = {"name": "紫霄界", "level": 3, "avatar": True, "last_harvest": 0.0,
+           "fields": [], "water_ts": 0.0}
+    ok45, msg45, nw45 = xs45.create_environment(w45, "仙泉之眼")
+    assert ok45 and nw45["env"] == ["仙泉"], msg45
+    ok45, msg45, _ = xs45.create_environment(nw45, "仙泉之眼")
+    assert not ok45 and "已拥有" in msg45
+    ok45, msg45, _ = xs45.create_environment(w45, "乱七八糟")
+    assert not ok45 and "仙泉之眼" in msg45
+    assert len(xs45.ENVIRONMENTS) == 8
+
+    # ② 神药环境门槛：悟道古茶树需 仙坟+仙泉；大夏无要求（3 级世界灵气 5000 种大夏可行）
+    ok45, msg45, _ = xs45.plant({**nw45, "level": 5}, "悟道古茶树幼苗")
+    assert not ok45 and "仙坟" in msg45, msg45
+    ok45, msg45, nw45 = xs45.plant(nw45, "大夏神药种子")
+    assert ok45, msg45
+    ok45, msg45, nw45 = xs45.create_environment(nw45, "仙坟土")
+    assert ok45 and nw45["env"] == ["仙泉", "仙坟"]
+    ok45, msg45, nw45 = xs45.plant({**nw45, "level": 5}, "悟道古茶树幼苗")
+    assert ok45, msg45
+    assert xs45.stage_of({**nw45, "level": 5}, nw45["fields"][-1]) == 1  # 刚种=萌芽
+    nw45["fields"][-1]["remaining"] = 0.01
+    assert xs45.stage_of({**nw45, "level": 5}, nw45["fields"][-1]) == 5  # 快熟=成熟期
+    # ③ 时间碎片：新栽生长 ×0.75（大夏 3000 灵气 → 12/8=1.5 现实小时 → 1.125）
+    ok45, msg45, nw45 = xs45.create_environment(nw45, "时间沙漏")
+    assert ok45
+    ok45, msg45, nw45b = xs45.plant({**nw45, "level": 5}, "大夏神药种子")
+    assert ok45 and abs(nw45b["fields"][-1]["remaining"] - 1.125) < 0.01, nw45b["fields"]  # round 2 位
+
+    # ④ 败天神殿：建造扣费 / 重复拒绝 / 4h 一轮结算 / 96h 封顶
+    ok45, msg45, nw45, cy45, cw45 = xs45.build_temple(nw45, 20_000, 15)
+    assert ok45 and cy45 == 20_000 and cw45 == 15 and nw45["temple"]["built"], msg45
+    assert not xs45.build_temple(nw45, 20_000, 15)[0]
+    assert not xs45.build_temple(nw45, 19_999, 15)[0]
+    assert not xs45.build_temple(nw45, 20_000, 14)[0]
+    got45, hrs45 = xs45.settle_temple(dict(nw45, temple={"built": True, "last_settle": t45}), 8.0)
+    assert got45 == {"yuanshi": 10_000, "insight": 10} and hrs45 == 8.0, got45
+    got45, _ = xs45.settle_temple(dict(nw45, temple={"built": True, "last_settle": t45}), 200.0)
+    assert got45["yuanshi"] == 24 * 5_000 and got45["insight"] == 24 * 5  # 96h/4h=24 轮
+
+    # ⑤ 浇灌道具：单株按比例 / 批量按固定小时 / 乾坤造化瓶全田 -25%
+    wf45 = {"name": "甲", "level": 3, "fields": [
+        {"seed": "大夏神药种子", "remaining": 10.0},
+        {"seed": "大夏神药种子", "remaining": 2.0},
+        {"seed": "大夏神药种子", "remaining": 0.0},
+    ]}
+    ok45, msg45, nw45 = xs45.water_item(wf45, 1, "岁月流金沙")
+    assert ok45 and abs(nw45["fields"][0]["remaining"] - 5.0) < 1e-9, msg45
+    ok45, msg45, _ = xs45.water_item(wf45, 3, "草木精华露")
+    assert not ok45 and "已经成熟" in msg45
+    ok45, msg45, _ = xs45.water_item(wf45, 9, "草木精华露")
+    assert not ok45 and "没有 9 号" in msg45
+    ok45, msg45, nw45 = xs45.batch_water_item(wf45, "掌天灵液")
+    assert ok45  # 10-12 与 2-12 都钳到 0
+    assert nw45["fields"][0]["remaining"] == 0.0 and nw45["fields"][1]["remaining"] == 0.0
+    ok45, msg45, _ = xs45.batch_water_item(wf45, "不存在")
+    assert not ok45
+    wf45b = {"name": "乙", "level": 3, "fields": [{"seed": "大夏神药种子", "remaining": 8.0}]}
+    ok45, msg45, nw45 = xs45.force_ripen_all(wf45b)
+    assert ok45 and abs(nw45["fields"][0]["remaining"] - 6.0) < 1e-9
+    assert not xs45.force_ripen_all({"fields": [{"seed": "s", "remaining": 0}]})[0]
+
+    # ⑥ 野外仙兽：事件概率公式 / 驯服成功入栖息地 / 失败逃离 / 符档优先
+    assert 0.0 < xs45._tame_event_chance(24.0) < 0.09
+    class _R45:
+        def __init__(self, seq): self.seq = list(seq); self.i = 0
+        def random(self):
+            v = self.seq[self.i % len(self.seq)]; self.i += 1; return v
+        def shuffle(self, _): pass
+    w45, tame_msg45 = xs45.maybe_wild_beast(
+        {"name": "甲", "pets": []}, 48.0, _R45([0.0, 0.5, 0.9]), now=t45)
+    assert tame_msg45 and w45["tame"]["beast"]["type"] in xs45.BEAST_TYPES
+    ok45, msg45, nw45 = xs45.tame(w45, "极品封灵符", _R45([0.5]), now=t45)
+    assert ok45 and nw45["pets"] and nw45["pets"][0]["name"] == w45["tame"]["beast"]["name"], msg45
+    assert nw45["tame"] is None
+    # 事件过期
+    w45b = {"name": "甲", "pets": [], "tame": {"beast": {"name": "x", "type": "战斗", "quality": "仙胎", "traits": []}, "expires": t45 - 1}}
+    ok45, msg45, _ = xs45.tame(w45b, "极品封灵符", _R45([0.0]), now=t45)
+    assert not ok45 and "没有仙兽" in msg45
+    # 驯服失败
+    w45c = {"name": "甲", "pets": [], "tame": {"beast": {"name": "x", "type": "战斗", "quality": "仙胎", "traits": []}, "expires": t45 + 100}}
+    ok45, msg45, nw45 = xs45.tame(w45c, "普通封灵符", _R45([0.999]), now=t45)
+    assert not ok45 and "挣脱" in msg45 and nw45["tame"] is None
+    # 符档优先
+    assert xs45.pick_talisman({"普通封灵符": 2, "上品封灵符": 1})[0] == "上品封灵符"
+    assert xs45.pick_talisman({"普通封灵符": 2})[0] == "普通封灵符"
+    assert xs45.pick_talisman({}) is None
+
+    # ⑦ 仙宠岗位：安置 / 容量 / 分配类型不匹配提示 / 召回 / 守卫 / 偷菜成功率联动
+    wp45 = {"name": "甲", "level": 1, "pets": []}   # 1 级栖息地 = 1 位
+    ok45, msg45, wp45 = xs45.place_pet(wp45, "赤瞳灵狐", "战斗", "仙胎", ["勤勉"])
+    assert ok45, msg45
+    ok45, msg45, _ = xs45.place_pet(wp45, "九尾仙猫", "修炼", "仙仔")
+    assert not ok45 and "已满" in msg45
+    ok45, msg45, wp45 = xs45.place_pet({**wp45, "level": 3}, "九尾仙猫", "修炼", "仙仔")
+    assert ok45
+    ok45, msg45, wp45 = xs45.assign_pet(wp45, "赤瞳灵狐", "矿脉")
+    assert ok45 and "不合" not in msg45  # 战斗型配矿脉 = 匹配
+    ok45, msg45, wp45 = xs45.assign_pet(wp45, "九尾仙猫", "丹房")
+    assert ok45 and "×0.5" in msg45  # 修炼型配丹房（只收炼丹型）不匹配
+    ok45, msg45, wp45 = xs45.recall_pet(wp45, "赤瞳灵狐")
+    assert ok45, msg45
+    ok45, msg45, wp45 = xs45.set_guard(wp45, "赤瞳灵狐")
+    assert ok45
+    assert xs45.steal_rate(wp45) < xs45.steal_rate({"name": "甲", "level": 3, "pets": []})
+    ok45, msg45, wp45 = xs45.unset_guard(wp45)
+    assert ok45 and not wp45["pets"][0]["guard"]
+    # 工坊容量 = 工坊等级
+    wp45b = {"name": "甲", "level": 5, "pets": [
+        {"name": "a", "type": "战斗", "quality": "仙胎", "traits": [], "workshop": "矿脉", "guard": False, "energy": 100, "max_energy": 100, "cycle": 0.0},
+        {"name": "b", "type": "战斗", "quality": "仙胎", "traits": [], "workshop": "矿脉", "guard": False, "energy": 100, "max_energy": 100, "cycle": 0.0},
+        {"name": "c", "type": "战斗", "quality": "仙胎", "traits": [], "workshop": None, "guard": False, "energy": 100, "max_energy": 100, "cycle": 0.0},
+    ], "workshops": {"矿脉": 2}}
+    ok45, msg45, _ = xs45.assign_pet(wp45b, "c", "矿脉")
+    assert not ok45 and "只能容纳" in msg45
+    ok45, msg45, _ = xs45.assign_pet(wp45b, "不存在的", "矿脉")
+    assert not ok45
+
+    # ⑧ 精力作息数学：14/7/3 循环 / 效率分档 / 恢复
+    st45 = xs45.energy_period(100, 100, 10, 4.0)
+    assert st45["active"] == 10.0 and st45["end"] == 60.0 and st45["weighted"] == 10.0
+    st45 = xs45.energy_period(20, 100, 10, 4.0)
+    assert st45["end"] == 0.0 and abs(st45["weighted"] - (2.5 * 0.6 + 2.5 * 0.2)) < 1e-9  # 20→10 中档2.5h + 10→0 低档2.5h
+    st45 = xs45.energy_period(50, 100, 10, -8.0)
+    assert st45["end"] == 100.0  # 休息封顶
+    cp45 = xs45.care_period(100, 100, 24.0, 4.0, 0.0)
+    assert cp45["meals"] == 1.0 and cp45["rest"] == 7.0 and cp45["play"] == 3.0, cp45
+
+    # ⑨ harvest_full 端到端：资源 + 神殿 + 宠物产出 + 喂食缺餐降效 + 深化环境加成
+    wh45 = {"name": "紫霄界", "level": 5, "avatar": True,
+            "last_harvest": t45 - 8 * 3600,   # 8 现实小时 × 流速 8 = 64 有效小时
+            "fields": [], "water_ts": 0.0,
+            "env": ["星辰矿脉", "生命古树"],
+            "temple": {"built": True, "last_settle": t45 - 8 * 3600},
+            "pets": [
+                {"name": "石煞", "type": "战斗", "quality": "仙灵", "traits": [],
+                 "energy": 100, "max_energy": 100, "workshop": "矿脉", "guard": False, "cycle": 0.0},
+            ],
+            "supplies": {"仙宠口粮": 10, "界源矿石": 0, "工坊构件": 0, "欠餐": 0}}
+    inv45 = {}
+    ok45, msg45, nw45, out45, ex45 = xs45.harvest_full(wh45, now=t45, inv=inv45, rng=_random.Random(7))
+    assert ok45, msg45
+    assert out45["__stones__"] >= 800_000 * 64 and out45.get("灵矿", 0) >= int(20 * 64 * 1.5)  # 星辰矿脉 +50%
+    assert out45.get("仙馐果", 0) >= int(300 * 64 * 1.5)  # 生命古树 +50%
+    assert ex45.get("yuanshi") == 10_000 and ex45.get("insight") == 10  # 神殿 8h = 2 轮
+    assert any("石煞" in ln for ln in ex45.get("pet_logs", [])), ex45.get("pet_logs")
+    # 仙灵 = 5 倍品级；战斗宠矿脉：灵石 50000/h + 源石 1500/h（64 有效小时 ≈ 42 工时）
+    assert ex45.get("__yuanshi__", 0) > 0
+    # 喂食：口粮充足 → 吃 2 份（64h≈2.67 轮，取整轮 2）、无欠餐
+    assert nw45["supplies"]["仙宠口粮"] == 8 and nw45["supplies"]["欠餐"] == 0, nw45["supplies"]
+    assert "界源矿石" in nw45["supplies"] and nw45["supplies"]["界源矿石"] > 0
+    # 老四元组兼容入口仍可用
+    ok45, msg45, _w45, out45b = xs45.harvest({"name": "乙", "avatar": True, "last_harvest": t45 - 3600, "level": 1, "fields": []})
+    assert ok45 and out45b.get("__stones__", 0) > 0
+    print("W8-D1 xiaoshijie ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

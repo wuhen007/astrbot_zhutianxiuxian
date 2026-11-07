@@ -739,6 +739,18 @@ CMD_WORLD_STEAL = "#小世界偷菜"
 CMD_WORLD_BATCH = "#一键种植"
 CMD_WORLD_WATER = "#一键浇灌普通"
 CMD_PLANT_GUIDE = "#种植指南"
+# W8-D1 灵园深化
+CMD_WORLD_JIAOGUAN = "#浇灌小世界作物"
+CMD_WORLD_TEMPLE = "#建立败天神殿"
+CMD_WORLD_TEMPLE2 = "#建造败天神殿"
+CMD_WORLD_TAME = "#驯服仙兽"
+CMD_WORLD_PLACE = "#安置仙宠"
+CMD_WORLD_RECALL = "#召回休息"
+CMD_WORLD_RECALL2 = "#处理分配"
+CMD_WORLD_GUARD_SET = "#设置仙宠守卫"
+CMD_WORLD_GUARD_UNSET = "#撤下仙宠守卫"
+CMD_WORLD_HABITAT = "#小世界栖息地"
+CMD_WORLD_TOUR = "#图中巡游"
 CMD_IMPERIAL = "#认主"
 CMD_IMPERIAL_MY = "#已认主"
 CMD_SECT_SECRET = "#宗门秘境"
@@ -1259,6 +1271,19 @@ class ZhutianPlugin(Star):
                 (CMD_WORLD_GUARD, "募请守卫（每级偷菜成功率 -15%）"),
                 (CMD_WORLD_RIPEN, "催熟全部在种作物（每株 800 万灵石，-24h）"),
                 (f"{CMD_WORLD_STEAL} @某人", "潜入他人小世界偷一株成熟神药（有守卫则可能被抓）"),
+                (f"#使用材料名创造环境", "8 道具造 8 环境（高阶神药门槛/产量加成）"),
+                (CMD_WORLD_TEMPLE, "建立败天神殿（源石 2 万+世界石 15，每 4h 产源石/感悟）"),
+                (CMD_WORLD_JIAOGUAN, "乾坤造化瓶全田 -25% 生长时间"),
+                ("#使用草木精华露/岁月流金沙/掌天灵液 第N号", "单株 -25%/50%/75% 生长时间"),
+                ("#一键浇灌草木精华露/岁月流金沙/掌天灵液", "全田 -3h/6h/12h"),
+                (CMD_WORLD_HABITAT, "栖息地名册（仙宠/精力/工坊物资）"),
+                (f"{CMD_WORLD_PLACE} 仙宠名", "安置纳戒仙宠入驻栖息地"),
+                ("#分配仙宠名到工坊名", "派往灵田/丹房/器阁/符台/矿脉干活（收获时产出）"),
+                (f"{CMD_WORLD_RECALL} 仙宠名", "召回休息（别名 #处理分配）"),
+                (f"{CMD_WORLD_GUARD_SET} 仙宠名", "设为守卫（每只再 -15% 偷菜成功率）"),
+                (CMD_WORLD_GUARD_UNSET, "撤下仙宠守卫"),
+                (CMD_WORLD_TAME, "驯服野外仙兽（收获时偶遇，封灵符 50/70/90%）"),
+                (CMD_WORLD_TOUR, "图中巡游（需执掌山河社稷图，额外结算 6h，72h CD）"),
             ]},
             {"title": "师徒道侣", "lines": [
                 (f"{CMD_RECRUIT_ON} / {CMD_RECRUIT_OFF}", "开启/关闭收徒"),
@@ -4201,7 +4226,8 @@ class ZhutianPlugin(Star):
             yield event.plain_result(f"道友尚无小世界，先「{CMD_WORLD_CREATE} 世界名」（需成仙）。")
             return
         _, exp = self._ensure_occ(doc)
-        yield event.plain_result(xiaoshijie.view(w, doc.exp))
+        yield event.plain_result(xiaoshijie.view(
+            w, doc.exp, shanhe_bonus=xt_mod.yield_mult(doc, "smallworld") > 1.0))
 
     @filter.command(CMD_WORLD_AVATAR, "分身化入小世界")
     async def handle_world_avatar(self, event: AstrMessageEvent):
@@ -4237,20 +4263,44 @@ class ZhutianPlugin(Star):
         if not w:
             yield event.plain_result(f"道友尚无小世界。")
             return
-        ok, msg, nw, out = xiaoshijie.harvest(w)
+        # W8-D1：深化收获（败天神殿 / 仙宠工坊 / 野外仙兽）；山河社稷图「小世界产出翻倍」在此兑现
+        shanhe = xt_mod.yield_mult(doc, "smallworld") > 1.0
+        inv = await self.db.get_inventory(doc.uid)
+        ok, msg, nw, out, extras = xiaoshijie.harvest_full(
+            w, inv=inv, rng=random.Random(f"{doc.uid}:xsj:{time.time_ns()}"), shanhe=shanhe)
         if not ok:
             yield event.plain_result(msg)
             return
         stones = out.pop("__stones__", 0)
         d = doc.model_copy(deep=True)
         d.stones += stones
+        d.exp += int(extras.pop("exp", 0) or 0)
+        if extras.get("xueqi"):
+            d.ext["xueqi"] = float(d.ext.get("xueqi", 0) or 0) + float(extras.pop("xueqi"))
+        if extras.get("yuanshi"):
+            y = yuanshi.system_of(d)
+            y["amount"] = int(y.get("amount", 0) or 0) + int(extras.pop("yuanshi"))
+            d.ext["yuanshi"] = y
+        if extras.get("insight"):
+            trib.add_insight(d, int(extras.pop("insight")))
         d.ext["xiaoshijie"] = nw
+        meals = extras.pop("meals_used", {}) or {}
         async with self.db.transaction():
             await self.db.save_player(d.model_dump())
             if out:
                 await self.db.add_items(doc.uid, out)
+            for food, qty in meals.items():
+                await self.db.remove_item(doc.uid, food, qty)
         parts = [f"灵石 ×{stones}"] + [f"{k} ×{v}" for k, v in out.items()]
-        yield event.plain_result(msg.replace("__stones__", "灵石") + f"\n合计：{'，'.join(parts)}")
+        head = msg.replace("__stones__", "灵石") + f"\n合计：{'，'.join(parts)}"
+        pet_logs = extras.get("pet_logs") or []
+        if pet_logs:
+            head += "\n【仙宠工坊】\n" + "\n".join(pet_logs)
+        async for r in self._smart(event, head, "小世界收获"):
+            yield r
+        tame_msg = extras.get("tame_msg")
+        if tame_msg:
+            yield event.plain_result(tame_msg)
 
     @filter.command(CMD_PLANT_GUIDE, "种植指南")
     async def handle_plant_guide(self, event: AstrMessageEvent):
@@ -4510,6 +4560,422 @@ class ZhutianPlugin(Star):
             d = doc.model_copy(deep=True)
             d.stones = max(0, int(d.stones) - fine)
             await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    # ---- W8-D1 灵园深化（对齐原版 xiaoshijie.js 环境创造 / 败天神殿 / 浇灌道具 / 驯服 / 仙宠岗位） ----
+
+    @filter.command(CMD_WORLD_JIAOGUAN, "乾坤造化瓶全田催熟")
+    async def handle_world_jiaoguan(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = doc.ext.get("xiaoshijie")
+        if not w:
+            yield event.plain_result("道友尚无小世界（#开辟小世界 世界名）。")
+            return
+        ok, msg, nw = xiaoshijie.force_ripen_all(w)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = doc.model_copy(deep=True)
+        d.ext["xiaoshijie"] = nw
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            await self.db.remove_item(doc.uid, xiaoshijie.FORCE_RIPEN_ITEM, 1)
+        yield event.plain_result(msg + f"（{xiaoshijie.FORCE_RIPEN_ITEM}×1 已消耗）")
+
+    async def _temple_run(self, event: AstrMessageEvent):
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = doc.ext.get("xiaoshijie")
+        if not w:
+            yield event.plain_result("道友尚无小世界（#开辟小世界 世界名）。")
+            return
+        y = yuanshi.system_of(doc)
+        inv = await self.db.get_inventory(doc.uid)
+        ok, msg, nw, cost_y, cost_ws = xiaoshijie.build_temple(
+            w, int(y.get("amount", 0) or 0), int(inv.get(xiaoshijie.WORKSHOP_NAME, 0) or 0))
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        y["amount"] = int(y.get("amount", 0) or 0) - cost_y
+        d = doc.model_copy(deep=True)
+        d.ext["yuanshi"] = y
+        d.ext["xiaoshijie"] = nw
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            await self.db.remove_item(doc.uid, xiaoshijie.WORKSHOP_NAME, cost_ws)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_WORLD_TEMPLE, "建立败天神殿")
+    async def handle_world_temple(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        async for r in self._temple_run(event):
+            yield r
+
+    @filter.command(CMD_WORLD_TEMPLE2, "建造败天神殿（别名）")
+    async def handle_world_temple2(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        async for r in self._temple_run(event):
+            yield r
+
+    async def _tame_run(self, event: AstrMessageEvent):
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = doc.ext.get("xiaoshijie")
+        if not w:
+            yield event.plain_result("道友尚无小世界（#开辟小世界 世界名）。")
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        pick = xiaoshijie.pick_talisman(inv)
+        if not pick:
+            yield event.plain_result("需要封灵符才能驯服仙兽！\n封灵符品质：普通(50%)、上品(70%)、极品(90%)")
+            return
+        talisman, _rate = pick
+        ok, msg, nw = xiaoshijie.tame(
+            w, talisman, random.Random(f"{doc.uid}:tame:{time.time_ns()}"))
+        d = doc.model_copy(deep=True)
+        d.ext["xiaoshijie"] = nw
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            await self.db.remove_item(doc.uid, talisman, 1)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_WORLD_TAME, "驯服仙兽")
+    async def handle_world_tame(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        async for r in self._tame_run(event):
+            yield r
+
+    async def _place_pet_run(self, event: AstrMessageEvent, name: str):
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = doc.ext.get("xiaoshijie")
+        if not w:
+            yield event.plain_result("道友尚无小世界（#开辟小世界 世界名）。")
+            return
+        name = (name or "").strip()
+        if not name:
+            yield event.plain_result("格式：#安置仙宠 仙宠名（消耗纳戒里的仙宠）")
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        info = self._pet_item_info(name)
+        if not info:
+            yield event.plain_result(f"纳戒里没有仙宠【{name}】（仙宠需先入纳戒，或收获时驯服野外仙兽）。")
+            return
+        shanhe = xt_mod.yield_mult(doc, "smallworld") > 1.0
+        ok, msg, nw = xiaoshijie.place_pet(
+            w, name, info.get("type", "战斗"), info.get("品级", "仙胎"),
+            None, shanhe_bonus=shanhe)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = doc.model_copy(deep=True)
+        d.ext["xiaoshijie"] = nw
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            await self.db.remove_item(doc.uid, name, 1)
+        yield event.plain_result(msg)
+
+    def _pet_item_info(self, name: str) -> dict | None:
+        """从仙宠图鉴取条目（class=仙宠）。"""
+        info = self.item_index.get(name)
+        if info and str(info.get("class", "")) == "仙宠":
+            return info
+        return None
+
+    @filter.command(CMD_WORLD_PLACE, "安置仙宠")
+    async def handle_world_place(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        async for r in self._place_pet_run(event, arg):
+            yield r
+
+    async def _recall_pet_run(self, event: AstrMessageEvent, name: str):
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = doc.ext.get("xiaoshijie")
+        if not w:
+            yield event.plain_result("道友尚无小世界（#开辟小世界 世界名）。")
+            return
+        ok, msg, nw = xiaoshijie.recall_pet(w, (name or "").strip())
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = doc.model_copy(deep=True)
+        d.ext["xiaoshijie"] = nw
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_WORLD_RECALL, "召回休息仙宠")
+    async def handle_world_recall(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        async for r in self._recall_pet_run(event, arg):
+            yield r
+
+    @filter.command(CMD_WORLD_RECALL2, "处理分配（召回别名）")
+    async def handle_world_recall2(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        async for r in self._recall_pet_run(event, arg):
+            yield r
+
+    @filter.command(CMD_WORLD_GUARD_SET, "设置仙宠守卫")
+    async def handle_world_guard_set(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = doc.ext.get("xiaoshijie")
+        if not w:
+            yield event.plain_result("道友尚无小世界。")
+            return
+        ok, msg, nw = xiaoshijie.set_guard(w, (arg or "").strip())
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = doc.model_copy(deep=True)
+        d.ext["xiaoshijie"] = nw
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_WORLD_GUARD_UNSET, "撤下仙宠守卫")
+    async def handle_world_guard_unset(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = doc.ext.get("xiaoshijie")
+        if not w:
+            yield event.plain_result("道友尚无小世界。")
+            return
+        ok, msg, nw = xiaoshijie.unset_guard(w)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = doc.model_copy(deep=True)
+        d.ext["xiaoshijie"] = nw
+        await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_WORLD_HABITAT, "小世界栖息地名册")
+    async def handle_world_habitat(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = doc.ext.get("xiaoshijie")
+        if not w:
+            yield event.plain_result("道友尚无小世界。")
+            return
+        shanhe = xt_mod.yield_mult(doc, "smallworld") > 1.0
+        async for r in self._smart(event, xiaoshijie.pets_text(w, shanhe), "小世界栖息地"):
+            yield r
+
+    async def _world_tour_run(self, event: AstrMessageEvent):
+        """图中巡游：需执掌【山河社稷图】，把收获锚点回拨 6 小时后立即重结算。"""
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = doc.ext.get("xiaoshijie")
+        if not w:
+            yield event.plain_result("道友尚无小世界（#开辟小世界 世界名）。")
+            return
+        if not w.get("avatar"):
+            yield event.plain_result("需先将分身化入小世界（#将分身化入小世界）。")
+            return
+        world = xt_mod.world_of(await self.db.get_calamity())
+        now = time.time()
+        ok, why, st = xt_mod._gate(doc, "山河社稷图", world, now, "图中巡游")
+        if not ok:
+            yield event.plain_result(why)
+            return
+        xt_mod._mark_cd(st, "图中巡游", now)
+        d = doc.model_copy(deep=True)
+        d.ext["xtzb"] = st
+        nw = dict(w)
+        nw["last_harvest"] = float(w.get("last_harvest") or now) - 6 * 3600
+        inv = await self.db.get_inventory(doc.uid)
+        ok2, msg, nw2, out, extras = xiaoshijie.harvest_full(
+            nw, now=now, inv=inv,
+            rng=random.Random(f"{doc.uid}:tour:{time.time_ns()}"),
+            shanhe=xt_mod.yield_mult(d, "smallworld") > 1.0)
+        if not ok2:
+            # 回拨不生效也不落库，CD 照标（原版同样先扣 CD）
+            await self.db.save_player(d.model_dump())
+            yield event.plain_result(msg)
+            return
+        d.ext["xiaoshijie"] = nw2
+        stones = out.pop("__stones__", 0)
+        d.stones += stones
+        d.exp += int(extras.pop("exp", 0) or 0)
+        if extras.get("xueqi"):
+            d.ext["xueqi"] = float(d.ext.get("xueqi", 0) or 0) + float(extras.pop("xueqi"))
+        if extras.get("yuanshi"):
+            y = yuanshi.system_of(d)
+            y["amount"] = int(y.get("amount", 0) or 0) + int(extras.pop("yuanshi"))
+            d.ext["yuanshi"] = y
+        if extras.get("insight"):
+            trib.add_insight(d, int(extras.pop("insight")))
+        meals = extras.pop("meals_used", {}) or {}
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            if out:
+                await self.db.add_items(doc.uid, out)
+            for food, qty in meals.items():
+                await self.db.remove_item(doc.uid, food, qty)
+        head = "你展开山河社稷图巡游一周，额外结算了 6 小时小世界产出。\n" + msg.replace("__stones__", "灵石")
+        pet_logs = extras.get("pet_logs") or []
+        if pet_logs:
+            head += "\n【仙宠工坊】\n" + "\n".join(pet_logs)
+        async for r in self._smart(event, head, "图中巡游"):
+            yield r
+        if extras.get("tame_msg"):
+            yield event.plain_result(extras["tame_msg"])
+
+    @filter.command(CMD_WORLD_TOUR, "图中巡游（山河社稷图）")
+    async def handle_world_tour(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        async for r in self._world_tour_run(event):
+            yield r
+
+    @filter.regex(r"^#使用(.+?)创造环境$")
+    async def handle_world_env(self, event: AstrMessageEvent):
+        """#使用材料名创造环境（原版 8 道具 → 8 环境）。"""
+        import re as _re
+        if not self._allowed(event):
+            return
+        m = _re.match(r"^#使用(.+?)创造环境$", (event.get_message_str() or "").strip())
+        item = (m.group(1).strip() if m else "")
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = doc.ext.get("xiaoshijie")
+        if not w:
+            yield event.plain_result("道友尚无小世界（#开辟小世界 世界名）。")
+            return
+        if not item:
+            yield event.plain_result("\n".join(
+                ["【小世界环境创造指南】可用道具："]
+                + [f"· {k} → {v}（{xiaoshijie.ENVIRONMENT_DESC[v]}）"
+                   for k, v in xiaoshijie.ENVIRONMENTS.items()]))
+            return
+        ok, msg, nw = xiaoshijie.create_environment(w, item)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = doc.model_copy(deep=True)
+        d.ext["xiaoshijie"] = nw
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            await self.db.remove_item(doc.uid, item, 1)
+        yield event.plain_result(msg)
+
+    @filter.regex(r"^#(?:使用|浇灌)?(草木精华露|岁月流金沙|掌天灵液)\s*(?:催熟|浇灌)?\s*(?:第)?(\d+)(?:号)?(?:作物|药田)?$")
+    async def handle_world_water_item(self, event: AstrMessageEvent):
+        """使用浇灌道具催熟单株（原版同款正则）。"""
+        import re as _re
+        if not self._allowed(event):
+            return
+        s = (event.get_message_str() or "").strip()
+        m = _re.match(r"^#(?:使用|浇灌)?(草木精华露|岁月流金沙|掌天灵液)\s*(?:催熟|浇灌)?\s*(?:第)?(\d+)(?:号)?(?:作物|药田)?$", s)
+        if not m:
+            yield event.plain_result("格式：#使用草木精华露 第1号作物")
+            return
+        item, idx = m.group(1), int(m.group(2))
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = doc.ext.get("xiaoshijie")
+        if not w:
+            yield event.plain_result("道友尚无小世界。")
+            return
+        ok, msg, nw = xiaoshijie.water_item(w, idx, item)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = doc.model_copy(deep=True)
+        d.ext["xiaoshijie"] = nw
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            await self.db.remove_item(doc.uid, item, 1)
+        yield event.plain_result(msg)
+
+    @filter.regex(r"^#一键浇灌(草木精华露|岁月流金沙|掌天灵液)$")
+    async def handle_world_batch_water(self, event: AstrMessageEvent):
+        """一键浇灌道具（原版 3/6/12h 直译，无冷却）。"""
+        import re as _re
+        if not self._allowed(event):
+            return
+        m = _re.match(r"^#一键浇灌(草木精华露|岁月流金沙|掌天灵液)$", (event.get_message_str() or "").strip())
+        item = m.group(1) if m else ""
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = doc.ext.get("xiaoshijie")
+        if not w:
+            yield event.plain_result("道友尚无小世界。")
+            return
+        ok, msg, nw = xiaoshijie.batch_water_item(w, item)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = doc.model_copy(deep=True)
+        d.ext["xiaoshijie"] = nw
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            await self.db.remove_item(doc.uid, item, 1)
+        yield event.plain_result(msg)
+
+    @filter.regex(r"^#分配仙宠(.+?)到(.+?)$")
+    async def handle_world_assign(self, event: AstrMessageEvent):
+        """分配仙宠到工坊（原版同款正则）。"""
+        import re as _re
+        if not self._allowed(event):
+            return
+        m = _re.match(r"^#分配仙宠(.+?)到(.+?)$", (event.get_message_str() or "").strip())
+        name, ws = (m.group(1).strip(), m.group(2).strip()) if m else ("", "")
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        w = doc.ext.get("xiaoshijie")
+        if not w:
+            yield event.plain_result("道友尚无小世界。")
+            return
+        ok, msg, nw = xiaoshijie.assign_pet(w, name, ws)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        d = doc.model_copy(deep=True)
+        d.ext["xiaoshijie"] = nw
+        await self.db.save_player(d.model_dump())
         yield event.plain_result(msg)
 
     # ---- 师徒 / 道侣 / 管理（对齐原版 shitu / Daolv / AdminSuper） ----
