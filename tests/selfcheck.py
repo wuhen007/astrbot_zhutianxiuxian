@@ -5595,6 +5595,159 @@ async def main():
     assert "众生念力" in dt43.materials_text() and "纪元" in dt43.forge_panel(w43, 102_000)
     print("W8-C3 daotreasure ok")
 
+    # ── 44. W8-C4 锻造深层 / 锻炉 / 神兵榜 ──────────────────────────────
+    from core import duanzao as dzl44        # noqa: E402
+    from core import daotreasure as dt44     # noqa: E402
+    from core import equipment as eq44       # noqa: E402
+
+    assert len(dzl44.FURNACES) == 7 and len(dzl44.FIRES) == 6 and len(dzl44.GONGFA) == 5
+    assert dzl44.FURNACES[5]["容纳量"] == 34     # 源码硬编码 34，非 json 的 77
+    assert abs(dzl44.time_speed({"fire": "道火", "gongfa": "无上炼器道"}) - 0.2) < 1e-9
+    assert dzl44.ELEMENT_AFFIX[0][1] == 0.35 and dzl44.NAME_MAX == 8
+
+    mat44 = {
+        "星银": {"name": "星银", "type": "锻造", "攻": 1.0, "防": 0.8, "血": 0.6,
+                 "暴": 0.2, "金": 1, "木": 0, "土": 0, "水": 0, "火": 0},
+        "庚金": {"name": "庚金", "type": "普通", "出售价": 3},
+    }
+    def look44(n):
+        return mat44.get(n)
+    tpl44 = [
+        {"name": "赤马阔刀", "type": "武器", "atk": 0.02, "def": 0.01, "HP": 0.01, "稀有度": 1},
+        {"name": "玄龟盾", "type": "护具", "atk": 0.01, "def": 0.4, "HP": 0.3, "稀有度": 3},
+        {"name": "混沌珠", "type": "法宝", "atk": 0.2, "def": 0.2, "HP": 0.2, "稀有度": 6},
+    ]
+    hid44 = [{"name": "真火灵根", "控器": 8, "type": 5}]
+    lvl44 = [{"level": "凡人", "exp": 500, "基础攻击": 2000, "基础防御": 2000,
+              "基础血量": 4000, "基础暴击": 0.0}]
+    rng44 = _random.Random(44)
+    t44 = 1_800_000.0
+
+    # ① 建档：天赋 80~119、隐藏灵根、不可重复
+    d44 = PlayerDoc(uid="w8c4", name="器痴", realm_index=25,
+                    ext={"occupation": "炼器师", "occupation_level": 20, "occupation_exp": 0})
+    d44.stones = 3_000_000
+    ok44, _, _ = dzl44.evaluate(d44, rng44, hid44)
+    assert ok44 and 80 <= dzl44.state_of(d44)["talent"] <= 119
+    ok44, _, _ = dzl44.evaluate(d44, rng44, hid44)
+    assert not ok44
+
+    # ② C3 回填：未建档旧档走职业等级，建档后逐项严格校验
+    bare44 = PlayerDoc(uid="w8c4bare", name="旧档", realm_index=25,
+                       ext={"occupation": "炼器师", "occupation_level": 24})
+    assert dzl44.gate(bare44) == (True, "", False)
+    ok44, _, _ = dt44.open_forge(bare44, "旧炉", dt44.world_of({}), 1000)
+    assert ok44
+    assert not dzl44.gate(d44)[0] and "混沌炉" in dzl44.gate(d44)[1]
+    st44 = dzl44.state_of(d44)
+    st44["furnace"] = "混沌炉"
+    assert "道火" in dzl44.gate(d44)[1]
+    st44["fire"] = "道火"
+    assert "熟练度" in dzl44.gate(d44)[1]
+    st44["gongfa"], st44["proficiency"] = "无上炼器道", 100
+    assert dzl44.gate(d44)[0] and dzl44.gate(d44)[2]
+    ok44, _, _ = dt44.open_forge(d44, "文明炉", dt44.world_of({}), 1000)
+    assert ok44                                # 三项齐备即可，不再看职业等级
+    bad44 = d44.model_copy(deep=True)
+    bad44.ext["forge"] = dict(st44, proficiency=3)
+    ok44, msg44, _ = dt44.open_forge(bad44, "废炉", dt44.world_of({}), 1000)
+    assert not ok44 and "熟练度" in msg44
+
+    # ③ 投料 / 温养 / 三种开炉
+    d44b = PlayerDoc(uid="w8c4b", name="匠人", realm_index=25,
+                     ext={"occupation": "炼器师", "occupation_level": 20, "occupation_exp": 0})
+    d44b.stones = 3_000_000
+    dzl44.evaluate(d44b, rng44, hid44)
+    inv44 = {"星银": 10, "庚金": 5, "时光令": 3, "造化本源": 2, "时光令配方": 1,
+             "时光石": 10, "世界石": 5, "天外清风": 5, "符纸": 50}
+    ok44, msg44, _ = dzl44.melt(d44b, inv44, "庚金*2", look44)
+    assert not ok44 and "凡界" in msg44
+    ok44, _, dl44 = dzl44.melt(d44b, inv44, "星银*3", look44)
+    assert ok44 and dl44["星银"] == -3 and dzl44.used(dzl44.state_of(d44b)) == 3
+    assert dzl44.capacity(dzl44.state_of(d44b), d44b) == 20   # 凡铁炉 10 + 20//2
+    ok44, _, _ = dzl44.start(d44b, t44)
+    assert ok44
+    ok44, msg44, _ = dzl44.open_forge(d44b, "normal", inv44, t44 + 60,
+                                      item_lookup=look44, templates=tpl44, rng=rng44)
+    assert not ok44 and "过短" in msg44
+    ok44, msg44, dl44 = dzl44.open_forge(d44b, "normal", inv44, t44 + 2000,
+                                         item_lookup=look44, templates=tpl44, rng=rng44)
+    assert ok44 and "获得" in msg44
+    arts44 = dzl44.state_of(d44b)["artifacts"]
+    assert len(arts44) == 1
+    nm44 = next(iter(arts44))
+    assert dl44[nm44] == 1 and arts44[nm44]["atk"] > 0 and arts44[nm44]["score"] > 0
+    assert dzl44.state_of(d44b)["proficiency"] == 2
+    assert int(d44b.ext.get("occupation_exp") or 0) > 0
+
+    # ④ 私有神兵卡注入装备聚合：clamp 0.99 且真的加三维
+    card44 = dzl44.item_card(d44b, nm44)
+    assert card44 and card44["class"] == "装备" and card44["atk"] <= dzl44.MAX_CARD_RATIO
+    def agg44(n):
+        return dzl44.item_card(d44b, n) or look44(n)
+    d44b.ext["equipment"] = {}
+    s44_plain = eq44.aggregate(d44b, lvl44, agg44)
+    d44b.ext["equipment"] = {"武器": nm44}
+    s44_worn = eq44.aggregate(d44b, lvl44, agg44)
+    assert s44_worn.atk > s44_plain.atk and s44_worn.defense > s44_plain.defense
+
+    # ⑤ 赋名 / 榜单 30 分钟缓存 / 神兵重铸同步
+    inv44[nm44] = 1
+    w44 = dzl44.world_of({})
+    ok44, msg44, _ = dzl44.name_it(d44b, inv44, f"{nm44}*九字神兵名字超长测试", w44, t44,
+                                   lambda n: False)
+    assert not ok44 and "超出" in msg44
+    ok44, _, dl44 = dzl44.name_it(d44b, inv44, f"{nm44}*诛仙", w44, t44, lambda n: False)
+    assert ok44 and dl44["诛仙"] == 1 and "诛仙" in w44["named"]
+    assert d44b.ext["equipment"]["武器"] == "诛仙"      # 穿戴槽同步
+    inv44["诛仙"] = 1                                    # 模拟 _dz_apply 落库后的背包
+    ok44, msg44, _ = dzl44.name_it(d44b, inv44, "诛仙*再来", w44, t44, lambda n: False)
+    assert not ok44 and "只能赋名一次" in msg44
+    p44 = [{"uid": d44b.uid, "name": d44b.name, "ext": d44b.ext}]
+    assert "诛仙" in dzl44.board(w44, p44, t44) and len(w44["board"]) == 1
+    w44["board"] = []
+    assert "诛仙" not in dzl44.board(w44, p44, t44 + 60)     # CD 内读缓存
+    dzl44.sync_recast(d44b, "诛仙", "诛仙改", w44)
+    assert "诛仙改" in dzl44.state_of(d44b)["artifacts"] and "诛仙改" in w44["named"]
+
+    # ⑥ 一键 / 完美开炉：跳过时间、扣道具、perfect 系数 +0.1
+    assert dzl44.melt(d44b, inv44, "星银*2", look44)[0]
+    ok44, msg44, dl44 = dzl44.open_forge(d44b, "oneclick", inv44, t44,
+                                         item_lookup=look44, templates=tpl44, rng=rng44)
+    assert ok44 and dl44["时光令"] == -1 and "跳过时间衰减" in msg44
+    assert dzl44.melt(d44b, inv44, "星银*2", look44)[0]
+    ok44, msg44, dl44 = dzl44.open_forge(d44b, "perfect", inv44, t44,
+                                         item_lookup=look44, templates=tpl44, rng=rng44)
+    assert ok44 and dl44["造化本源"] == -1 and "+0.10" in msg44
+    inv44["时光令"] = 0
+    assert dzl44.melt(d44b, inv44, "星银*1", look44)[0]
+    ok44, msg44, _ = dzl44.open_forge(d44b, "oneclick", inv44, t44,
+                                      item_lookup=look44, templates=tpl44, rng=rng44)
+    assert not ok44 and "时光令" in msg44
+
+    # ⑦ 炉阶 / 炉火 / 功法 / 时光令配方 / 清炉
+    inv44["道火"], inv44["混沌炉"] = 1, 1
+    ok44, _, _ = dzl44.install_furnace(d44b, "混沌炉", inv44)
+    assert ok44 and dzl44.capacity(dzl44.state_of(d44b), d44b) == 31
+    ok44, _, _ = dzl44.light_fire(d44b, "道火", inv44)
+    assert ok44 and abs(dzl44.time_speed(dzl44.state_of(d44b)) - 0.4) < 1e-9
+    ok44, _, _ = dzl44.learn_gongfa(d44b, "无上炼器道", inv44)
+    assert ok44 and d44b.stones == 1_000_000 and dzl44.state_of(d44b)["proficiency"] == 0
+    ok44, _, _ = dzl44.synth_token(d44b, inv44, "1")
+    assert not ok44
+    ok44, _, dl44 = dzl44.learn_recipe(d44b, inv44)
+    assert ok44 and dl44["时光令配方"] == -1
+    ok44, _, dl44 = dzl44.synth_token(d44b, inv44, "2")
+    assert ok44 and dl44["时光令"] == 2 and dl44["符纸"] == -20
+    assert dzl44.start(d44b, t44)[0]
+    dzl44.clear_state(dzl44.state_of(d44b))
+    assert dzl44.state_of(d44b)["materials"] == [] and dzl44.state_of(d44b)["status"] == 0
+    assert "我的锻炉" in dzl44.panel(d44b, t44, look44)
+    assert "#熔炼" in dzl44.help_text() and "shortcut" in dzl44.rules_text()
+    assert "星银" in dzl44.materials_text(look44, ["星银", "庚金"])
+    assert "庚金" not in dzl44.materials_text(look44, ["星银", "庚金"])
+    print("W8-C4 duanzao ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

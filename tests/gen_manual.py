@@ -153,6 +153,7 @@ def main() -> int:
                   "handle_dt_rename", "handle_dt_decree", "handle_dt_repair",
                   "handle_dt_life", "handle_dt_fate", "handle_dt_apt",
                   "handle_dt_accept", "handle_dt_tech", "handle_dt_world")),
+        ("锻炉 · 锻造深层", ("handle_furn_help", "handle_furn_rules", "handle_furn_mats", "handle_furn_eval", "handle_furn_show_furnace", "handle_furn_install", "handle_furn_show_fire", "handle_furn_light_fire", "handle_furn_show_gongfa", "handle_furn_learn_gongfa", "handle_furn_recipe", "handle_furn_synth", "handle_furn_melt", "handle_furn_start", "handle_furn_open", "handle_furn_oneclick", "handle_furn_perfect", "handle_furn_clear", "handle_furn_panel", "handle_furn_name", "handle_furn_board", "handle_furn_clear_all")),
         ("帮助", ("handle_help",)),
     ]
     grouped = {}

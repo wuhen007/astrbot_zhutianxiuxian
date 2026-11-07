@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, authority as authority_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, authority as authority_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -659,6 +659,29 @@ CMD_DT_WORLD = "#开辟大道界"
 CMD_DT_HELP = "#大道炼器帮助"
 CMD_DT_RULES = "#大道炼器规则"
 CMD_DT_MATS = "#文明燃料"
+# W8-C4：锻造深层 / 锻炉（原版 duanzao.js 19 条 rule；#神兵重铸 与既有 CMD_RECAST 撞名故不重复注册）
+CMD_FURN_HELP = "#锻炉帮助"
+CMD_FURN_RULES = "#锻炉规则"
+CMD_FURN_MATS = "#锻炉材料"
+CMD_FURN_EVAL = "#炼器师能力评测"
+CMD_FURN_MELT = "#熔炼"
+CMD_FURN_START = "#开始炼制"
+CMD_FURN_OPEN = "#开炉"
+CMD_FURN_CLEAR = "#清空锻炉"
+CMD_FURN_PANEL = "#我的锻炉"
+CMD_FURN_NAME = "#赋名"
+CMD_FURN_CLEAR_ALL = "#全体清空锻炉"
+CMD_FURN_BOARD = "#神兵榜"
+CMD_FURN_ONECLICK = "#一键开炉"
+CMD_FURN_PERFECT = "#一键完美开炉"
+CMD_FURN_SHOW_FURNACE = "#炼器炉"
+CMD_FURN_INSTALL = "#安装锻炉"
+CMD_FURN_SHOW_GONGFA = "#炼器功法"
+CMD_FURN_LEARN_GONGFA = "#修炼功法"
+CMD_FURN_SHOW_FIRE = "#炉火"
+CMD_FURN_LIGHT_FIRE = "#点燃炉火"
+CMD_FURN_RECIPE = "#参悟时光令配方"
+CMD_FURN_SYNTH = "#合成时光令"
 # W7-4：养成深度（灵根觉醒 / 寿元救援 / 帝兵铭文 / 职业产线 / 道法卡）
 CMD_LG_AWAKEN = "#灵根觉醒"
 CMD_RESCUE = "#轮回救人"
@@ -794,6 +817,11 @@ class ZhutianPlugin(Star):
                     dupes += 1
                     continue
                 self.item_index[e["name"]] = e
+        # W8-C4：锻炉材料九维专用索引（item_index 中"材料列表"可能先占同名条目）
+        self._furn_mats = {
+            e["name"]: e for e in (self.content.table("item/锻造材料") or [])
+            if isinstance(e, dict) and e.get("name")
+        }
         self.shop_stock = [
             e for t in ("item/常驻", "item/限定")
             for e in (self.content.table(t) if isinstance(self.content.table(t), list) else [])
@@ -1001,8 +1029,13 @@ class ZhutianPlugin(Star):
                 return
         yield event.plain_result(text)
 
+    def _furn_item(self, name: str):
+        """W8-C4：优先查锻造材料九维表，再回退全局物品索引。"""
+        return self._furn_mats.get(str(name)) or self.item_index.get(str(name))
+
     def _stats(self, doc: PlayerDoc) -> equipment.Stats:
-        # 本命帝兵是玩家私有数据（不在全局 item_index），按玩家注入 lookup 避免跨玩家同名污染
+        # 本命帝兵 / 锻炉神兵都是玩家私有数据（不在全局 item_index），
+        # 按玩家注入 lookup 避免跨玩家同名污染。
         w = dibing.system_of(doc)
         if w:
             card = dibing.item_card(w)
@@ -1011,9 +1044,12 @@ class ZhutianPlugin(Star):
             def lookup(n: str):
                 if n == name:
                     return card
-                return self.item_index.get(n)
+                art = dzl_mod.item_card(doc, n)
+                return art if art is not None else self.item_index.get(n)
         else:
-            lookup = self.item_index.get
+            def lookup(n: str):
+                art = dzl_mod.item_card(doc, n)
+                return art if art is not None else self.item_index.get(n)
         st = equipment.aggregate(
             doc, self.content.table(doc.realm_table), lookup,
             doc.ext.get("enh"), set(doc.ext.get("imperial") or []),
@@ -1695,6 +1731,21 @@ class ZhutianPlugin(Star):
                 (f"{CMD_DT_LIFE} / {CMD_DT_FATE} 名 / {CMD_DT_APT} 十级天资", "三大改命（耗 6/3/3 本源，改他人需 60 秒同意）"),
                 (CMD_DT_ACCEPT, "被改命者在 60 秒内确认邀请"),
                 (f"{CMD_DT_TECH} 名 类型 / {CMD_DT_WORLD} 名", "耗 8/12 本源，每件至宝各一次"),
+            ]},
+            {"title": "锻炉 · 锻造深层", "lines": [
+                (CMD_FURN_HELP, "锻炉全部指令一览"),
+                (CMD_FURN_RULES, "时序 / 系数 / 完美窗口 / shortcut 说明"),
+                (CMD_FURN_MATS, "可投炉的九维材料一览"),
+                (CMD_FURN_EVAL, "建档：随机天赋 80~119 + 隐藏灵根，赠凡铁炉/凡火"),
+                (f"{CMD_FURN_SHOW_FURNACE} / {CMD_FURN_INSTALL} 炉名", "七阶炉表 / 安装炉阶（需拥有炉道具）"),
+                (f"{CMD_FURN_SHOW_FIRE} / {CMD_FURN_LIGHT_FIRE} 火种名", "六品火种 / 点燃炉火（温养提速）"),
+                (f"{CMD_FURN_SHOW_GONGFA} / {CMD_FURN_LEARN_GONGFA} 功法名", "五部炼器功法 / 修炼（换功法熟练度归零）"),
+                (f"{CMD_FURN_MELT} 材料名*数量 / {CMD_FURN_START}", "投料（容量=炉容纳量+职业等级/2） / 启动温养"),
+                (f"{CMD_FURN_OPEN} / {CMD_FURN_ONECLICK} / {CMD_FURN_PERFECT}", "常规出炉 / 时光令一键 / 时光令+造化本源强制完美"),
+                (f"{CMD_FURN_PANEL} / {CMD_FURN_CLEAR} / {CMD_FURN_CLEAR_ALL}", "炉内明细与完美窗口 / 清炉 / 管理员全服清炉"),
+                (f"{CMD_FURN_NAME} 原名*新名 / {CMD_FURN_BOARD}", "8 字赋名刻谱（一件一次） / 全服 Top20 神兵榜"),
+                (f"{CMD_FURN_RECIPE} / {CMD_FURN_SYNTH} 数量", "参悟时光令配方 / 合成时光令"),
+                ("⚠️ #大道权柄 开铸", "需混沌炉或造化仙炉 + 道火 + 无上炼器道熟练度 100"),
             ]},
         ]
 
@@ -4981,21 +5032,27 @@ class ZhutianPlugin(Star):
             yield event.plain_result("你没有神兵重铸卡。")
             return
         d = doc.model_copy(deep=True)
+        # W8-C4：若改的是锻炉神兵，先在内存里同步私有卡与榜单登记，
+        # 再连同玩家档一起落库（事务块内不做无关 IO）。
+        _st = await self.db.get_calamity()
+        _w = dzl_mod.world_of(_st)
+        dzl_mod.sync_recast(d, old_name, new_name, _w)
+        # 穿戴槽同步
+        equip = dict(d.ext.get("equipment") or {})
+        changed = False
+        for slot, equipped in equip.items():
+            if equipped == old_name:
+                equip[slot] = new_name
+                changed = True
+        if changed:
+            d.ext["equipment"] = equip
         async with self.db.transaction():
             await self.db.save_player(d.model_dump())
             await self.db.remove_item(doc.uid, "神兵重铸卡", 1)
             await self.db.remove_item(doc.uid, old_name, 1)
             await self.db.add_items(doc.uid, {new_name: 1})
-            # 穿戴槽同步
-            equip = dict(d.ext.get("equipment") or {})
-            changed = False
-            for slot, equipped in equip.items():
-                if equipped == old_name:
-                    equip[slot] = new_name
-                    changed = True
-            if changed:
-                d.ext["equipment"] = equip
-                await self.db.save_player(d.model_dump())
+        dzl_mod.set_world(_st, _w)
+        await self.db.save_calamity(_st)
         yield event.plain_result("神光转瞬即逝，神兵已重塑真名，重回您的纳戒当中。")
 
     @filter.command(CMD_SHUANGXIU, "双修")
@@ -16832,3 +16889,200 @@ class ZhutianPlugin(Star):
         async for r in self._dt_dispatch(event, "开辟大道界",
                 lambda d, i, w, y, td, t: dt_mod.create_world(d, a, w)):
             yield r
+
+
+    # ─────────────────── W8-C4 锻造深层 · 锻炉 · 神兵榜 ───────────────────
+    async def _furn_dispatch(self, event, title, fn, need_inv=False, need_board=False):
+        """统一分发：玩家私有炉 + 全服神兵榜状态 + 物品增减（复用 B6 事务落库）。"""
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid) if need_inv else {}
+        state = await self.db.get_calamity()
+        world = dzl_mod.world_of(state)
+        now = time.time()
+        players = await self.db.all_players() if need_board else []
+        templates = [
+            e for t in dzl_mod.ARTIFACT_PREFIX
+            for e in (self.content.table("item/" + t) or [])
+            if isinstance(e, dict) and e.get("name")
+        ]
+        mats = self.content.table("item/锻造材料") or []
+        c = {
+            "inv": inv, "world": world, "now": now,
+            "rng": random.Random(f"{doc.uid}:{now}:{title}"),
+            "templates": templates, "hidden": self.content.table("item/隐藏灵根") or [],
+            "players": players, "lookup": self._furn_item,
+            "name_exists": lambda n: n in self.item_index,
+            "mat_names": [e.get("name") for e in mats if isinstance(e, dict)],
+        }
+        result = fn(doc, c)
+        dzl_mod.set_world(state, world)
+        await self.db.save_calamity(state)
+        async for r in self._dz_finish(event, doc, result, title):
+            yield r
+
+    @filter.command(CMD_FURN_HELP, "锻炉全部指令一览")
+    async def handle_furn_help(self, event: AstrMessageEvent):
+        async for r in self._furn_dispatch(event, "锻炉帮助",
+                lambda d, c: (True, dzl_mod.help_text(), {})):
+            yield r
+
+    @filter.command(CMD_FURN_RULES, "锻炉时序 / 系数 / 完美窗口规则")
+    async def handle_furn_rules(self, event: AstrMessageEvent):
+        async for r in self._furn_dispatch(event, "锻炉规则",
+                lambda d, c: (True, dzl_mod.rules_text(), {})):
+            yield r
+
+    @filter.command(CMD_FURN_MATS, "可投炉的九维锻造材料")
+    async def handle_furn_mats(self, event: AstrMessageEvent):
+        async for r in self._furn_dispatch(event, "锻炉材料",
+                lambda d, c: (True, dzl_mod.materials_text(c["lookup"], c["mat_names"]), {})):
+            yield r
+
+    @filter.command(CMD_FURN_EVAL, "炼器师能力评测（建档）")
+    async def handle_furn_eval(self, event: AstrMessageEvent):
+        async for r in self._furn_dispatch(event, "炼器师能力评测",
+                lambda d, c: dzl_mod.evaluate(d, c["rng"], c["hidden"])):
+            yield r
+
+    @filter.command(CMD_FURN_SHOW_FURNACE, "七阶炼器炉一览")
+    async def handle_furn_show_furnace(self, event: AstrMessageEvent):
+        async for r in self._furn_dispatch(event, "炼器炉",
+                lambda d, c: (True, dzl_mod.show_furnace(d), {})):
+            yield r
+
+    @filter.command(CMD_FURN_INSTALL, "安装锻炉（需拥有炉道具）")
+    async def handle_furn_install(self, event: AstrMessageEvent, arg: str = ""):
+        a = self._xt_clean(arg)
+        async for r in self._furn_dispatch(event, "安装锻炉",
+                lambda d, c: dzl_mod.install_furnace(d, a, c["inv"]), True):
+            yield r
+
+    @filter.command(CMD_FURN_SHOW_FIRE, "六品炉火一览")
+    async def handle_furn_show_fire(self, event: AstrMessageEvent):
+        async for r in self._furn_dispatch(event, "炉火",
+                lambda d, c: (True, dzl_mod.show_fire(d), {})):
+            yield r
+
+    @filter.command(CMD_FURN_LIGHT_FIRE, "点燃炉火（温养提速）")
+    async def handle_furn_light_fire(self, event: AstrMessageEvent, arg: str = ""):
+        a = self._xt_clean(arg)
+        async for r in self._furn_dispatch(event, "点燃炉火",
+                lambda d, c: dzl_mod.light_fire(d, a, c["inv"]), True):
+            yield r
+
+    @filter.command(CMD_FURN_SHOW_GONGFA, "五部炼器功法一览")
+    async def handle_furn_show_gongfa(self, event: AstrMessageEvent):
+        async for r in self._furn_dispatch(event, "炼器功法",
+                lambda d, c: (True, dzl_mod.show_gongfa(d), {})):
+            yield r
+
+    @filter.command(CMD_FURN_LEARN_GONGFA, "修炼炼器功法（重置熟练度）")
+    async def handle_furn_learn_gongfa(self, event: AstrMessageEvent, arg: str = ""):
+        a = self._xt_clean(arg)
+        async for r in self._furn_dispatch(event, "修炼功法",
+                lambda d, c: dzl_mod.learn_gongfa(d, a, c["inv"]), True):
+            yield r
+
+    @filter.command(CMD_FURN_RECIPE, "参悟时光令配方")
+    async def handle_furn_recipe(self, event: AstrMessageEvent):
+        async for r in self._furn_dispatch(event, "参悟时光令配方",
+                lambda d, c: dzl_mod.learn_recipe(d, c["inv"]), True):
+            yield r
+
+    @filter.command(CMD_FURN_SYNTH, "合成时光令（需已参悟配方）")
+    async def handle_furn_synth(self, event: AstrMessageEvent, arg: str = ""):
+        a = self._xt_clean(arg)
+        async for r in self._furn_dispatch(event, "合成时光令",
+                lambda d, c: dzl_mod.synth_token(d, c["inv"], a), True):
+            yield r
+
+    @filter.command(CMD_FURN_MELT, "投料：材料名*数量（仅九维锻造材料）")
+    async def handle_furn_melt(self, event: AstrMessageEvent, arg: str = ""):
+        a = self._xt_clean(arg)
+        async for r in self._furn_dispatch(event, "熔炼投料",
+                lambda d, c: dzl_mod.melt(d, c["inv"], a, c["lookup"]), True):
+            yield r
+
+    @filter.command(CMD_FURN_START, "启动温养（180 分钟基准）")
+    async def handle_furn_start(self, event: AstrMessageEvent):
+        async for r in self._furn_dispatch(event, "开始炼制",
+                lambda d, c: dzl_mod.start(d, c["now"])):
+            yield r
+
+    @filter.command(CMD_FURN_OPEN, "常规开炉 = 出炉（需温养 ≥30 分钟 × 提速）")
+    async def handle_furn_open(self, event: AstrMessageEvent):
+        async for r in self._furn_dispatch(event, "开炉",
+                lambda d, c: dzl_mod.open_forge(d, "normal", c["inv"], c["now"],
+                    item_lookup=c["lookup"], templates=c["templates"], rng=c["rng"]), True):
+            yield r
+
+    @filter.command(CMD_FURN_ONECLICK, "一键开炉（时光令×1，跳过时间与衰减）")
+    async def handle_furn_oneclick(self, event: AstrMessageEvent):
+        async for r in self._furn_dispatch(event, "一键开炉",
+                lambda d, c: dzl_mod.open_forge(d, "oneclick", c["inv"], c["now"],
+                    item_lookup=c["lookup"], templates=c["templates"], rng=c["rng"]), True):
+            yield r
+
+    @filter.command(CMD_FURN_PERFECT, "一键完美开炉（时光令+造化本源，系数 +0.1）")
+    async def handle_furn_perfect(self, event: AstrMessageEvent):
+        async for r in self._furn_dispatch(event, "一键完美开炉",
+                lambda d, c: dzl_mod.open_forge(d, "perfect", c["inv"], c["now"],
+                    item_lookup=c["lookup"], templates=c["templates"], rng=c["rng"]), True):
+            yield r
+
+    @filter.command(CMD_FURN_CLEAR, "清空本人炉内材料与温养状态")
+    async def handle_furn_clear(self, event: AstrMessageEvent):
+        async for r in self._furn_dispatch(event, "清空锻炉",
+                lambda d, c: dzl_mod.clear(d)):
+            yield r
+
+    @filter.command(CMD_FURN_PANEL, "我的锻炉：炉阶/炉火/功法/材料/完美窗口/产出")
+    async def handle_furn_panel(self, event: AstrMessageEvent):
+        async for r in self._furn_dispatch(event, "我的锻炉",
+                lambda d, c: (True, dzl_mod.panel(d, c["now"], c["lookup"]), {})):
+            yield r
+
+    @filter.command(CMD_FURN_NAME, "赋名：原神兵名*新名（8 字、全服唯一、一件一次）")
+    async def handle_furn_name(self, event: AstrMessageEvent, arg: str = ""):
+        a = self._xt_clean(arg)
+        async for r in self._furn_dispatch(event, "赋名",
+                lambda d, c: dzl_mod.name_it(d, c["inv"], a, c["world"], c["now"],
+                                             c["name_exists"]), True):
+            yield r
+
+    @filter.command(CMD_FURN_BOARD, "全服 Top20 神兵榜（30 分钟重建、无奖励）")
+    async def handle_furn_board(self, event: AstrMessageEvent):
+        async for r in self._furn_dispatch(event, "神兵榜",
+                lambda d, c: (True, dzl_mod.board(c["world"], c["players"], c["now"]), {}),
+                need_board=True):
+            yield r
+
+    @filter.command(CMD_FURN_CLEAR_ALL, "管理员：清空全服炉内材料与温养状态")
+    async def handle_furn_clear_all(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not event.is_admin:
+            yield event.plain_result("仅管理员可清空全服锻炉。")
+            return
+        n = 0
+        for uid in await self.db.all_player_uids():
+            row = await self.db.get_player(uid)
+            if not row:
+                continue
+            ext = row.get("ext")
+            if isinstance(ext, dict) and isinstance(ext.get(dzl_mod.EXT_KEY), dict):
+                dzl_mod.clear_state(ext[dzl_mod.EXT_KEY])
+                await self.db.save_player(row)
+                n += 1
+        state = await self.db.get_calamity()
+        world = dzl_mod.world_of(state)
+        world["board_cd"] = 0.0
+        dzl_mod.set_world(state, world)
+        await self.db.save_calamity(state)
+        yield event.plain_result(
+            f"已清空 {n} 位道友的炉内材料与温养状态（炉阶/炉火/功法/神兵保留）。")

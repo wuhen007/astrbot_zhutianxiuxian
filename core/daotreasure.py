@@ -14,7 +14,8 @@
 shortcut（与原版差异，写清楚便于以后升级）：
 1. `#大道至宝` 已被 W7-5a「彼岸铸宝」占用，本批改用 `#大道权柄`（别名 `#文明至宝`）。
 2. 原版要求 `炉阶∈{混沌炉,造化仙炉}` + `炉火=道火` + `炼器功法=无上炼器道/熟练度100`；
-   本移植 C4 之前没有炉与功法熟练度，折算为「炼器师职业等级 ≥20（炉火纯青）」。
+   C4 锻炉落地后由 `duanzao.gate()` 回填这三项（见 `open_forge`）；未建档的旧存档
+   仍回退「炼器师职业等级 ≥20（炉火纯青）」，避免卡死 C3 已有进度。
 3. 至宝三维：原版固定 +1e12 与套装乘区 +300，按本移植 C1/C2 的 ÷1000 口径折算为
    flat 300_000 / ratio 0.30 / bao 0.15；超纲的 1e12 会碾平全部既有体系。
 4. 原版「永寂之界复活 / 指定命格表 / 小世界升格大道界」依赖三套本移植没有的外部系统，
@@ -369,7 +370,17 @@ def open_forge(doc: Any, name: str, w: dict[str, Any], years_total: int
         return _no("唯有炼器师能够立下大道熔炉。")
     if auth_mod.authority_of(doc) < 22:
         return _no("开铸大道至宝需要达到祭道境（权柄境界 ≥22）。")
-    if int(doc.ext.get("occupation_level") or 0) < 20:
+    # W8-C4 回填：锻炉落地后走原版三项校验（炉阶/炉火/无上炼器道熟练度），
+    # 未建档的旧存档仍回退职业等级 ≥20，避免卡死 C3 已有进度。
+    try:
+        from . import duanzao as _dzl
+        gate_ok, gate_msg, strict = _dzl.gate(doc)
+    except Exception:
+        gate_ok, gate_msg, strict = True, "", False
+    if strict:
+        if not gate_ok:
+            return _no(gate_msg)
+    elif int(doc.ext.get("occupation_level") or 0) < 20:
         return _no("需将炼器之道修至「炉火纯青」（职业等级 ≥20），方能承受文明炉火。")
     w["project"] = _new_project(doc, name, years_total)
     w.setdefault("history", []).append(f"世界年 {years_total:,}：{doc.name or doc.uid[:8]} 立炉【{name}】")
