@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -275,6 +275,21 @@ CMD_TB_SHUTDOWN = "#关闭所有讨伐"
 CMD_TB_AWAKEN = "#帝尊感知"
 CMD_TB_REVIVE = "#复苏帝尊"
 CMD_TB_SETTLE = "#结算魔君奖励"
+# W8-D5：若陀龙王竞价团（原版 apps/TeamBoss/TeamBoss.js 11 条活跃 rule + 3 条补位）
+CMD_DR_HELP = "#若陀龙王帮助"
+CMD_DR_RULES = "#若陀龙王规则"
+CMD_DR_SYSTEM = "#若陀龙王系统"
+CMD_DR_STATUS = "#若陀龙王状态"
+CMD_DR_RANK = "#龙王榜"
+CMD_DR_FIGHT = "#讨伐若陀龙王"
+CMD_DR_JOIN = "#加入讨伐若陀龙王"
+CMD_DR_LOOT = "#若陀龙王奖励"
+CMD_DR_BID = "#若陀龙王出价"
+CMD_DR_ASSIGN = "#若陀龙王分配"
+CMD_DR_LIST = "#若陀龙王团本"
+CMD_DR_LEAVE = "#退出若陀龙王团本"
+CMD_DR_OPEN = "#开启若陀龙王"
+CMD_DR_CLOSE = "#关闭若陀龙王"
 CMD_ENDLESS = "#无尽劫境"
 CMD_ENDLESS_START = "#开启无尽劫境"
 CMD_ENDLESS_MAP = "#劫途星图"
@@ -1871,6 +1886,14 @@ class ZhutianPlugin(Star):
                 (f"{CMD_TB_ENABLE} / {CMD_TB_DISABLE} / {CMD_TB_RESET_CD} / {CMD_TB_SHUTDOWN}", "管理员：系统开关 / 重置全服 CD / 关闭所有讨伐"),
                 (f"{CMD_TB_AWAKEN} reclaim|confront / {CMD_TB_REVIVE}", "管理员：切感知 / 复苏帝尊（回滚永久击杀）"),
                 ("⚠️ 帝尊无奖励不占 CD", "普通团本仍走 #创建讨伐队伍 / #讨伐出手；跨服三指令不做"),
+            ]},
+            {"title": "若陀龙王 · 竞价团", "lines": [
+                (f"{CMD_DR_HELP} / {CMD_DR_RULES} / {CMD_DR_SYSTEM}", "全部指令 / 完整规则口径 / 全服开关与管理员留痕"),
+                (f"{CMD_DR_LIST} / {CMD_DR_JOIN} 编号 / {CMD_DR_LEAVE}", "列团本 / 入团（5 人上限）/ 退团（每团一次机会）"),
+                (f"{CMD_DR_FIGHT} / {CMD_DR_STATUS} / {CMD_DR_RANK}", "单挑镜像幻影折算共享血条 / 攻防打码面板 / 伤害榜前 20"),
+                (f"{CMD_DR_LOOT} / {CMD_DR_BID} 编号*价格 / {CMD_DR_ASSIGN} 编号", "5 件掉落 / 加价 ≥30%（填 1 自动）/ 团长分配并平分灵石"),
+                (f"{CMD_DR_OPEN} / {CMD_DR_CLOSE}", "管理员：唤醒新团本（建团即抽定掉落）/ 清空全部并重置退团锁"),
+                ("⚠️ 与帝尊团本不互通", "本团各自单挑 + 竞价；掉落池是 GroupBoss.json 36 条；终结者得起死回生丹 ×5"),
             ]},
         ]
 
@@ -18416,3 +18439,253 @@ class ZhutianPlugin(Star):
             tb_mod.note(w, f"{doc.name or doc.uid[:8]} 离开帝尊队 {team['code']}", time.time())
             await self._tb_save(state, w)
         yield event.plain_result(f"已离开【{team['boss']}】队伍（{team['code']}）。")
+
+    # ─────────────── W8-D5 若陀龙王竞价团（原版 apps/TeamBoss/TeamBoss.js） ───────────────
+    # 与 W8-D4 的 tuanben 是两套互不相通的团本：D4 多人回合 + 等额随机奖励，
+    # D5 各自单挑幻影 + 共享血条 + 掉落竞价。状态挂 calamity_state["dragon"]，db 仍 v17。
+
+    async def _dr_avg_pool(self) -> tuple[list, int, int]:
+        """原版 GetAverageDamage：遍历境界 ≥30 的玩家攻击，>15 人去最大值后求平均。"""
+        vals: list[int] = []
+        for raw in await self.db.all_players():
+            try:
+                p = PlayerDoc(**raw)
+                if int(p.realm_index) + 1 >= dr_mod.HP_STAT_GATE:
+                    vals.append(int(self._stats(p).atk))
+            except Exception:
+                continue
+        if len(vals) > 15:
+            vals = sorted(vals)[1:]        # 原版去最高值，避免极端号拉爆血条
+        avg = int(sum(vals) / len(vals)) if vals else 0
+        table = self.content.table("item/GroupBoss") or []
+        pool = list(table[0].get("one") or []) if (
+            isinstance(table, list) and table and isinstance(table[0], dict)) else []
+        return pool, avg, len(vals)
+
+    async def _dr_dispatch(self, event, title, fn, *, arg: str = "", admin=False,
+                           need_fight=False, need_balance=False, need_avg=False):
+        """统一分发：读 dragon 单例 → 纯函数 → 统一落全服状态与跨玩家账变。
+
+        fn(doc, w, ts, rng, ctx) -> (msg, ops)；ops 支持：
+          ("hp", uid, value) / ("stones", uid, delta) /
+          ("items", uid, {name: qty}) / ("clear_exit",)
+        """
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if admin and not bool(event.is_admin):
+            yield event.plain_result("唤醒与封印若陀龙王，唯管理员可执。")
+            return
+        state = calamity.ensure(await self.db.get_calamity())
+        w = dr_mod.world_of(state)
+        ts = time.time()
+        rng = random.Random(f"{doc.uid}:dr:{time.time_ns()}")
+        ctx: dict = {"arg": arg, "admin": bool(event.is_admin)}
+        if need_fight:
+            cur, cap = self._hp_pair(doc)
+            ctx.update(stats=self._stats(doc), cur_hp=cur, hp_max=cap,
+                       auth21=authority_mod.authority_21(doc))
+        if need_avg:
+            pool, avg, count = await self._dr_avg_pool()
+            ctx.update(pool=pool, avg_atk=avg, sample_count=count)
+        if need_balance:
+            balances: dict[str, int] = {}
+            uids: set[str] = set()
+            for team in (w.get("bosses") or {}).values():
+                if not isinstance(team, dict):
+                    continue
+                for uid in (team.get("members") or []):
+                    uids.add(str(uid))
+                for lot in (team.get("loot") or []):
+                    if isinstance(lot, dict) and lot.get("bidder"):
+                        uids.add(str(lot["bidder"]))
+            for uid in uids:
+                if uid == doc.uid:
+                    balances[uid] = int(doc.stones)
+                    continue
+                row = await self.db.get_player(uid)
+                if row:
+                    balances[uid] = int(PlayerDoc(**row).stones)
+            ctx["balances"] = balances
+
+        msg, ops = fn(doc, w, ts, rng, ctx)
+        others: dict[str, PlayerDoc] = {}
+        for op in ops:
+            kind = op[0]
+            if kind == "hp" and str(op[1]) == str(doc.uid):
+                doc.ext["hp"] = int(op[2])
+            elif kind == "stones":
+                uid, delta = str(op[1]), int(op[2])
+                if uid == str(doc.uid):
+                    doc.stones = max(0, int(doc.stones) + delta)
+                else:
+                    p = others.get(uid)
+                    if p is None:
+                        row = await self.db.get_player(uid)
+                        if not row:
+                            continue
+                        p = PlayerDoc(**row)
+                        others[uid] = p
+                    p.stones = max(0, int(p.stones) + delta)
+            elif kind == "items":
+                await self.db.add_items(str(op[1]),
+                                        {k: int(v) for k, v in op[2].items()})
+            elif kind == "clear_exit":
+                # 原版 GardenBossExit 只 set 不 del；本移植关闭团本时统一清退团锁
+                for raw in await self.db.all_players():
+                    try:
+                        p = PlayerDoc(**raw)
+                        s = dr_mod.player_state_of(p)
+                        if not s.get("exit_ids"):
+                            continue
+                        s["exit_ids"] = []
+                        dr_mod.set_player(p, s)
+                        if p.uid == doc.uid:
+                            doc.ext["dragon"] = p.ext["dragon"]
+                        else:
+                            others[p.uid] = p
+                    except Exception:
+                        continue
+        async with self.db.transaction():
+            for p in others.values():
+                await self.db.save_player(p.model_dump())
+            await self.db.save_player(doc.model_dump())
+        dr_mod.set_world(state, w)
+        await self.db.save_calamity(state)
+        async for r in self._smart(event, msg, title):
+            yield r
+
+    @filter.command(CMD_DR_HELP, "若陀龙王团本全部指令一览")
+    async def handle_dr_help(self, event: AstrMessageEvent):
+        async for r in self._dr_dispatch(event, "若陀龙王帮助",
+                lambda d, w, t, r, c: (dr_mod.help_text(), [])):
+            yield r
+
+    @filter.command(CMD_DR_RULES, "若陀龙王团本完整规则口径")
+    async def handle_dr_rules(self, event: AstrMessageEvent):
+        async for r in self._dr_dispatch(event, "若陀龙王规则",
+                lambda d, w, t, r, c: (dr_mod.rules_text(), [])):
+            yield r
+
+    @filter.command(CMD_DR_SYSTEM, "全服龙王团本与管理员留痕")
+    async def handle_dr_system(self, event: AstrMessageEvent):
+        async for r in self._dr_dispatch(event, "若陀龙王系统",
+                lambda d, w, t, r, c: (dr_mod.system_text(w), [])):
+            yield r
+
+    @filter.command(CMD_DR_LIST, "列出进行中的若陀龙王团本")
+    async def handle_dr_list(self, event: AstrMessageEvent):
+        async for r in self._dr_dispatch(event, "若陀龙王团本",
+                lambda d, w, t, r, c: (dr_mod.list_text(w), [])):
+            yield r
+
+    @filter.command(CMD_DR_STATUS, "若陀龙王状态与个人调息")
+    async def handle_dr_status(self, event: AstrMessageEvent):
+        async for r in self._dr_dispatch(event, "若陀龙王状态",
+                lambda d, w, t, r, c: (dr_mod.status_text(w, d, t), [])):
+            yield r
+
+    @filter.command(CMD_DR_RANK, "龙王榜：累计伤害前 20 与占比")
+    async def handle_dr_rank(self, event: AstrMessageEvent):
+        async for r in self._dr_dispatch(event, "龙王榜",
+                lambda d, w, t, r, c: (dr_mod.rank_text(w, d), [])):
+            yield r
+
+    @filter.command(CMD_DR_FIGHT, "讨伐若陀龙王幻影（共享血条）")
+    async def handle_dr_fight(self, event: AstrMessageEvent):
+        async for r in self._dr_dispatch(event, "讨伐若陀龙王",
+                lambda d, w, t, r, c: dr_mod.fight(
+                    w, d, c["stats"], c["cur_hp"], c["hp_max"], c["auth21"], t, r),
+                need_fight=True):
+            yield r
+
+    async def _dr_join(self, event, arg: str):
+        auth21 = authority_mod.authority_21  # 闭包内按 doc 计算，避免重复取玩家档
+        def _fn(d, w, t, r, c):
+            return dr_mod.join_boss(w, d, c["arg"], auth21(d), t), []
+        async for r in self._dr_dispatch(event, "加入讨伐若陀龙王", _fn, arg=arg):
+            yield r
+
+    @filter.command(CMD_DR_JOIN, "加入讨伐若陀龙王（空格参数：编号）")
+    async def handle_dr_join(self, event: AstrMessageEvent, arg: str = ""):
+        async for r in self._dr_join(event, arg):
+            yield r
+
+    @filter.regex(r"^#加入讨伐若陀龙王(\d+)$")
+    async def handle_dr_join_bare(self, event: AstrMessageEvent):
+        """原版 `^#加入讨伐若陀龙王.*$`：编号紧跟指令、无空格。"""
+        import re as _re
+        m = _re.match(r"^#加入讨伐若陀龙王(\d+)$", (event.get_message_str() or "").strip())
+        async for r in self._dr_join(event, m.group(1) if m else "1"):
+            yield r
+
+    @filter.command(CMD_DR_LEAVE, "退出若陀龙王团本（每团一次机会）")
+    async def handle_dr_leave(self, event: AstrMessageEvent):
+        async for r in self._dr_dispatch(event, "退出若陀龙王团本",
+                lambda d, w, t, r, c: (dr_mod.leave_boss(w, d, t), [])):
+            yield r
+
+    @filter.command(CMD_DR_LOOT, "查看 5 件掉落与当前出价")
+    async def handle_dr_loot(self, event: AstrMessageEvent):
+        async for r in self._dr_dispatch(event, "若陀龙王奖励",
+                lambda d, w, t, r, c: (dr_mod.loot_text(w, d), [])):
+            yield r
+
+    async def _dr_bid(self, event, arg: str):
+        async for r in self._dr_dispatch(event, "若陀龙王出价",
+                lambda d, w, t, r, c: dr_mod.bid(w, d, c["arg"], t), arg=arg):
+            yield r
+
+    @filter.command(CMD_DR_BID, "若陀龙王出价（空格参数：编号*价格）")
+    async def handle_dr_bid(self, event: AstrMessageEvent, arg: str = ""):
+        async for r in self._dr_bid(event, arg):
+            yield r
+
+    @filter.regex(r"^#若陀龙王出价(\d+)\*(\d+)$")
+    async def handle_dr_bid_bare(self, event: AstrMessageEvent):
+        """原版 `^#若陀龙王出价.*$`：`编号*价格`，`*` 是字面分隔符。"""
+        import re as _re
+        m = _re.match(r"^#若陀龙王出价(\d+)\*(\d+)$",
+                      (event.get_message_str() or "").strip())
+        arg = f"{m.group(1)}*{m.group(2)}" if m else "1*1"
+        async for r in self._dr_bid(event, arg):
+            yield r
+
+    async def _dr_assign(self, event, arg: str):
+        async for r in self._dr_dispatch(event, "若陀龙王分配",
+                lambda d, w, t, r, c: dr_mod.assign(w, d, c["arg"], c["balances"], t),
+                arg=arg, need_balance=True):
+            yield r
+
+    @filter.command(CMD_DR_ASSIGN, "团长分配掉落（空格参数：编号）")
+    async def handle_dr_assign(self, event: AstrMessageEvent, arg: str = ""):
+        async for r in self._dr_assign(event, arg):
+            yield r
+
+    @filter.regex(r"^#若陀龙王分配(\d+)$")
+    async def handle_dr_assign_bare(self, event: AstrMessageEvent):
+        """原版 `^#若陀龙王分配.*$`：注意帮助 yaml 误抄成末尾带 `$`。"""
+        import re as _re
+        m = _re.match(r"^#若陀龙王分配(\d+)$", (event.get_message_str() or "").strip())
+        async for r in self._dr_assign(event, m.group(1) if m else "1"):
+            yield r
+
+    @filter.command(CMD_DR_OPEN, "管理员：唤醒一支若陀龙王团本")
+    async def handle_dr_open(self, event: AstrMessageEvent):
+        def _fn(d, w, t, r, c):
+            _ok, msg = dr_mod.create_boss(
+                w, d.uid, d.name, c["avg_atk"], c["sample_count"], t, c["pool"], r)
+            return msg, []
+        async for r in self._dr_dispatch(event, "开启若陀龙王", _fn,
+                                         need_avg=True, admin=True):
+            yield r
+
+    @filter.command(CMD_DR_CLOSE, "管理员：关闭并清空全部若陀龙王团本")
+    async def handle_dr_close(self, event: AstrMessageEvent):
+        async for r in self._dr_dispatch(event, "关闭若陀龙王",
+                lambda d, w, t, r, c: (dr_mod.close_all(w, t), [("clear_exit",)]),
+                admin=True):
+            yield r

@@ -6325,6 +6325,177 @@ async def main():
     assert (await db.get_raid("485678"))["status"] == "closed"
     print("W8-D4 tuanben ok")
 
+    # ---------------- 49. W8-D5 若陀龙王竞价团 ----------------
+    import json as _json49
+    from core import teamboss as dr49
+    from core import equipment as eq49
+
+    t49 = 1_800_000.0
+    pool49 = _json49.load(
+        open(PLUGIN / "data/item/GroupBoss.json", encoding="utf-8-sig"))[0]["one"]
+    assert len(pool49) == 36, "GroupBoss.json 掉落池应 36 条（非团本奖励列表）"
+
+    def p49(uid: str, name: str = "道友", stones: int = 10 ** 9,
+            realm: int = 45, cd: float = 0.0) -> PlayerDoc:
+        d = PlayerDoc(uid=uid, name=name, realm_index=realm, stones=stones)
+        d.ext["dragon"] = {"cd_until": cd, "exit_ids": [], "battles": 0,
+                           "kills": 0, "last_id": 1}
+        return d
+
+    st49 = eq49.Stats(atk=20000, defense=18000, hp=60000, bao=0.15, set_lines=[])
+
+    # ① 整数加价 / 血条公式 / 状态单例深拷贝
+    assert dr49.min_bid(100) == 130 and dr49.min_bid(1) == 2
+    assert dr49.min_bid(666888) == 866955          # 原版 ceil(666888*1.3)
+    assert dr49.boss_hp(20000, 8) == 8_000_000
+    assert dr49.boss_hp(20000, 1) == 5_000_000     # 人数下限 5
+    state49: dict = {}
+    w49 = dr49.world_of(state49)
+    assert w49["enabled"] and w49["next_id"] == 1 and w49["bosses"] == {}
+    dr49.set_world(state49, w49)
+    w49["bosses"]["x"] = {"bad": 1}
+    assert "x" not in state49["dragon"]["bosses"], "set_world 必须深拷贝"
+    w49 = dr49.world_of(state49)                 # 丢弃临时脏视图
+    # 与 D4 团本状态互不串扰
+    state49["tuanben"] = {"enabled": False}
+    assert tb48.world_of(state49)["enabled"] is False
+    assert dr49.world_of(state49)["enabled"] is True
+
+    # ② 掉落：建团时抽定 5 件、同种子确定性、起拍价来自出售价
+    a49 = dr49.draw_loot(pool49, _random.Random(5))
+    b49 = dr49.draw_loot(pool49, _random.Random(5))
+    assert len(a49) == 5 and a49 == b49
+    assert all(x["amount"] == 1 and x["bidder"] == "" for x in a49)
+    assert all(x["price"] == max(1, int(next(
+        (e for e in pool49 if e["name"] == x["name"]), {}).get("出售价", 1)))
+        for x in a49)
+
+    # ③ 建团 / 门槛 / 加入 / 满员 / 退团一次机会
+    ok49, msg49 = dr49.create_boss(w49, "lead", "团长", 20000, 8,
+                                   t49, pool49, _random.Random(7))
+    assert ok49 and w49["next_id"] == 2 and "1 号" in msg49
+    team49 = w49["bosses"]["1"]
+    assert team49["hp"] == team49["hp_max"] == 8_000_000
+    assert len(team49["loot"]) == 5 and team49["members"] == ["lead"]
+    assert not dr49.create_boss(w49, "lead", "团长", 0, 0, t49, pool49,
+                                _random.Random(7))[0], "无达标玩家应拒绝"
+    assert dr49.gate(p49("low", realm=0), 0)[0] is False
+    assert dr49.gate(p49("hi", realm=41), 0)[0] is True
+    assert dr49.gate(p49("lh", realm=0), 0)[0] is False
+    lh49 = p49("lh", realm=0); lh49.ext["lunhui"] = 1
+    assert dr49.gate(lh49, 0)[0] is True                      # 轮回放行
+    assert dr49.gate(p49("au", realm=0), 10)[0] is True      # 权柄 10 档放行
+    assert dr49.parse_id("1,2,3") == 1, "原版只取第一个数字"
+    assert dr49.parse_id("") == 1
+    for i in range(2, 6):
+        assert "已加入" in dr49.join_boss(w49, p49(f"u{i}", f"队员{i}"), "1", 21, t49)
+    assert len(team49["members"]) == 5
+    assert "已满" in dr49.join_boss(w49, p49("u6"), "1", 21, t49)
+    assert "已在" in dr49.join_boss(w49, p49("lead", "团长"), "1", 21, t49)
+    assert "仙界之人" in dr49.join_boss(w49, p49("low", realm=0), "1", 0, t49)
+    lead49 = p49("lead", "团长")
+    assert "已脱离" in dr49.leave_boss(w49, lead49, t49)
+    assert team49["members"][0] == "u2", "团长退团应顺延"
+    assert str(1) in dr49.player_state_of(lead49)["exit_ids"]
+    assert "不在任何" in dr49.leave_boss(w49, lead49, t49)
+    # 同一 uid 重新入团后再退 → 退团机会已用尽（原版此处永久锁死）
+    dr49.join_boss(w49, lead49, "1", 21, t49)
+    assert "唯一一次" in dr49.leave_boss(w49, lead49, t49)
+    assert team49["members"][0] == "u2"
+
+    # ④ 门槛 / CD / 体力不支 / 战斗折算与记账 / 击杀终结奖励
+    low49 = p49("low", realm=0)
+    assert "仙界之人" in dr49.fight(w49, low49, st49, 60000, 60000, 0,
+                                    t49, _random.Random(1))[0]
+    cd49 = p49("u2", "队员2", cd=t49 + 200)
+    assert "调息" in dr49.fight(w49, cd49, st49, 60000, 60000, 21,
+                                t49, _random.Random(1))[0]
+    tired49 = p49("u2", "队员2")
+    assert "体力不支" in dr49.fight(w49, tired49, st49, 100, 60000, 21,
+                                    t49, _random.Random(1))[0]
+    outsider49 = p49("zz", "路人")
+    assert "不在任何" in dr49.fight(w49, outsider49, st49, 60000, 60000, 21,
+                                    t49, _random.Random(1))[0]
+    killed49 = False
+    for k49 in range(80):
+        f49 = p49("u2", "队员2")
+        msg49, ops49 = dr49.fight(w49, f49, st49, 60000, 60000, 21,
+                                  t49 + k49 * 301, _random.Random(900 + k49))
+        if "终结一击" in msg49:
+            killed49 = True
+            assert ("items", "u2", {"起死回生丹": 5}) in ops49
+            break
+    assert killed49 and not team49["alive"] and team49["hp"] == 0
+    assert team49["killer"] == "u2"
+    assert int(team49["record"]["u2"][1]) > 0
+    assert abs(dr49.cd_left(p49("u2", cd=t49 + 301), t49 + 1) - 300.0) < 1e-6
+    assert "已被斩" in dr49.fight(w49, p49("u2"), st49, 60000, 60000, 21,
+                                  t49 + 10_000, _random.Random(1))[0]
+
+    # ⑤ 竞价：格式 / 30% 下限 / 填 1 自动 / 灵石不足
+    lead2 = p49("u2", "队员2")
+    assert "格式" in dr49.bid(w49, lead2, "abc", t49)[0]
+    assert "不存在编号" in dr49.bid(w49, lead2, "9*100", t49)[0]
+    first49 = team49["loot"][0]
+    first49["price"] = 1000        # 固定样本，避免抽到出售价 1 的物品令「填 2」恰好等于下限
+    floor49 = dr49.min_bid(first49["price"])
+    assert floor49 == 1300
+    assert "低于下限" in dr49.bid(w49, lead2, "1*2", t49)[0]
+    okmsg49, _ = dr49.bid(w49, lead2, "1*1", t49)
+    assert "出价成功" in okmsg49 and first49["price"] == floor49
+    assert first49["bidder"] == "u2" and first49["bids"] == 1
+    poor49 = p49("u3", "队员3", stones=1)
+    assert "灵石不足" in dr49.bid(w49, poor49, "2*99999999", t49)[0]
+
+    # ⑥ 分配：非团长 / 无人出价 / 验资 / 平分 ops / 归档
+    assert "只有" in dr49.assign(w49, p49("u3", "队员3"), "1", {}, t49)[0]
+    assert "尚无人出价" in dr49.assign(w49, lead2, "2", {}, t49)[0]
+    buyer49 = p49("u3", "队员3", stones=10 ** 9)
+    dr49.bid(w49, buyer49, "1*99999999", t49)
+    assert "灵石不足" in dr49.assign(w49, lead2, "1", {"u3": 1}, t49)[0]
+    okmsg49, ops49 = dr49.assign(w49, lead2, "1", {"u3": 10 ** 9}, t49)
+    price49 = max(1, team49["loot"][0]["price"])
+    share49 = price49 // len(team49["members"])
+    assert ("stones", "u3", -price49) in ops49
+    assert ("items", "u3", {team49["loot"][0]["name"]: 1}) in ops49
+    assert sum(1 for o in ops49 if o[0] == "stones" and o[2] == share49) \
+        == len(team49["members"])
+    assert "全队" in okmsg49 and team49["loot"][0]["amount"] == 0
+    for i in range(2, 6):
+        dr49.bid(w49, buyer49, f"{i}*99999999", t49)
+        dr49.assign(w49, lead2, str(i), {"u3": 10 ** 9}, t49)
+    assert team49["settled"] and dr49.unassigned(team49) == 0
+    assert "归档" in dr49.assign(w49, lead2, "1", {}, t49)[0]
+
+    # ⑦ 文本面板 / 规则纠偏 / 关闭清场
+    assert "龙王榜" in dr49.rank_text(w49, lead2) and "占比" in dr49.rank_text(w49, lead2)
+    assert "????????????" in dr49.status_text(w49, lead2, t49)
+    assert "1 号" in dr49.list_text(w49) or "没有进行中" in dr49.list_text(w49)
+    assert "dragon" in dr49.system_text(w49)
+    assert "GroupBoss.json" in dr49.rules_text() and "$" in dr49.rules_text()
+    assert "30%" in dr49.rules_text() and "起死回生丹" in dr49.rules_text()
+    assert all(x in dr49.help_text() for x in (
+        "#若陀龙王状态", "#龙王榜", "#讨伐若陀龙王", "#加入讨伐若陀龙王",
+        "#若陀龙王奖励", "#若陀龙王出价", "#若陀龙王分配", "#若陀龙王团本",
+        "#退出若陀龙王团本", "#开启若陀龙王", "#关闭若陀龙王"))
+    assert "关闭" in dr49.close_all(w49, t49)
+    assert w49["bosses"] == {} and w49["next_id"] == 1 and not w49["enabled"]
+    assert "团本已被管理员关闭" in dr49.system_on(w49)[1]
+    assert "已被管理员关闭" in dr49.list_text(w49)
+    assert "已被管理员关闭" in dr49.bid(w49, lead2, "1*1", t49)[0]
+
+    # ⑧ DB 往返：calamity_state["dragon"] + ext["dragon"]（db 仍 v17）
+    await db.save_calamity(state49)
+    got49 = dr49.world_of(await db.get_calamity())
+    assert got49["enabled"] is True and "1" not in got49["bosses"]
+    p49db = p49("db49", "存档")
+    dr49.set_player(p49db, {"cd_until": t49 + 300, "exit_ids": ["1"],
+                            "battles": 3, "kills": 1, "last_id": 1})
+    await db.save_player(p49db.model_dump())
+    row49 = await db.get_player("db49")
+    assert row49 and dr49.player_state_of(PlayerDoc(**row49))["battles"] == 3
+    print("W8-D5 teamboss ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 
