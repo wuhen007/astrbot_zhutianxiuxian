@@ -5909,6 +5909,147 @@ async def main():
     assert ok45 and out45b.get("__stones__", 0) > 0
     print("W8-D1 xiaoshijie ok")
 
+    # ── 46. W8-D2 星阁 · 竞价拍卖 / 惰性结算 / 内场验资 / NPC ──
+    from core import auction as xg46  # noqa: E402
+    t46 = 1_800_000.0
+    pools46 = {
+        "official": [{"name": "玄铁", "class": "材料", "出售价": 500000,
+                      "desc": "顶级材料", "稀有度": 3}],
+        "inner": [{"name": "帝品秘境结算卡", "class": "道具", "出售价": 1300000,
+                   "数量": 1, "desc": "副本-30分钟", "稀有度": 10}],
+    }
+    r46 = _random.Random(46)
+    seller46 = PlayerDoc(uid="seller", stones=1000, ext={})
+    buyer46 = PlayerDoc(uid="buyer", stones=10_000_000, ext={})
+
+    # ① 世界状态默认值 / 写回
+    st46: dict = {}
+    w46 = xg46.world_of(st46)
+    assert w46["player"] is None and w46["official"] is None and w46["inner"] is None
+    assert w46["enabled"] is False and w46["claims"] == [] and w46["last_list"] == {}
+    xg46.set_world(st46, w46)
+    assert xg46.WORLD_KEY in st46 and xg46.world_of(st46)["seq"] == 0
+
+    # ② 上架：格式 / 全服唯一 / 禁售 / 24h CD / 扣物
+    ok46, msg46, _ = xg46.list_item(w46, seller46, {}, "玄铁", t46)
+    assert not ok46 and "格式" in msg46
+    ok46, msg46, d46 = xg46.list_item(w46, seller46, {"玄铁": 3}, "玄铁*1000*2", t46)
+    assert ok46 and d46 == {"玄铁": -2} and w46["player"]["amount"] == 2, msg46
+    ok46, msg46, _ = xg46.list_item(w46, seller46, {"玄铁": 3}, "玄铁*1000", t46)
+    assert not ok46 and "仅 1 场" in msg46
+    w46["player"] = None
+    secret46 = PlayerDoc(uid="secret", stones=1000,
+                         ext={"forge": {"artifacts": {"我的神兵": {}}}})
+    ok46, msg46, _ = xg46.list_item(w46, secret46, {"我的神兵": 1}, "我的神兵*100", t46)
+    assert not ok46 and "不可交易" in msg46
+    w46["last_list"] = {}          # 前面成功上架写过 CD，隔离后再测 CD 本身
+    ok46, _, _ = xg46.list_item(w46, seller46, {"玄铁": 3}, "玄铁*1000*1", t46)
+    assert ok46
+    w46["player"] = None
+    ok46, msg46, _ = xg46.list_item(w46, seller46, {"玄铁": 3}, "玄铁*1000*1", t46 + 3600)
+    assert not ok46 and "冷却" in msg46
+
+    # ③ 竞价：10% 门槛 / 禁止卖家与最高者 / 余额 / 倒计时重置
+    w46["player"] = None
+    w46["last_list"] = {}          # 独立场景，清掉上一组的 24h CD
+    ok46, _, _ = xg46.list_item(w46, seller46, {"玄铁": 2}, "玄铁*1000*2", t46)
+    assert ok46
+    ok46, msg46, _ = xg46.bid(w46, seller46, "player", "1100", t46 + 1, r46)
+    assert not ok46 and "卖家" in msg46
+    ok46, msg46, _ = xg46.bid(w46, buyer46, "player", "1000", t46 + 1, r46)
+    assert not ok46 and "10%" in msg46
+    ok46, msg46, _ = xg46.bid(w46, buyer46, "player", "", t46 + 1, r46)
+    assert ok46 and w46["player"]["price"] == 1100 and w46["player"]["bid_ts"] == t46 + 1
+    ok46, msg46, _ = xg46.bid(w46, buyer46, "player", "2000", t46 + 2, r46)
+    assert not ok46 and "最高出价者" in msg46
+    poor46 = PlayerDoc(uid="poor", stones=100, ext={})
+    ok46, msg46, _ = xg46.bid(w46, poor46, "player", "", t46 + 2, r46)
+    assert not ok46 and "灵石不足" in msg46
+
+    # ④ 惰性结算：未到时间不动 / 超时成交（买家扣款+发货、卖家收款）/ 幂等
+    bal46 = {"buyer": (10_000_000, 0), "seller": (1000, 0)}
+    notes46, ops46 = xg46.tick(w46, t46 + 60, pools46, r46, bal46)
+    assert not notes46 and not ops46
+    notes46, ops46 = xg46.tick(w46, t46 + 121, pools46, r46, bal46)
+    assert any("成交" in n for n in notes46), notes46
+    bop46 = [o for o in ops46 if o["uid"] == "buyer"][0]
+    assert bop46["stones"] == -1100 and bop46["items"] == {"玄铁": 2}
+    assert any(o["uid"] == "seller" and o["stones"] == 1100 for o in ops46)
+    assert w46["player"] is None
+    _, ops46b = xg46.tick(w46, t46 + 300, pools46, r46, bal46)
+    assert not ops46b
+
+    # ⑤ 流拍退物 / 违约 / NPC 得标不扣款
+    wf46 = xg46.world_of({})
+    xg46.list_item(wf46, seller46, {"玄铁": 1}, "玄铁*100*1", t46)
+    notes46, ops46 = xg46.tick(wf46, t46 + 121, {}, r46, {})
+    assert any("流拍" in n for n in notes46)
+    assert any(o["uid"] == "seller" and o["items"] == {"玄铁": 1} for o in ops46)
+    wd46 = xg46.world_of({})
+    xg46.list_item(wd46, seller46, {"玄铁": 1}, "玄铁*100*1", t46)
+    xg46.bid(wd46, buyer46, "player", "110", t46 + 1, r46)
+    notes46, ops46 = xg46.tick(wd46, t46 + 122, {}, r46, {"buyer": (0, 0)})
+    assert any("余额不足" in n for n in notes46), notes46
+    assert not any(o.get("stones", 0) < 0 for o in ops46)
+    wn46 = xg46.world_of({})
+    wn46["player"] = {"id": "p-x", "kind": "player", "name": "玄铁", "class": "材料",
+                      "amount": 1, "start": 100, "price": 200, "bid_ts": t46,
+                      "bidder": "-1", "seller": "seller", "desc": "", "rarity": 0}
+    notes46, ops46 = xg46.tick(wn46, t46 + 121, {}, r46, {})
+    assert any("NPC" in n for n in notes46) and not any(o.get("stones", 0) < 0 for o in ops46)
+
+    # ⑥ 官方开拍 / 管理员开关 / 面板文案
+    wo46 = xg46.world_of({})
+    wo46["enabled"] = True
+    notes46, _ = xg46.tick(wo46, t46, pools46, _random.Random(1), {})
+    assert any("开拍" in n for n in notes46) and wo46["official"]["start"] == 500000
+    assert "500,000" in xg46.panel(wo46, "official", t46)
+    ok46, _, _ = xg46.switch(wo46, "close", False, "", True)
+    assert ok46 and wo46["official"] is None and wo46["enabled"] is False
+    ok46, msg46, _ = xg46.switch(wo46, "open", False, "g1", False)
+    assert not ok46 and "管理员" in msg46
+    assert "尚未开启" in xg46.panel(xg46.world_of({}), "official", t46)
+    ws46 = xg46.world_of({})
+    xg46.switch(ws46, "open", False, "g1", True)
+    assert ws46["enabled"] and ws46["groups"] == ["g1"]
+    xg46.switch(ws46, "cancel", False, "g1", True)
+    assert ws46["groups"] == []
+
+    # ⑦ 内场验资：1200 万门槛 / 扣 500 万买断 / 永久 / 无身份禁出价
+    ypoor46 = PlayerDoc(uid="v", stones=0, ext={"yuanshi": {"amount": 11_999_999}})
+    ok46, msg46, _ = xg46.verify_inner(ypoor46)
+    assert not ok46 and "验资需" in msg46
+    rich46 = PlayerDoc(uid="v", stones=0, ext={"yuanshi": {"amount": 12_000_000}})
+    ok46, msg46, _ = xg46.verify_inner(rich46)
+    assert ok46 and rich46.ext["yuanshi"]["amount"] == 7_000_000
+    assert rich46.ext[xg46.INNER_FLAG] == 1
+    ok46, msg46, _ = xg46.verify_inner(rich46)
+    assert not ok46 and "永久" in msg46
+    wi46 = xg46.world_of({})
+    wi46["enabled2"] = True
+    xg46.tick(wi46, t46, pools46, _random.Random(2), {})
+    noid46 = PlayerDoc(uid="n", stones=0, ext={"yuanshi": {"amount": 9_000_000}})
+    ok46, msg46, _ = xg46.bid(wi46, noid46, "inner", "", t46, _random.Random(3))
+    assert not ok46 and "验资" in msg46
+
+    # ⑧ 内场 NPC 同步抬价（原版 30%/分钟 cron 的等价替代）
+    class _R46:
+        def __init__(self, first): self.first, self.calls = first, 0
+        def random(self):
+            self.calls += 1
+            return self.first if self.calls == 1 else 0.5
+        def choices(self, pop, weights=None, k=1): return [(1.05, 1.15)]
+        def uniform(self, a, b): return (a + b) / 2
+        def choice(self, seq): return seq[0]
+    wi46b = xg46.world_of({})
+    wi46b["enabled2"] = True
+    xg46.tick(wi46b, t46, pools46, _R46(0.9), {})
+    ok46, msg46, _ = xg46.bid(wi46b, rich46, "inner", "", t46, _R46(0.0))
+    assert ok46 and "神秘 NPC" in msg46 and wi46b["inner"]["bidder"] == "-1", msg46
+
+    assert "无手续费" in xg46.rules_text() and "#星阁内场验资" in xg46.help_text()
+    print("W8-D2 auction ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

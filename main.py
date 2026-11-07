@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, authority as authority_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, authority as authority_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -751,6 +751,25 @@ CMD_WORLD_GUARD_SET = "#设置仙宠守卫"
 CMD_WORLD_GUARD_UNSET = "#撤下仙宠守卫"
 CMD_WORLD_HABITAT = "#小世界栖息地"
 CMD_WORLD_TOUR = "#图中巡游"
+# W8-D2：星阁 · 竞价拍卖（原版 Auction.js 8 + Auction2.js 8 = 16 条 rule；+ 帮助/规则 2 条补位）
+CMD_XG_HELP = "#星阁帮助"
+CMD_XG_RULES = "#星阁规则"
+CMD_XG_LIST = "#拍卖"
+CMD_XG_SHOW = "#查看当前拍卖"
+CMD_XG_BID = "#竞价"
+CMD_XG_OFFICIAL_BID = "#星阁出价"
+CMD_XG_HALL = "#星阁拍卖行"
+CMD_XG_OPEN = "#开启星阁体系"
+CMD_XG_CANCEL = "#取消星阁体系"
+CMD_XG_CLOSE = "#关闭星阁体系"
+CMD_XG_INNER_SHOW = "#查看当前内场拍卖"
+CMD_XG_INNER_BID = "#星阁内场出价"
+CMD_XG_INNER_BID_ALIAS = "#内场竞价"
+CMD_XG_INNER_HALL = "#星阁内场拍卖行"
+CMD_XG_INNER_OPEN = "#开启星阁内场体系"
+CMD_XG_INNER_CANCEL = "#取消星阁内场体系"
+CMD_XG_INNER_CLOSE = "#关闭星阁内场体系"
+CMD_XG_VERIFY = "#星阁内场验资"
 CMD_IMPERIAL = "#认主"
 CMD_IMPERIAL_MY = "#已认主"
 CMD_SECT_SECRET = "#宗门秘境"
@@ -833,6 +852,13 @@ class ZhutianPlugin(Star):
         self._furn_mats = {
             e["name"]: e for e in (self.content.table("item/锻造材料") or [])
             if isinstance(e, dict) and e.get("name")
+        }
+        # W8-D2：星阁官方拍品表（43 外场 / 36 内场），专用索引不进 item_index
+        self._xg_pools = {
+            "official": [e for e in (self.content.table("item/星阁拍卖行列表") or [])
+                         if isinstance(e, dict) and e.get("name")],
+            "inner": [e for e in (self.content.table("item/星阁内场拍卖行") or [])
+                      if isinstance(e, dict) and e.get("name")],
         }
         self.shop_stock = [
             e for t in ("item/常驻", "item/限定")
@@ -1771,6 +1797,18 @@ class ZhutianPlugin(Star):
                 (f"{CMD_FURN_NAME} 原名*新名 / {CMD_FURN_BOARD}", "8 字赋名刻谱（一件一次） / 全服 Top20 神兵榜"),
                 (f"{CMD_FURN_RECIPE} / {CMD_FURN_SYNTH} 数量", "参悟时光令配方 / 合成时光令"),
                 ("⚠️ #大道权柄 开铸", "需混沌炉或造化仙炉 + 道火 + 无上炼器道熟练度 100"),
+            ]},
+            {"title": "星阁 · 竞价拍卖", "lines": [
+                (f"{CMD_XG_HELP} / {CMD_XG_RULES}", "全部指令 / 数值口径（无手续费、无撤拍）"),
+                (f"{CMD_XG_LIST} 物品名*起拍价*数量", "寄售（24h CD、全服仅 1 场、私密产物禁售）"),
+                (f"{CMD_XG_SHOW} / {CMD_XG_BID} 金额", "看玩家外场 / 出价（留空自动 +10%）"),
+                (f"{CMD_XG_HALL} / {CMD_XG_OFFICIAL_BID} 金额", "官方星阁拍品（灵石） / 出价"),
+                (f"{CMD_XG_OPEN} / {CMD_XG_CANCEL} / {CMD_XG_CLOSE}", "管理员：开启 / 取消本群 / 全服关闭"),
+                (CMD_XG_VERIFY, "1200 万源石验资，扣 500 万买断永久内场身份"),
+                (f"{CMD_XG_INNER_HALL} / {CMD_XG_INNER_SHOW}", "星阁内场拍品（源石）"),
+                (f"{CMD_XG_INNER_BID} 金额", "内场出价（别名 #内场竞价，NPC 有概率抬价）"),
+                (f"{CMD_XG_INNER_OPEN} / {CMD_XG_INNER_CANCEL} / {CMD_XG_INNER_CLOSE}", "管理员：内场三开关"),
+                ("⚠️ 2 分钟无人加价即成交", "本移植无 cron，结算挂在每个星阁指令入口惰性执行"),
             ]},
         ]
 
@@ -17552,3 +17590,179 @@ class ZhutianPlugin(Star):
         await self.db.save_calamity(state)
         yield event.plain_result(
             f"已清空 {n} 位道友的炉内材料与温养状态（炉阶/炉火/功法/神兵保留）。")
+
+
+    # ─────────────── W8-D2 星阁 · 竞价拍卖 ───────────────
+    async def _xg_op(self, op: dict):
+        """惰性结算产生的一条账变（可能属于非当前玩家）。调用方保证在事务块内。"""
+        uid = str(op.get("uid") or "")
+        if not uid:
+            return
+        row = await self.db.get_player(uid)
+        if not row:
+            return
+        d = PlayerDoc(**row)
+        if op.get("stones"):
+            d.stones = max(0, int(d.stones) + int(op["stones"]))
+        if op.get("yuanshi"):
+            y = yuanshi.system_of(d)
+            y["amount"] = max(0, int(y.get("amount") or 0) + int(op["yuanshi"]))
+            d.ext["yuanshi"] = y
+        await self.db.save_player(d.model_dump())
+        items = {k: int(v) for k, v in (op.get("items") or {}).items() if int(v) > 0}
+        if items:
+            await self.db.add_items(uid, items)
+
+    async def _xg_dispatch(self, event, title, fn, need_inv=False, admin=False):
+        """统一分发：惰性结算 → 落账变 → 重读当前玩家（避免覆盖）→ 执行指令 → 落全服状态。"""
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if admin and not bool(event.is_admin):
+            yield event.plain_result("星阁开关仅管理员可用。")
+            return
+        state = await self.db.get_calamity()
+        w = xg_mod.world_of(state)
+        now = time.time()
+        rng = random.Random(f"{doc.uid}:xg:{time.time_ns()}")
+        balances: dict[str, tuple[int, int]] = {}
+        for lot in (w.get("player"), w.get("official"), w.get("inner")):
+            if isinstance(lot, dict):
+                b = str(lot.get("bidder") or "0")
+                if b not in ("0", "-1", "") and b not in balances:
+                    row = await self.db.get_player(b)
+                    if row:
+                        bd = PlayerDoc(**row)
+                        balances[b] = (int(bd.stones),
+                                       int(yuanshi.system_of(bd).get("amount") or 0))
+        notes, ops = xg_mod.tick(w, now, self._xg_pools, rng, balances)
+        async with self.db.transaction():
+            for op in ops:
+                await self._xg_op(op)
+            row = await self.db.get_player(doc.uid)
+        if row:
+            doc = PlayerDoc(**row)
+        inv = await self.db.get_inventory(doc.uid) if need_inv else {}
+        result = fn(doc, inv, w, now, rng)
+        xg_mod.set_world(state, w)
+        await self.db.save_calamity(state)
+        if notes:
+            ok, msg, delta = result
+            result = (ok, "\n".join(notes) + "\n" + msg, delta)
+        async for r in self._dz_finish(event, doc, result, title):
+            yield r
+
+    @filter.command(CMD_XG_HELP, "星阁全部指令一览")
+    async def handle_xg_help(self, event: AstrMessageEvent):
+        async for r in self._xg_dispatch(event, "星阁帮助",
+                lambda d, i, w, t, r: (True, xg_mod.help_text(), {})):
+            yield r
+
+    @filter.command(CMD_XG_RULES, "星阁竞价与结算规则")
+    async def handle_xg_rules(self, event: AstrMessageEvent):
+        async for r in self._xg_dispatch(event, "星阁规则",
+                lambda d, i, w, t, r: (True, xg_mod.rules_text(), {})):
+            yield r
+
+    @filter.command(CMD_XG_LIST, "上架玩家拍卖场")
+    async def handle_xg_list(self, event: AstrMessageEvent, arg: str = ""):
+        async for r in self._xg_dispatch(event, "上架拍卖",
+                lambda d, i, w, t, r: xg_mod.list_item(w, d, i, arg, t), need_inv=True):
+            yield r
+
+    @filter.command(CMD_XG_SHOW, "查看玩家外场拍卖")
+    async def handle_xg_show(self, event: AstrMessageEvent):
+        async for r in self._xg_dispatch(event, "玩家拍卖场",
+                lambda d, i, w, t, r: (True, xg_mod.panel(w, "player", t), {})):
+            yield r
+
+    @filter.command(CMD_XG_BID, "玩家外场竞价")
+    async def handle_xg_bid(self, event: AstrMessageEvent, arg: str = ""):
+        async for r in self._xg_dispatch(event, "竞价",
+                lambda d, i, w, t, r: xg_mod.bid(w, d, "player", arg, t, r)):
+            yield r
+
+    @filter.command(CMD_XG_HALL, "官方星阁拍品")
+    async def handle_xg_hall(self, event: AstrMessageEvent):
+        async for r in self._xg_dispatch(event, "星阁拍卖行",
+                lambda d, i, w, t, r: (True, xg_mod.panel(w, "official", t), {})):
+            yield r
+
+    @filter.command(CMD_XG_OFFICIAL_BID, "星阁官方外场出价")
+    async def handle_xg_official_bid(self, event: AstrMessageEvent, arg: str = ""):
+        async for r in self._xg_dispatch(event, "星阁出价",
+                lambda d, i, w, t, r: xg_mod.bid(w, d, "official", arg, t, r)):
+            yield r
+
+    @filter.command(CMD_XG_OPEN, "开启星阁体系（管理员）")
+    async def handle_xg_open(self, event: AstrMessageEvent):
+        gid = str(event.get_group_id() or "")
+        async for r in self._xg_dispatch(event, "星阁开关",
+                lambda d, i, w, t, r: xg_mod.switch(w, "open", False, gid, bool(event.is_admin)),
+                admin=True):
+            yield r
+
+    @filter.command(CMD_XG_CANCEL, "取消本群星阁广播（管理员）")
+    async def handle_xg_cancel(self, event: AstrMessageEvent):
+        gid = str(event.get_group_id() or "")
+        async for r in self._xg_dispatch(event, "星阁开关",
+                lambda d, i, w, t, r: xg_mod.switch(w, "cancel", False, gid, bool(event.is_admin)),
+                admin=True):
+            yield r
+
+    @filter.command(CMD_XG_CLOSE, "全服关闭星阁体系（管理员）")
+    async def handle_xg_close(self, event: AstrMessageEvent):
+        async for r in self._xg_dispatch(event, "星阁开关",
+                lambda d, i, w, t, r: xg_mod.switch(w, "close", False, "", bool(event.is_admin)),
+                admin=True):
+            yield r
+
+    @filter.command(CMD_XG_INNER_SHOW, "查看星阁内场拍卖")
+    async def handle_xg_inner_show(self, event: AstrMessageEvent):
+        async for r in self._xg_dispatch(event, "星阁内场",
+                lambda d, i, w, t, r: (True, xg_mod.panel(w, "inner", t), {})):
+            yield r
+
+    @filter.command(CMD_XG_INNER_HALL, "星阁内场拍卖行")
+    async def handle_xg_inner_hall(self, event: AstrMessageEvent):
+        async for r in self._xg_dispatch(event, "星阁内场拍卖行",
+                lambda d, i, w, t, r: (True, xg_mod.panel(w, "inner", t), {})):
+            yield r
+
+    @filter.command(CMD_XG_INNER_BID, "星阁内场出价（源石）", alias={CMD_XG_INNER_BID_ALIAS})
+    async def handle_xg_inner_bid(self, event: AstrMessageEvent, arg: str = ""):
+        async for r in self._xg_dispatch(event, "内场出价",
+                lambda d, i, w, t, r: xg_mod.bid(w, d, "inner", arg, t, r)):
+            yield r
+
+    @filter.command(CMD_XG_VERIFY, "星阁内场验资（永久身份）")
+    async def handle_xg_verify(self, event: AstrMessageEvent):
+        async for r in self._xg_dispatch(event, "星阁内场验资",
+                lambda d, i, w, t, r: xg_mod.verify_inner(d)):
+            yield r
+
+    @filter.command(CMD_XG_INNER_OPEN, "开启星阁内场体系（管理员）")
+    async def handle_xg_inner_open(self, event: AstrMessageEvent):
+        gid = str(event.get_group_id() or "")
+        async for r in self._xg_dispatch(event, "内场开关",
+                lambda d, i, w, t, r: xg_mod.switch(w, "open", True, gid, bool(event.is_admin)),
+                admin=True):
+            yield r
+
+    @filter.command(CMD_XG_INNER_CANCEL, "取消本群内场广播（管理员）")
+    async def handle_xg_inner_cancel(self, event: AstrMessageEvent):
+        gid = str(event.get_group_id() or "")
+        async for r in self._xg_dispatch(event, "内场开关",
+                lambda d, i, w, t, r: xg_mod.switch(w, "cancel", True, gid, bool(event.is_admin)),
+                admin=True):
+            yield r
+
+    @filter.command(CMD_XG_INNER_CLOSE, "全服关闭内场体系（管理员）")
+    async def handle_xg_inner_close(self, event: AstrMessageEvent):
+        async for r in self._xg_dispatch(event, "内场开关",
+                lambda d, i, w, t, r: xg_mod.switch(w, "close", True, "", bool(event.is_admin)),
+                admin=True):
+            yield r
