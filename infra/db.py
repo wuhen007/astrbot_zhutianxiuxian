@@ -702,6 +702,59 @@ class DataBase:
         if owned:
             await self.conn.commit()
 
+    @_serialized
+    async def leave_raid(self, code: str, uid: str) -> bool:
+        """W8-D4 #离开队伍：退队不删队伍（队长须先 #解散队伍，接线层判断）。"""
+        assert self.conn is not None
+        owned = not self.conn.in_transaction
+        cur = await self.conn.execute(
+            "DELETE FROM raid_member WHERE code = ? AND uid = ?",
+            (str(code), str(uid)),
+        )
+        ok = cur.rowcount > 0
+        if owned:
+            await self.conn.commit()
+        return ok
+
+    @_serialized
+    async def settle_raid_battle(self, code: str, damage: dict[str, int],
+                                 hp: int, status: str, now: float) -> None:
+        """W8-D4 帝尊战一次性落库：成员伤害账本 + 队伍血条/终局态。
+
+        不用 damage_raid：后者会在 hp<=0 时立刻置 victory，而帝尊有
+        者字秘·极尽二阶段（中途血空要复活），必须等 run_raid 结算完再落。
+        """
+        assert self.conn is not None
+        owned = not self.conn.in_transaction
+        for uid, dmg in damage.items():
+            await self.conn.execute(
+                "UPDATE raid_member SET dmg = dmg + ? WHERE code = ? AND uid = ?",
+                (int(dmg), str(code), str(uid)),
+            )
+        await self.conn.execute(
+            "UPDATE raid_team SET hp = ?, status = ?, finished_at = ?, settled = ?"
+            " WHERE code = ? AND status = 'fighting'",
+            (max(0, int(hp)), str(status), float(now), 1 if status == "victory" else 0,
+             str(code)),
+        )
+        if owned:
+            await self.conn.commit()
+
+    @_serialized
+    async def close_all_raids(self, now: float, status: str = "closed") -> int:
+        """W8-D4 #关闭所有讨伐：收掉所有招募中 / 讨伐中的队伍。"""
+        assert self.conn is not None
+        owned = not self.conn.in_transaction
+        cur = await self.conn.execute(
+            "UPDATE raid_team SET status = ?, finished_at = ?"
+            " WHERE status IN ('recruiting', 'fighting')",
+            (str(status), float(now)),
+        )
+        n = int(cur.rowcount or 0)
+        if owned:
+            await self.conn.commit()
+        return n
+
     async def list_raids(self, status: str = "recruiting", limit: int = 10) -> list[dict[str, Any]]:
         assert self.conn is not None
         async with self.conn.execute(

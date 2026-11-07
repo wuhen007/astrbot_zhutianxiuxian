@@ -6163,6 +6163,168 @@ async def main():
     assert "destroyed_view" not in box47["sacrifice"] and "phase" in box47["sacrifice"]
     print("W8-D3 sacrifice ok")
 
+    # ============ 第 48 组：W8-D4 组队迎战帝尊 / 多人团本 ============
+    from core import tuanben as tb48
+    from core.combat import Fighter as F48, run_raid as raid48
+
+    t48 = 1_800_000_000.0
+    rng48 = _random.Random(48)
+
+    # ① 全服单例：老档兼容、白名单过滤临时视图、类型归一化
+    w48 = tb48.world_of({})
+    assert set(w48) == set(tb48.DEFAULTS) and w48["enabled"] and w48["awareness"] == "reclaim"
+    w48b = tb48.world_of({"tuanben": {"enabled": False, "emperor_codes": ["123456"],
+                                      "awareness": "乱写", "junk": 1}})
+    assert not w48b["enabled"] and w48b["emperor_codes"] == ["123456"]
+    assert w48b["awareness"] == "reclaim"
+    box48 = {}
+    w48c = dict(tb48.world_of(box48), destroyed_view={"遮天位面": {}})
+    tb48.set_world(box48, w48c)
+    assert "destroyed_view" not in box48["tuanben"]
+    w48c["emperor_codes"].append("999999")
+    assert "999999" not in box48["tuanben"]["emperor_codes"]   # 深拷贝，不留可变引用
+
+    # ② 自然周：周一 0 点（北京时间）为界，跨周额度重置
+    wk48 = tb48.week_key(t48)
+    assert wk48 != tb48.week_key(t48 + 7 * 86400)
+    assert tb48.weekly_left(w48, "u48", t48) == tb48.WEEKLY_LIMIT
+    tb48.consume_weekly(w48, "u48", 4, t48)
+    assert tb48.weekly_left(w48, "u48", t48) == tb48.WEEKLY_LIMIT - 4
+    assert tb48.weekly_left(w48, "u48", t48 + 7 * 86400) == tb48.WEEKLY_LIMIT
+    assert len(w48["weekly"]["u48"]) == 1                       # 旧周惰性清掉
+
+    # ③ 门槛 / 感知 / 沉眠 / 系统开关
+    low48 = PlayerDoc(uid="low48", realm_index=10, ext={})
+    assert not tb48.emperor_gate(15) and tb48.emperor_gate(16)
+    ok48, msg48 = tb48.can_create_emperor(low48, w48, False, 15, True, t48)
+    assert not ok48 and "权柄" in msg48
+    w48["enabled"] = False
+    ok48, msg48 = tb48.can_create_emperor(low48, w48, False, 20, True, t48)
+    assert not ok48 and "关闭" in msg48
+    w48["enabled"] = True
+    ok48, msg48 = tb48.can_create_emperor(low48, w48, True, 20, True, t48)
+    assert not ok48 and "别的讨伐队伍" in msg48
+    ok48, _ = tb48.awareness_available(w48, True)
+    assert ok48
+    w48["awareness"] = "confront"
+    ok48, msg48 = tb48.awareness_available(w48, False)
+    assert not ok48 and "遮天位面" in msg48
+    ok48, _ = tb48.awareness_available(w48, True)
+    assert ok48
+    w48["awareness"] = "reclaim"
+    s48 = tb48.player_state_of(low48)
+    tb48.defeat_penalty(low48, s48, t48)
+    tb48.set_player(low48, s48)
+    assert tb48.sleep_left(low48, t48) == tb48.DEFEAT_SLEEP
+    ok48, msg48 = tb48.can_create_emperor(low48, w48, False, 20, True, t48)
+    assert not ok48 and "沉眠" in msg48
+    ok48, _ = tb48.can_create_emperor(low48, w48, False, 20, True,
+                                      t48 + tb48.DEFEAT_SLEEP + 1)
+    assert ok48
+    w48["emperor_defeated"] = True
+    ok48, msg48 = tb48.can_create_emperor(low48, w48, False, 20, True,
+                                          t48 + tb48.DEFEAT_SLEEP + 1)
+    assert not ok48 and "归寂" in msg48
+    w48["emperor_defeated"] = False
+
+    # ④ run_raid：阶段复活（者字秘·极尽）、伤害账本、确定性
+    p48 = tb48.player_fighter("u1", "甲", 1000, 400, 5000, 5000, 0.1, 0, speed=100)
+    b48 = F48(name="帝尊", atk=1, defense=1, hp=100, hp_max=100, bao=0.0,
+              tags={"key": "boss", "speed": 1, "phase_revive": 1,
+                    "phase_mult": 1.3, "phase_name": "者字秘·极尽"})
+    r48 = raid48([p48], b48, _random.Random(9), max_rounds=10)
+    assert r48.win and r48.phases == ["者字秘·极尽"] and r48.boss_hp == 0
+    assert r48.damage["u1"] > 0 and r48.rounds >= 2
+    p48b = tb48.player_fighter("u1", "甲", 1000, 400, 5000, 5000, 0.1, 0, speed=100)
+    b48b = F48(name="帝尊", atk=1, defense=1, hp=100, hp_max=100, bao=0.0,
+               tags={"key": "boss", "speed": 1, "phase_revive": 1,
+                     "phase_mult": 1.3, "phase_name": "者字秘·极尽"})
+    r48b = raid48([p48b], b48b, _random.Random(9), max_rounds=10)
+    assert (r48.win, r48.log, r48.damage, r48.rounds) == (
+        r48b.win, r48b.log, r48b.damage, r48b.rounds)
+
+    # ⑤ 玩家侧者字秘：致死复活一次后仍会全灭，BOSS 胜利
+    p48c = tb48.player_fighter("u2", "乙", 10, 10, 100, 100, 0.0, 1, speed=100)
+    b48c = F48(name="帝尊", atk=100000, defense=100000, hp=10**9, hp_max=10**9,
+               bao=0.0, tags={"key": "boss", "speed": 10})
+    r48c = raid48([p48c], b48c, _random.Random(5), max_rounds=6)
+    assert not r48c.win and any("者字秘" in x for x in r48c.log)
+    assert r48c.player_hp["u2"] == 0 and r48c.survivors == []
+
+    # ⑥ 胜率梯度：1 人必败、5 人高胜率（多人协作有意义，避免数值必败）
+    def _sim48(n: int, seed: int) -> bool:
+        fs = [tb48.player_fighter(f"p{i}", f"甲{i}", 1000, 400, 5000, 5000, 0.1, 1)
+              for i in range(n)]
+        bb = tb48.boss_fighter(1000, n, _random.Random(seed))
+        return raid48(fs, bb, _random.Random(seed + 100), max_rounds=30).win
+    assert sum(_sim48(1, s) for s in range(8)) == 0
+    assert sum(_sim48(5, s) for s in range(8)) >= 5
+
+    # ⑦ 结算落全服：DPS 榜 / 战报 / 感知归寂 / 管理员回滚
+    w48d = tb48.world_of({})
+    w48d["emperor_codes"] = ["123456"]
+    members48 = [{"uid": "u1", "name": "甲"}, {"uid": "u2", "name": "乙"}]
+    win48 = tb48.settle_battle(w48d, "123456", r48, members48, t48, True)
+    assert "伏诛" in win48 and w48d["emperor_defeated"]
+    assert w48d["emperor_codes"] == [] and w48d["dps"]["123456"][0] == ["甲", r48.damage["u1"]]
+    assert "玩家胜利" in tb48.log_text(w48d) and "甲" in tb48.rank_text(w48d, "123456")
+    assert "尚无" in tb48.rank_text(w48d, "000000")
+    assert "无需复苏" in tb48.revive_emperor(tb48.world_of({}), t48)
+    assert "感知重开" in tb48.revive_emperor(w48d, t48)
+    assert not w48d["emperor_defeated"] and w48d["defeated_at"] == 0.0
+    assert w48d["awareness"] == "reclaim"
+
+    # ⑧ 奖励池：不重复抽 N 组、兜底、41 组文本、魔君批量结算
+    pool48 = ContentStore(PLUGIN / "data").table("团本奖励列表")
+    assert len(pool48) == 41
+    loot48 = tb48.draw_loot(pool48, rng48, 8)
+    assert loot48 and len(tb48.draw_loot([], rng48, 3)) == 1
+    assert "41 组" in tb48.loot_text(pool48)
+    w48e = tb48.world_of({})
+    ok48, msg48, delta48 = tb48.mojun_settle(w48e, "u9", 3, 2, t48, pool48, rng48)
+    assert ok48 and delta48["tokens"] == 2 and delta48["rounds"] == 2
+    assert tb48.weekly_left(w48e, "u9", t48) == tb48.WEEKLY_LIMIT - 2
+    assert sum(delta48["items"].values()) > 0 and delta48["stones"] == tb48.MOJUN_STONES * 2
+    ok48, msg48, _ = tb48.mojun_settle(w48e, "u9", 1000, 5, t48, pool48, rng48)
+    assert not ok48 and "999" in msg48
+    ok48, msg48, _ = tb48.mojun_settle(w48e, "u9", 1, 0, t48, pool48, rng48)
+    assert not ok48 and "讨伐令" in msg48
+
+    # ⑨ 管理员：开关 / 重置闸 / 关闭所有 / 感知切换 / 文本完整
+    w48f = tb48.world_of({})
+    assert "关闭" in tb48.system_switch(w48f, False, t48) and not w48f["enabled"]
+    assert "开启" in tb48.system_switch(w48f, True, t48) and w48f["enabled"]
+    assert "重置" in tb48.reset_cd(w48f, t48) and w48f["cd_reset_at"] == t48
+    w48f["emperor_codes"] = ["1", "2"]
+    assert "2 支" in tb48.shutdown(w48f, t48) and w48f["emperor_codes"] == []
+    assert "confront" in tb48.awareness_switch(w48f, "confront", t48)
+    assert w48f["awareness"] == "confront"
+    assert "confront" in tb48.awareness_switch(w48f, "对抗", t48)
+    assert w48f["awareness"] == "confront"
+    assert "reclaim" in tb48.awareness_switch(w48f, "reclaim", t48)
+    assert w48f["awareness"] == "reclaim"
+    assert "#迎战帝尊" in tb48.help_text() and "16 小时" not in tb48.rules_text()
+    assert "24h" in tb48.rules_text() and "W8-D5" in tb48.rules_text()
+    assert "团本系统" in tb48.system_text(w48f)
+    assert "权柄" in tb48.status_text(w48f, low48, 20, True, t48, None, "")
+
+    # ⑩ DB 新方法（不改表结构，db 仍 v17）：离队 / 一次性结算 / 全关
+    await db.create_raid("481234", tb48.EMPEROR, "lead48", "队长", t48)
+    await db.join_raid("481234", "join48", "队员", t48)
+    await db.start_raid("481234", {"hp": 500, "hp_max": 500, "atk": 10,
+                                   "defense": 10, "reward": 0})
+    await db.settle_raid_battle("481234", {"lead48": 300, "join48": 200},
+                                0, "victory", t48)
+    trow48 = await db.get_raid("481234")
+    assert trow48["status"] == "victory" and trow48["hp"] == 0 and trow48["settled"]
+    assert (await db.raid_member("481234", "join48"))["dmg"] == 200
+    assert await db.leave_raid("481234", "join48")
+    assert await db.raid_member("481234", "join48") is None
+    await db.create_raid("485678", "若陀龙王", "lead48", "队长", t48)
+    assert await db.close_all_raids(t48) >= 1
+    assert (await db.get_raid("485678"))["status"] == "closed"
+    print("W8-D4 tuanben ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

@@ -274,3 +274,191 @@ def run_1v1(
         if abs(ratio_a - ratio_b) >= 1e-9:
             winner = 0 if ratio_a > ratio_b else 1
     return BattleResult(winner, log, hp[0], hp[1])
+
+
+# ------------------------------------------------------- 多人团本（W8-D4）
+
+@dataclass
+class RaidResult:
+    """多人对单 Boss 的回合结算结果。
+
+    key 为 Fighter.tags['key']（玩家 uid / 'boss'），damage 只统计对 Boss 本体
+    造成的伤害（不含反弹、治疗与溢出），即伤害账本口径。
+    """
+
+    win: bool
+    log: list[str]
+    damage: dict[str, int]
+    boss_hp: int
+    rounds: int
+    phases: list[str]
+    survivors: list[str]
+    player_hp: dict[str, int]
+
+    def top(self, limit: int = 20) -> list[tuple[str, int]]:
+        return sorted(self.damage.items(), key=lambda kv: -kv[1])[:max(1, int(limit))]
+
+
+def _raid_key(f: Fighter, fallback: str) -> str:
+    return str(f.tags.get("key") or fallback)
+
+
+def _raid_strike(
+    atk_u: Fighter, def_u: Fighter, hp: dict[str, int], rng: random.Random,
+    log: list[str], rnd: int,
+) -> int:
+    """一次出手：复用 1v1 的技能池 / 护盾 / 反噬 / 汲取链，返回对 def 的实际伤害。
+
+    与 run_1v1 的差别：血量表用 key 寻址（多名玩家共享一份），且不做胜负判定。
+    """
+    ka, kd = _raid_key(atk_u, "atk"), _raid_key(def_u, "def")
+    stun = int(atk_u.eff("stun_turns", 0) or 0)
+    if stun > 0:
+        atk_u.effects["stun_turns"] = stun - 1
+        log.append(f"第{rnd}回合：{atk_u.name}被定身，无法出手")
+        return 0
+    dmg, crit = battle.harm(
+        max(1, int(atk_u.atk * float(atk_u.eff("dmg_dealt_mult", 1.0)))),
+        max(1, int(def_u.defense * float(def_u.eff("dmg_taken_mult", 1.0)))),
+        rng, atk_u.bao,
+    )
+    dmg, atk_extra = roll_attack_skills(atk_u, def_u, dmg, rng)
+    log.extend(atk_extra)
+    orb = float(atk_u.eff("orb", 0.0) or 0.0)
+    orb_dmg = int(atk_u.atk * orb) if orb > 0 else 0
+    dealt = dmg + orb_dmg
+    dealt, def_extra = roll_defense_skills(def_u, dealt, rng)
+    log.extend(def_extra)
+    suffix = ""
+    shield = int(def_u.eff("shield", 0) or 0)
+    if shield > 0:
+        absorbed = min(shield, dealt)
+        def_u.effects["shield"] = shield - absorbed
+        dealt -= absorbed
+        if absorbed:
+            suffix += f"（护盾吸收 {absorbed}）"
+    hp[kd] = max(0, hp[kd] - dealt)
+    if orb_dmg > 0:
+        suffix += f"，法球 {orb_dmg}"
+    line = (f"第{rnd}回合：{atk_u.name}出手，对{def_u.name}造成 {dealt} 点伤害"
+            + ("（暴击！）" if crit else "") + suffix
+            + f"，{def_u.name}剩余 {hp[kd]}")
+    reflect = float(def_u.eff("reflect", 0.0) or 0.0)
+    if reflect > 0 and dealt > 0:
+        back = min(int(dealt * reflect), hp[ka])
+        if back > 0:
+            hp[ka] -= back
+            line += f"，反噬 {back}"
+    lifesteal = float(atk_u.eff("lifesteal", 0.0) or 0.0)
+    if lifesteal > 0 and dealt > 0:
+        heal = min(int(dealt * lifesteal), atk_u.hp_max - hp[ka])
+        if heal > 0:
+            hp[ka] += heal
+            line += f"，汲取 {heal}"
+    log.append(line)
+    return max(0, dealt)
+
+
+def run_raid(
+    players: Sequence[Fighter], boss: Fighter, rng: random.Random,
+    max_rounds: int = 30,
+) -> RaidResult:
+    """多人对单 Boss 的回合战（W8-D4，对齐原版 tuanben.tb_battle 的语义骨架）。
+
+    简化点（已写入《缺失玩法规划-W8》）：原版是速度累积的行动条，本移植按
+    `tags['speed']` 降序固定出手序；原版 100 回合 / 5 分钟，本移植 30 回合。
+    Boss 按仇恨（累计伤害）最高的存活玩家单体攻击；`boss.tags['aoe']=True`
+    时每 5 回合追加一次全体攻击（对齐九秘合一 / 冥狱火）。
+
+    阶段与复活：
+    - `boss.tags['phase_revive']`：Boss 首次被打空时满血复活、三维 ×mult（帝尊者字秘·极尽）
+    - `player.tags['revives']` + `tags['revive_ratio']`：者字秘致死复活（一场 N 次）
+    """
+    units: list[Fighter] = [*players, boss]
+    for i, p in enumerate(players):
+        p.tags.setdefault("key", f"p{i}")
+        p.tags.setdefault("speed", 100)
+    boss.tags.setdefault("key", "boss")
+    boss.tags.setdefault("speed", 1500)
+
+    keys = {_raid_key(u, f"u{i}"): u for i, u in enumerate(units)}
+    hp: dict[str, int] = {k: int(u.hp) for k, u in keys.items()}
+    damage: dict[str, int] = {_raid_key(p, f"p{i}"): 0 for i, p in enumerate(players)}
+    hatred: dict[str, int] = {k: 0 for k in damage}
+    revives: dict[str, int] = {
+        _raid_key(p, f"p{i}"): max(0, int(p.tags.get("revives", 0) or 0))
+        for i, p in enumerate(players)
+    }
+    ratio: dict[str, float] = {
+        _raid_key(p, f"p{i}"): min(1.0, max(0.05, float(p.tags.get("revive_ratio", 1.0) or 1.0)))
+        for i, p in enumerate(players)
+    }
+    phase_left = max(0, int(boss.tags.get("phase_revive", 0) or 0))
+    phase_mult = max(1.0, float(boss.tags.get("phase_mult", 1.3) or 1.3))
+    phase_name = str(boss.tags.get("phase_name") or "者字秘·极尽")
+    bkey = _raid_key(boss, "boss")
+    order = sorted(units, key=lambda u: -int(u.tags.get("speed", 100) or 100))
+
+    log: list[str] = []
+    phases: list[str] = []
+    win = False
+    rounds = 0
+    for rnd in range(1, max(1, int(max_rounds)) + 1):
+        rounds = rnd
+        for u in order:
+            uk = _raid_key(u, "unit")
+            if hp[uk] <= 0 or win:
+                continue
+            alive = [p for p in players if hp[_raid_key(p, "p")] > 0]
+            if not alive:
+                break
+            if uk == bkey:
+                targets = ([p for p in alive] if boss.tags.get("aoe") and rnd % 5 == 0
+                           else [max(alive, key=lambda p: hatred[_raid_key(p, "p")])])
+                if boss.tags.get("aoe") and rnd % 5 == 0:
+                    log.append(f"第{rnd}回合：【{boss.name}】催动群体秘术，全队承压！")
+                for t in targets:
+                    if hp[_raid_key(t, "p")] <= 0:
+                        continue
+                    _raid_strike(boss, t, hp, rng, log, rnd)
+            else:
+                before = hp[bkey]
+                dealt = _raid_strike(u, boss, hp, rng, log, rnd)
+                got = min(dealt, before)
+                damage[uk] += got
+                hatred[uk] += got
+                if hp[bkey] <= 0 and phase_left > 0:
+                    phase_left -= 1
+                    boss.atk = max(1, int(boss.atk * phase_mult))
+                    boss.defense = max(1, int(boss.defense * phase_mult))
+                    boss.hp_max = max(1, int(boss.hp_max * phase_mult))
+                    hp[bkey] = boss.hp_max
+                    phases.append(phase_name)
+                    log.append(
+                        f"【{phase_name}】{boss.name} 气血尽而复生，三维 ×{phase_mult:g}，"
+                        f"满血 {hp[bkey]:,}！（剩余复活 {phase_left} 次）"
+                    )
+                elif hp[bkey] <= 0:
+                    win = True
+                    break
+            # 玩家侧者字秘：致死一击后立刻判定，不影响本回合后续单位
+            for p in players:
+                pk = _raid_key(p, "p")
+                if hp[pk] <= 0 and revives[pk] > 0:
+                    revives[pk] -= 1
+                    hp[pk] = max(1, int(p.hp_max * ratio[pk]))
+                    log.append(f"【者字秘】{p.name} 生机重燃，回复至 {hp[pk]:,}"
+                               f"（余 {revives[pk]} 次）")
+        if win or all(hp[_raid_key(p, "p")] <= 0 for p in players):
+            break
+
+    survivors = [_raid_key(p, "p") for p in players if hp[_raid_key(p, "p")] > 0]
+    log.append("--- 讨伐结束 ---")
+    log.append(f"【{'玩家胜利' if win else 'BOSS胜利'}】共 {rounds} 回合，"
+               f"{boss.name} 剩余气血 {hp[bkey]:,} / {boss.hp_max:,}，"
+               f"存活 {len(survivors)}/{len(players)} 人")
+    return RaidResult(
+        win=win, log=log, damage=damage, boss_hp=max(0, hp[bkey]),
+        rounds=rounds, phases=phases, survivors=survivors,
+        player_hp={_raid_key(p, "p"): max(0, hp[_raid_key(p, "p")]) for p in players},
+    )

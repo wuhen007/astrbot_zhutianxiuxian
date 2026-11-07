@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -255,6 +255,26 @@ CMD_TR_INFO = "#查看队伍信息"
 CMD_TR_LIST = "#团本列表"
 CMD_TR_DISMISS = "#解散队伍"
 CMD_TR_CLAIM = "#结算团本奖励"
+# W8-D4：组队迎战帝尊 / 团本深化（原版 apps/Battle/tuanben.js，跨服三指令不做）
+CMD_TB_HELP = "#迎战帝尊帮助"
+CMD_TB_RULES = "#迎战帝尊规则"
+CMD_TB_CREATE = "#组队迎战帝尊"
+CMD_TB_JOIN = "#加入迎战帝尊"
+CMD_TB_START = "#迎战帝尊"
+CMD_TB_STATUS = "#帝尊状态"
+CMD_TB_DPS = "#团本伤害榜"
+CMD_TB_LOG = "#团本战报"
+CMD_TB_LEAVE = "#离开队伍"
+CMD_TB_MOJUN = "#魔君周常"
+CMD_TB_LOOT = "#团本奖励一览"
+CMD_TB_SYSTEM = "#团本系统状态"
+CMD_TB_DISABLE = "#关闭团本系统"
+CMD_TB_ENABLE = "#开启团本系统"
+CMD_TB_RESET_CD = "#重置所有讨伐CD"
+CMD_TB_SHUTDOWN = "#关闭所有讨伐"
+CMD_TB_AWAKEN = "#帝尊感知"
+CMD_TB_REVIVE = "#复苏帝尊"
+CMD_TB_SETTLE = "#结算魔君奖励"
 CMD_ENDLESS = "#无尽劫境"
 CMD_ENDLESS_START = "#开启无尽劫境"
 CMD_ENDLESS_MAP = "#劫途星图"
@@ -1839,6 +1859,18 @@ class ZhutianPlugin(Star):
                 (CMD_SS_REPAIR_ALL, "管理员：修复全部界门 + 清空永寂名单"),
                 (CMD_SS_RESTORE, "管理员：唯一解除高原永久覆灭、重置祭礼纪年"),
                 ("⚠️ 位面后果不可逆", "大祭守界失败会永久封闭 2 处界门，靠上面两条回滚"),
+            ]},
+            {"title": "组队迎战帝尊 · 团本", "lines": [
+                (f"{CMD_TB_HELP} / {CMD_TB_RULES}", "全部指令 / 门槛、CD、二阶段、回滚完整口径"),
+                (f"{CMD_TB_CREATE} / {CMD_TB_JOIN} 队伍码", "建帝尊队（权柄 16 档）/ 入队（5 人上限）"),
+                (CMD_TB_START, "队长开战：多人回合 + 者字秘复活 + 伤害榜 + 战报"),
+                (f"{CMD_TB_LEAVE} / {CMD_TR_DISMISS} / {CMD_TR_INFO}", "退队 / 解散 / 复用 B7 队伍面板（两类队伍通用）"),
+                (f"{CMD_TB_STATUS} / {CMD_TB_SYSTEM}", "个人权柄沉眠 / 全服开关与留痕"),
+                (f"{CMD_TB_DPS} [队伍码] / {CMD_TB_LOG}", "DPS 占比榜（补原版缺失账本）/ 最近 10 场战报"),
+                (f"{CMD_TB_MOJUN} / {CMD_TB_SETTLE}*N / {CMD_TB_LOOT}", "魔君周额度 / 批量结算（N ≤ 999）/ 41 组奖励池"),
+                (f"{CMD_TB_ENABLE} / {CMD_TB_DISABLE} / {CMD_TB_RESET_CD} / {CMD_TB_SHUTDOWN}", "管理员：系统开关 / 重置全服 CD / 关闭所有讨伐"),
+                (f"{CMD_TB_AWAKEN} reclaim|confront / {CMD_TB_REVIVE}", "管理员：切感知 / 复苏帝尊（回滚永久击杀）"),
+                ("⚠️ 帝尊无奖励不占 CD", "普通团本仍走 #创建讨伐队伍 / #讨伐出手；跨服三指令不做"),
             ]},
         ]
 
@@ -7686,6 +7718,19 @@ class ZhutianPlugin(Star):
 
     # ---- B7：团本讨伐（组队共享血条 + 伤害账本分奖） ----
 
+    async def _tb_state(self) -> tuple[dict, dict]:
+        """W8-D4：读全服团本单例（calamity_state["tuanben"]，db 仍 v17）。"""
+        state = calamity.ensure(await self.db.get_calamity())
+        return state, tb_mod.world_of(state)
+
+    async def _tb_save(self, state: dict, w: dict) -> None:
+        tb_mod.set_world(state, w)
+        await self.db.save_calamity(state)
+
+    def _tb_plane_alive(self, state: dict) -> bool:
+        rows = state.get("destroyed_planes") or {}
+        return isinstance(rows, dict) and "遮天位面" not in rows
+
     def _raid_cd_left(self, doc: PlayerDoc) -> float:
         return max(0.0, float(doc.ext.get("raid_cd", 0) or 0) - time.time())
 
@@ -7730,7 +7775,11 @@ class ZhutianPlugin(Star):
         elif str(team.get("status")) == "fighting":
             hint = "#讨伐出手（今日 3 次，20 秒间隔）"
         elif victory:
-            hint = "奖励已按伤害占比自动发放（击杀者 +10%）"
+            hint = ("帝尊伏诛，无奖励、不占 CD（#团本伤害榜 看战绩）"
+                    if str(team.get("boss")) == tb_mod.EMPEROR
+                    else "奖励已按伤害占比自动发放（击杀者 +10%）")
+        elif str(team.get("status")) == "defeated":
+            hint = "帝尊未斩：全队道伤 +5、沉眠 2 小时（#帝尊状态）"
         else:
             hint = "队伍已解散"
         return {
@@ -7772,8 +7821,18 @@ class ZhutianPlugin(Star):
                 gate = f"，需【{cfg['gate']}】" if cfg.get("gate") else ""
                 lines.append(f"· {bname}（第 {cfg['realm']} 境{gate}）：{cfg['desc']}")
             lines.append(f"格式：{CMD_TR_CREATE} 名字｜队长可邀 4 人（共 5 人）")
+            lines.append(f"帝尊不走此入口：{CMD_TB_CREATE}（无奖励、不占 CD）")
             async for r in self._smart(event, "\n".join(lines), "创建讨伐队伍"):
                 yield r
+            return
+        # W8-D4：系统开关 + 帝尊专用入口（原版 createBossTeam 明确拒绝帝尊）
+        _st0, w0 = await self._tb_state()
+        ok0, msg0 = tb_mod.system_on(w0)
+        if not ok0:
+            yield event.plain_result(msg0)
+            return
+        if name == tb_mod.EMPEROR:
+            yield event.plain_result(f"帝尊只可组队迎战，不可创建讨伐队伍——请发 {CMD_TB_CREATE}。")
             return
         cd = self._raid_cd_left(doc)
         if cd > 0:
@@ -7863,6 +7922,15 @@ class ZhutianPlugin(Star):
         if not team:
             yield event.plain_result("你不在任何招募中的队伍里。")
             return
+        # W8-D4：帝尊队走多人回合 #迎战帝尊，不能走 B7 各自单挑的 #发起讨伐
+        _st0, w0 = await self._tb_state()
+        ok0, msg0 = tb_mod.system_on(w0)
+        if not ok0:
+            yield event.plain_result(msg0)
+            return
+        if tb_mod.is_emperor_team(w0, team["code"]):
+            yield event.plain_result(f"这是迎战帝尊的队伍，请队长发 {CMD_TB_START}（多人回合战）。")
+            return
         members = await self.db.raid_members(team["code"])
         ok, msg = raid.can_start(team, len(members), team["leader_uid"] == doc.uid)
         if not ok:
@@ -7897,6 +7965,11 @@ class ZhutianPlugin(Star):
         team = await self._raid_expire(await self.db.active_raid_of(doc.uid))
         if not team:
             yield event.plain_result("你不在进行中的讨伐队伍里。")
+            return
+        # W8-D4：帝尊战一次性结算，不走 #讨伐出手 的每日 3 次累加
+        _st0, w0 = await self._tb_state()
+        if tb_mod.is_emperor_team(w0, team["code"]):
+            yield event.plain_result(f"帝尊战由队长 {CMD_TB_START} 一次性结算，无需 {CMD_TR_HIT}。")
             return
         member = await self.db.raid_member(team["code"], doc.uid)
         if not member:
@@ -8032,6 +8105,13 @@ class ZhutianPlugin(Star):
         if team["leader_uid"] != doc.uid:
             yield event.plain_result("只有队长可以解散队伍。")
             return
+        # W8-D4：帝尊队解散时同步清掉全服 emperor_codes 标记，避免残留幽灵队
+        state0, w0 = await self._tb_state()
+        if tb_mod.is_emperor_team(w0, team["code"]):
+            w0["emperor_codes"] = [c for c in w0["emperor_codes"]
+                                   if str(c) != str(team["code"])]
+            tb_mod.note(w0, f"帝尊队 {team['code']} 解散", time.time())
+            await self._tb_save(state0, w0)
         await self.db.close_raid(team["code"], "closed", time.time())
         yield event.plain_result(f"【{team['boss']}】讨伐队已解散（队伍码 {team['code']}）。")
 
@@ -8046,6 +8126,10 @@ class ZhutianPlugin(Star):
         team = await self.db.last_raid_of(doc.uid)
         if not team or team.get("status") != "victory":
             yield event.plain_result("你还没有已讨伐成功的团本。")
+            return
+        # W8-D4：原版「帝尊只可杀死，不可结算团本奖励」
+        if team.get("boss") == tb_mod.EMPEROR:
+            yield event.plain_result("帝尊只可杀死，不可结算团本奖励（#团本战报 / #团本伤害榜 看战绩）。")
             return
         members = await self.db.raid_members(team["code"])
         cfg = raid.boss_of(team["boss"]) or {}
@@ -17954,3 +18038,381 @@ class ZhutianPlugin(Star):
         async for r in self._ss_dispatch(event, "永寂名单",
                 lambda d, w, y, t, r, a, s: (True, ss_mod.yongji_text(w), {}, [])):
             yield r
+
+    # ---- W8-D4：组队迎战帝尊 / 团本深化（原版 apps/Battle/tuanben.js） ----
+
+    async def _tb_dispatch(self, event, title, fn, admin=False):
+        """统一分发：读全服团本单例 → 纯函数 → 落全服状态 + 玩家档。
+
+        fn(doc, w, now, rng, is_admin, stats, state) -> str 或 (str, ops)；
+        ops 支持 close_all / reset_cd / grant（需 await 的 DB 动作集中在此）。
+        """
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if admin and not bool(event.is_admin):
+            yield event.plain_result("此权柄唯管理员可执。")
+            return
+        state, w = await self._tb_state()
+        now = time.time()
+        rng = random.Random(f"{doc.uid}:tb:{time.time_ns()}")
+        out = fn(doc, w, now, rng, bool(event.is_admin), self._stats(doc), state)
+        msg, ops = (out, []) if isinstance(out, str) else (out[0], list(out[1]))
+        n_closed = n_reset = 0
+        for op in ops:
+            kind = op[0]
+            if kind == "close_all":
+                n_closed = await self.db.close_all_raids(now, "closed")
+            elif kind == "reset_cd":
+                for raw in await self.db.all_players():
+                    try:
+                        p = PlayerDoc(**raw)
+                        if p.ext.get("raid_cd"):
+                            p.ext["raid_cd"] = 0.0
+                            if p.uid == doc.uid:
+                                doc.ext["raid_cd"] = 0.0
+                            await self.db.save_player(p.model_dump())
+                            n_reset += 1
+                    except Exception:
+                        continue
+            elif kind == "grant":
+                delta = op[1]
+                doc.stones += int(delta.get("stones", 0) or 0)
+                if int(delta.get("tokens", 0) or 0) > 0:
+                    await self.db.remove_item(doc.uid, tb_mod.TOKEN,
+                                              int(delta["tokens"]))
+                if delta.get("items"):
+                    await self.db.add_items(
+                        doc.uid, {k: int(v) for k, v in delta["items"].items()}
+                    )
+        await self._tb_save(state, w)
+        await self.db.save_player(doc.model_dump())
+        msg = msg.replace("{closed}", str(n_closed)).replace("{reset}", str(n_reset))
+        async for r in self._smart(event, msg, title):
+            yield r
+
+    @filter.command(CMD_TB_HELP, "迎战帝尊全部指令一览")
+    async def handle_tb_help(self, event: AstrMessageEvent):
+        async for r in self._tb_dispatch(event, "迎战帝尊帮助",
+                lambda d, w, t, r, a, s, state: tb_mod.help_text()):
+            yield r
+
+    @filter.command(CMD_TB_RULES, "迎战帝尊完整规则口径")
+    async def handle_tb_rules(self, event: AstrMessageEvent):
+        async for r in self._tb_dispatch(event, "迎战帝尊规则",
+                lambda d, w, t, r, a, s, state: tb_mod.rules_text()):
+            yield r
+
+    @filter.command(CMD_TB_STATUS, "帝尊感知与个人沉眠状态")
+    async def handle_tb_status(self, event: AstrMessageEvent):
+        team = await self.db.active_raid_of(event.get_sender_id())
+        async for r in self._tb_dispatch(event, "帝尊状态",
+                lambda d, w, t, r, a, s, state: tb_mod.status_text(
+                    w, d, authority_mod.authority_21(d), self._tb_plane_alive(state),
+                    t, team, tb_mod.player_state_of(d)["last_code"])):
+            yield r
+
+    @filter.command(CMD_TB_DPS, "团本伤害榜（可带队伍码）")
+    async def handle_tb_dps(self, event: AstrMessageEvent, code: str = ""):
+        c = (code or "").strip()
+        if not c:
+            team = await self.db.last_raid_of(event.get_sender_id())
+            c = str(team.get("code") or "") if team else ""
+        async for r in self._tb_dispatch(event, "团本伤害榜",
+                lambda d, w, t, r, a, s, state: tb_mod.rank_text(w, c or "-")):
+            yield r
+
+    @filter.command(CMD_TB_LOG, "团本战报最近十场")
+    async def handle_tb_log(self, event: AstrMessageEvent):
+        async for r in self._tb_dispatch(event, "团本战报",
+                lambda d, w, t, r, a, s, state: tb_mod.log_text(w)):
+            yield r
+
+    @filter.command(CMD_TB_LOOT, "团本奖励一览")
+    async def handle_tb_loot(self, event: AstrMessageEvent):
+        pool = self.content.table("团本奖励列表") or []
+        async for r in self._tb_dispatch(event, "团本奖励一览",
+                lambda d, w, t, r, a, s, state: tb_mod.loot_text(pool)):
+            yield r
+
+    @filter.command(CMD_TB_SYSTEM, "团本系统状态")
+    async def handle_tb_system(self, event: AstrMessageEvent):
+        async for r in self._tb_dispatch(event, "团本系统状态",
+                lambda d, w, t, r, a, s, state: tb_mod.system_text(w)):
+            yield r
+
+    @filter.command(CMD_TB_MOJUN, "九幽魔君本周结算额度")
+    async def handle_tb_mojun(self, event: AstrMessageEvent):
+        inv = await self.db.get_inventory(event.get_sender_id())
+        tokens = int(inv.get(tb_mod.TOKEN, 0) or 0)
+        async for r in self._tb_dispatch(event, "魔君周常",
+                lambda d, w, t, r, a, s, state:
+                    f"--- 九幽魔君周常 ---\n"
+                    f"本周剩余：{tb_mod.weekly_left(w, d.uid, t)}/{tb_mod.WEEKLY_LIMIT}"
+                    f"（周键 {tb_mod.week_key(t)}，周一 0 点北京时间重置）\n"
+                    f"持有【{tb_mod.TOKEN}】：{tokens}\n"
+                    f"不吃 24h 讨伐 CD；结算：{CMD_TB_SETTLE}*N（N ≤ {tb_mod.BATCH_LIMIT}，# 可省）\n"
+                    f"每轮 {tb_mod.MOJUN_STONES:,} 灵石 + 5 组随机奖励，扣 1 令牌。"):
+            yield r
+
+    @filter.command(CMD_TB_ENABLE, "管理员开启团本系统")
+    async def handle_tb_enable(self, event: AstrMessageEvent):
+        async for r in self._tb_dispatch(event, "开启团本系统",
+                lambda d, w, t, r, a, s, state: tb_mod.system_switch(w, True, t),
+                admin=True):
+            yield r
+
+    @filter.command(CMD_TB_DISABLE, "管理员关闭团本系统")
+    async def handle_tb_disable(self, event: AstrMessageEvent):
+        async for r in self._tb_dispatch(event, "关闭团本系统",
+                lambda d, w, t, r, a, s, state: tb_mod.system_switch(w, False, t),
+                admin=True):
+            yield r
+
+    @filter.command(CMD_TB_RESET_CD, "管理员重置所有讨伐CD")
+    async def handle_tb_reset_cd(self, event: AstrMessageEvent):
+        async for r in self._tb_dispatch(event, "重置所有讨伐CD",
+                lambda d, w, t, r, a, s, state:
+                    (tb_mod.reset_cd(w, t) + "｜实际清除 {reset} 人", [("reset_cd",)]),
+                admin=True):
+            yield r
+
+    @filter.command(CMD_TB_SHUTDOWN, "管理员关闭所有讨伐")
+    async def handle_tb_shutdown(self, event: AstrMessageEvent):
+        async for r in self._tb_dispatch(event, "关闭所有讨伐",
+                lambda d, w, t, r, a, s, state:
+                    (tb_mod.shutdown(w, t) + "｜接线层关闭 {closed} 支队伍",
+                     [("close_all",)]),
+                admin=True):
+            yield r
+
+    @filter.command(CMD_TB_AWAKEN, "管理员切换帝尊感知 reclaim|confront")
+    async def handle_tb_awaken(self, event: AstrMessageEvent, mode: str = ""):
+        arg = (mode or "").strip()
+        if not arg:
+            yield event.plain_result(f"格式：{CMD_TB_AWAKEN} reclaim（可直接挑战）或 confront（需遮天位面未毁）。")
+            return
+        async for r in self._tb_dispatch(event, "帝尊感知",
+                lambda d, w, t, r, a, s, state: tb_mod.awareness_switch(w, arg, t),
+                admin=True):
+            yield r
+
+    @filter.command(CMD_TB_REVIVE, "管理员复苏帝尊（回滚永久击杀）")
+    async def handle_tb_revive(self, event: AstrMessageEvent):
+        async for r in self._tb_dispatch(event, "复苏帝尊",
+                lambda d, w, t, r, a, s, state: tb_mod.revive_emperor(w, t),
+                admin=True):
+            yield r
+
+    @filter.regex(r"^#?结算魔君奖励\*(\d+)$")
+    async def handle_tb_settle_mojun(self, event: AstrMessageEvent):
+        """原版 /^#?结算魔君奖励\\*(\\d+)$/：# 可选、* 为字面星号。"""
+        import re as _re
+        m = _re.match(r"^#?结算魔君奖励\*(\d+)$",
+                      (event.get_message_str() or "").strip())
+        n = int(m.group(1)) if m else 1
+        pool = self.content.table("团本奖励列表") or []
+        inv = await self.db.get_inventory(event.get_sender_id())
+        tokens = int(inv.get(tb_mod.TOKEN, 0) or 0)
+
+        def _fn(d, w, t, r, a, s, state):
+            ok, msg, delta = tb_mod.mojun_settle(w, d.uid, n, tokens, t, pool, r)
+            return (msg, [("grant", delta)] if ok else [])
+
+        async for r in self._tb_dispatch(event, "结算魔君奖励", _fn):
+            yield r
+
+    @filter.command(CMD_TB_CREATE, "组队迎战帝尊（专用，无奖励不占CD）")
+    async def handle_tb_create(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        state, w = await self._tb_state()
+        now = time.time()
+        active = await self._raid_expire(await self.db.active_raid_of(doc.uid))
+        ok, msg = tb_mod.can_create_emperor(
+            doc, w, bool(active), authority_mod.authority_21(doc),
+            self._tb_plane_alive(state), now,
+        )
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        rng = random.Random(f"{doc.uid}:emperor:{time.time_ns()}")
+        code = ""
+        for _ in range(20):
+            code = raid.make_code(rng)
+            if not await self.db.get_raid(code):
+                break
+        await self.db.create_raid(code, tb_mod.EMPEROR, doc.uid,
+                                  doc.name or doc.uid[:8], now)
+        w["emperor_codes"] = [str(c) for c in w["emperor_codes"]] + [code]
+        tb_mod.note(w, f"{doc.name or doc.uid[:8]} 组队迎战帝尊 {code}", now)
+        s = tb_mod.player_state_of(doc)
+        s["last_code"] = code
+        tb_mod.set_player(doc, s)
+        await self._tb_save(state, w)
+        await self.db.save_player(doc.model_dump())
+        yield event.plain_result(
+            f"迎战帝尊之队已立！\n队伍码：{code}（{tb_mod.MAX_MEMBERS} 人上限）\n"
+            f"队友加入：{CMD_TB_JOIN} {code}\n"
+            f"队长开战：{CMD_TB_START}（一次结算，无奖励、不占 CD）\n"
+            f"查看：{CMD_TR_INFO}｜规则：{CMD_TB_RULES}"
+        )
+
+    @filter.command(CMD_TB_JOIN, "加入迎战帝尊队伍")
+    async def handle_tb_join(self, event: AstrMessageEvent, code: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        c = (code or "").strip()
+        if not (len(c) == 6 and c.isdigit()):
+            yield event.plain_result(f"格式：{CMD_TB_JOIN} 六位队伍码")
+            return
+        state, w = await self._tb_state()
+        now = time.time()
+        team = await self._raid_expire(await self.db.get_raid(c))
+        if not team:
+            yield event.plain_result("没有这个队伍码（或队伍已解散/逾期）。")
+            return
+        if await self.db.raid_member(c, doc.uid):
+            yield event.plain_result("你已在这支队伍里。")
+            return
+        count = await self.db.raid_member_count(c)
+        active = await self._raid_expire(await self.db.active_raid_of(doc.uid))
+        ok, msg = tb_mod.can_join_emperor(
+            doc, w, team, count, bool(active),
+            authority_mod.authority_21(doc), now,
+        )
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        joined = await self.db.join_raid(c, doc.uid, doc.name or doc.uid[:8], now)
+        if not joined:
+            yield event.plain_result("加入失败：队伍状态已变化，请重试。")
+            return
+        s = tb_mod.player_state_of(doc)
+        s["last_code"] = c
+        tb_mod.set_player(doc, s)
+        await self.db.save_player(doc.model_dump())
+        yield event.plain_result(
+            f"已加入迎战帝尊之队（{count + 1}/{tb_mod.MAX_MEMBERS}）。\n"
+            f"等待队长 {CMD_TB_START}；败则道伤 +5 并沉眠 2 小时。"
+        )
+
+    @filter.command(CMD_TB_START, "队长发起帝尊多人回合战")
+    async def handle_tb_start(self, event: AstrMessageEvent):
+        from .core.combat import run_raid
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        state, w = await self._tb_state()
+        now = time.time()
+        team = await self._raid_expire(await self.db.active_raid_of(doc.uid))
+        if not team or not tb_mod.is_emperor_team(w, team.get("code")):
+            yield event.plain_result(f"你不在迎战帝尊的队伍里。先发 {CMD_TB_CREATE}。")
+            return
+        code = str(team["code"])
+        members = await self.db.raid_members(code)
+        ok, msg = tb_mod.can_start_emperor(
+            doc, w, team, len(members), authority_mod.authority_21(doc),
+            self._tb_plane_alive(state), now, team["leader_uid"] == doc.uid,
+        )
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        fighters = []
+        meta: list[tuple[str, PlayerDoc, dict]] = []
+        atks: list[int] = []
+        for m in members:
+            raw = await self.db.get_player(m["uid"])
+            if not raw:
+                continue
+            p = PlayerDoc(**raw)
+            st = self._stats(p)
+            hp_cur, hp_max = self._hp_pair(p)
+            s = tb_mod.player_state_of(p)
+            fighters.append(tb_mod.player_fighter(
+                m["uid"], m["name"] or m["uid"][:8], st.atk, st.defense,
+                hp_cur, hp_max, st.bao, int(s.get("zhezi", 0) or 0),
+                speed=100 + int(st.atk) % 97,
+            ))
+            atks.append(int(st.atk))
+            meta.append((m["uid"], p, s))
+        if not fighters:
+            yield event.plain_result("队伍成员档案不可读，无法开战。")
+            return
+        avg = sum(atks) // len(atks)
+        rng = random.Random(f"{code}:emperor:{now}")
+        boss = tb_mod.boss_fighter(avg, len(fighters), rng)
+        result = run_raid(fighters, boss, rng, max_rounds=tb_mod.RAID_ROUNDS)
+        # 先把 Boss 定标写回队伍表，再一次性落伤害账本与终局态
+        await self.db.start_raid(code, {
+            "hp": boss.hp, "hp_max": boss.hp_max, "atk": boss.atk,
+            "defense": boss.defense, "reward": 0,
+        })
+        await self.db.settle_raid_battle(
+            code, result.damage, result.boss_hp,
+            "victory" if result.win else "defeated", now,
+        )
+        for uid, p, s in meta:
+            p.ext["hp"] = int(result.player_hp.get(uid, 0) or 0)
+            if result.win:
+                s["wins"] = int(s.get("wins", 0) or 0) + 1
+            else:
+                tb_mod.defeat_penalty(p, s, now)
+            s["last_code"] = code
+            tb_mod.set_player(p, s)
+            await self.db.save_player(p.model_dump())
+        concl = tb_mod.settle_battle(w, code, result, members, now,
+                                     self._tb_plane_alive(state))
+        await self._tb_save(state, w)
+        lines = [
+            f"--- 迎战帝尊 · 队伍 {code} ---",
+            f"全队 {len(fighters)} 人｜均攻 {avg:,}｜{result.rounds} 回合",
+            f"帝尊气血：{result.boss_hp:,} / {boss.hp_max:,}",
+            f"阶段：{'、'.join(result.phases) or '无'}｜存活 {len(result.survivors)}/{len(fighters)} 人",
+            "",
+        ]
+        lines.extend(result.log[-14:])
+        lines.append("")
+        lines.append(tb_mod.rank_text(w, code, 10))
+        lines.append(concl)
+        async for r in self._smart(event, "\n".join(lines), "迎战帝尊"):
+            yield r
+
+    @filter.command(CMD_TB_LEAVE, "离开队伍（普通队/帝尊队通用）")
+    async def handle_tb_leave(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        team = await self.db.active_raid_of(doc.uid)
+        if not team:
+            yield event.plain_result("你不在任何队伍中。")
+            return
+        if team["leader_uid"] == doc.uid:
+            yield event.plain_result(f"队长不可直接离队，请用 {CMD_TR_DISMISS} 解散。")
+            return
+        state, w = await self._tb_state()
+        ok = await self.db.leave_raid(team["code"], doc.uid)
+        if not ok:
+            yield event.plain_result("离队失败：队伍状态已变化。")
+            return
+        if tb_mod.is_emperor_team(w, team["code"]):
+            tb_mod.note(w, f"{doc.name or doc.uid[:8]} 离开帝尊队 {team['code']}", time.time())
+            await self._tb_save(state, w)
+        yield event.plain_result(f"已离开【{team['boss']}】队伍（{team['code']}）。")

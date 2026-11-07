@@ -164,6 +164,7 @@ def main() -> int:
                   "handle_dt_accept", "handle_dt_tech", "handle_dt_world")),
         ("锻炉 · 锻造深层", ("handle_furn_help", "handle_furn_rules", "handle_furn_mats", "handle_furn_eval", "handle_furn_show_furnace", "handle_furn_install", "handle_furn_show_fire", "handle_furn_light_fire", "handle_furn_show_gongfa", "handle_furn_learn_gongfa", "handle_furn_recipe", "handle_furn_synth", "handle_furn_melt", "handle_furn_start", "handle_furn_open", "handle_furn_oneclick", "handle_furn_perfect", "handle_furn_clear", "handle_furn_panel", "handle_furn_name", "handle_furn_board", "handle_furn_clear_all")),
         ("诡异大祭 · 厄土高原", ("handle_ss_help", "handle_ss_rules", "handle_ss_status", "handle_ss_slash", "handle_ss_fight_small", "handle_ss_fight_big", "handle_ss_open_small", "handle_ss_open_big", "handle_ss_close_small", "handle_ss_close_big", "handle_ss_settle", "handle_ss_restore", "handle_ss_rank", "handle_ss_planes", "handle_ss_repair_all", "handle_ss_yongji")),
+        ("组队迎战帝尊 · 团本", ("handle_tb_help", "handle_tb_rules", "handle_tb_create", "handle_tb_join", "handle_tb_start", "handle_tb_status", "handle_tb_dps", "handle_tb_log", "handle_tb_leave", "handle_tb_mojun", "handle_tb_loot", "handle_tb_system", "handle_tb_enable", "handle_tb_disable", "handle_tb_reset_cd", "handle_tb_shutdown", "handle_tb_awaken", "handle_tb_revive")),
         ("帮助", ("handle_help",)),
     ]
     grouped = {}

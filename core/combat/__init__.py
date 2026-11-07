@@ -9,4 +9,5 @@
 """
 
 from .engine import Fighter, BattleResult, run_1v1  # noqa: F401
+from .engine import RaidResult, run_raid           # noqa: F401  (W8-D4 多人团本)
 from . import skills  # noqa: F401
