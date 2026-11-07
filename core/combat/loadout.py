@@ -251,6 +251,27 @@ def build_fighter(
             f.effects["revive"] = cx["revive"]
     except Exception:
         pass
+    # W8-C3 大道炼器：敕令权柄（须完整）+ 终极功法 + 大道界 + 天资
+    try:
+        from .. import daotreasure as dt_mod
+        c3 = dt_mod.combat(doc)
+        if c3.get("dealt"):
+            f.effects["dmg_dealt_mult"] = float(f.eff("dmg_dealt_mult", 1.0)) * (1 + c3["dealt"])
+        if c3.get("taken"):
+            f.effects["dmg_taken_mult"] = max(0.15, float(f.eff("dmg_taken_mult", 1.0))
+                                              * (1 - c3["taken"]))
+        if c3.get("crit"):
+            f.bao = 1.0
+        if c3.get("revive"):
+            rev = f.effects.get("revive")
+            if isinstance(rev, dict):
+                rev["pr"] = 1.0
+                rev["used"] = False
+            else:
+                f.effects["revive"] = {"name": "大道生死", "ratio": 0.7, "pr": 1.0,
+                                      "msg": "生死权柄，一缕真灵不灭", "used": False}
+    except Exception:
+        pass
     apply_proficiency(f, doc)   # W7-0：三乘区 + 档位共鸣，PvP/PvE 同源
     if (int(getattr(doc, "realm_index", 0) or 0) >= 10
             and int(getattr(doc, "physique_index", 0) or 0) >= 10):

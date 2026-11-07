@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, authority as authority_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, authority as authority_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -639,6 +639,26 @@ CMD_XT_DINGHAI = "#演化诸天"
 CMD_XT_ETERNAL = "#合成永恒仙图"
 CMD_XT_HISTORY = "#永恒古史"
 CMD_XT_REWRITE = "#永恒改命"
+# W8-C3：大道炼器 · 文明大道至宝（原版 15 条 rule；#大道至宝 已被 W7-5a 占用，改名 #大道权柄）
+CMD_DT_FORGE = "#大道炼器"
+CMD_DT_OPEN = "#开铸大道至宝"
+CMD_DT_FUEL = "#献祭文明"
+CMD_DT_GUARD = "#镇守大道炉"
+CMD_DT_TRIB = "#渡大道器劫"
+CMD_DT_MY = "#大道权柄"
+CMD_DT_MY_ALIAS = "#文明至宝"
+CMD_DT_RENAME = "#大道至宝改名"
+CMD_DT_DECREE = "#敕令大道"
+CMD_DT_REPAIR = "#修复大道权柄"
+CMD_DT_LIFE = "#改写生死"
+CMD_DT_FATE = "#改写命格"
+CMD_DT_APT = "#重塑天资"
+CMD_DT_ACCEPT = "#同意大道改命"
+CMD_DT_TECH = "#推演终极功法"
+CMD_DT_WORLD = "#开辟大道界"
+CMD_DT_HELP = "#大道炼器帮助"
+CMD_DT_RULES = "#大道炼器规则"
+CMD_DT_MATS = "#文明燃料"
 # W7-4：养成深度（灵根觉醒 / 寿元救援 / 帝兵铭文 / 职业产线 / 道法卡）
 CMD_LG_AWAKEN = "#灵根觉醒"
 CMD_RESCUE = "#轮回救人"
@@ -1661,6 +1681,20 @@ class ZhutianPlugin(Star):
                 (f"{CMD_XT_SPRING} / {CMD_XT_FURNACE} / {CMD_XT_BODHI}", "回春祛道伤 / 开炉增炼丹 / 菩提顿悟"),
                 (f"{CMD_XT_CAUSALITY} / {CMD_XT_TEMPER}", "燃灯解因消因果债 / 淬神涨元神上限"),
                 (f"{CMD_XT_ETERNAL} / {CMD_XT_HISTORY} / {CMD_XT_REWRITE} 编号", "九宝合成永恒仙图 / 古史改写"),
+            ]},
+            {"title": "大道炼器", "lines": [
+                (CMD_DT_HELP, "大道炼器全部指令一览"),
+                (CMD_DT_RULES, "五阶段世界年 / 镇守 / 器劫 / 本源 / 改命规则"),
+                (CMD_DT_MATS, "四种文明燃料目标与获取途径"),
+                (f"{CMD_DT_FORGE} / {CMD_DT_OPEN} 名", "熔炉进度 / 炼器师立全服唯一大道炉"),
+                (f"{CMD_DT_FUEL} 材料*数 / {CMD_DT_GUARD}", "献祭四种燃料点炉 / 前四阶段各留道痕（需 3 人）"),
+                (CMD_DT_TRIB, "第五阶段打自身镜像，失败无惩罚、可无限重试"),
+                (f"{CMD_DT_MY}（别名 {CMD_DT_MY_ALIAS}）", "领取成器 + 完整度 / 权柄 / 文明本源面板"),
+                (f"{CMD_DT_RENAME} 名 / {CMD_DT_DECREE} 生死|命运|万法|世界", "改器名 / 定战斗开场权柄"),
+                (f"{CMD_DT_REPAIR} 本体|生死|…", "耗四种燃料补残缺权柄，完整度 +20"),
+                (f"{CMD_DT_LIFE} / {CMD_DT_FATE} 名 / {CMD_DT_APT} 十级天资", "三大改命（耗 6/3/3 本源，改他人需 60 秒同意）"),
+                (CMD_DT_ACCEPT, "被改命者在 60 秒内确认邀请"),
+                (f"{CMD_DT_TECH} 名 类型 / {CMD_DT_WORLD} 名", "耗 8/12 本源，每件至宝各一次"),
             ]},
         ]
 
@@ -12564,6 +12598,11 @@ class ZhutianPlugin(Star):
         if xt_drop:
             for _k, _v in xt_drop.items():
                 items_out[_k] = int(items_out.get(_k, 0) or 0) + int(_v)
+        # W8-C3：文明薪火燃料 12% 成批投放（原版四种燃料无发放点，本移植补通道）
+        dt_drop = dt_mod.roll_drop(random.Random())
+        if dt_drop:
+            for _k, _v in dt_drop.items():
+                items_out[_k] = int(items_out.get(_k, 0) or 0) + int(_v)
         async with self.db.transaction():
             await self.db.save_player(d.model_dump())
             if items_out:
@@ -12593,6 +12632,9 @@ class ZhutianPlugin(Star):
             if xt_drop:
                 lines.append(f"【先天道痕】{'、'.join(f'{k}×{v}' for k, v in xt_drop.items())}"
                              + "（#至宝择主 争夺先天至宝）")
+            if dt_drop:
+                lines.append(f"【文明薪火】{'、'.join(f'{k}×{v}' for k, v in dt_drop.items())}"
+                             + "（#献祭文明 投入大道炉）")
         else:
             lines.append("物品：无")
         if dungeon_note:
@@ -16637,3 +16679,156 @@ class ZhutianPlugin(Star):
                 lambda d, inv, w, t: xt_mod.eternal_rewrite(d, w, a, t)):
             yield r
 
+    # ─────────────────── W8-C3 大道炼器 · 文明大道至宝 ───────────────────
+    async def _dt_dispatch(self, event, title, fn, need_inv=False, need_target=False):
+        """统一分发：全服熔炉 + 世界年 + 玩家档 + 物品增减（复用 B6 事务落库）。"""
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid) if need_inv else {}
+        state = await self.db.get_calamity()
+        world = dt_mod.world_of(state)
+        years = int((await self._era_state()).get("years_total") or 0)
+        now = time.time()
+        notes = dt_mod.advance(world, years, now)
+        tdoc = None
+        if need_target:
+            uid = self._at_target(event)
+            if uid:
+                row = await self.db.get_player(uid)
+                tdoc = PlayerDoc(**row) if row else None
+        result = fn(doc, inv, world, years, tdoc, now)
+        dt_mod.sync_treasure(doc, world)
+        dt_mod.set_world(state, world)
+        await self.db.save_calamity(state)
+        if tdoc is not None:
+            await self.db.save_player(tdoc.model_dump())
+        if notes:
+            ok, msg, delta = result
+            result = (ok, msg + "\n" + "\n".join(notes), delta)
+        async for r in self._dz_finish(event, doc, result, title):
+            yield r
+
+    @filter.command(CMD_DT_HELP, "大道炼器全部指令一览")
+    async def handle_dt_help(self, event: AstrMessageEvent):
+        async for r in self._dt_dispatch(event, "大道炼器帮助",
+                lambda d, i, w, y, td, t: (True, dt_mod.help_text(), {})):
+            yield r
+
+    @filter.command(CMD_DT_RULES, "五阶段世界年 / 镇守 / 器劫 / 本源 / 改命规则")
+    async def handle_dt_rules(self, event: AstrMessageEvent):
+        async for r in self._dt_dispatch(event, "大道炼器规则",
+                lambda d, i, w, y, td, t: (True, dt_mod.rules_text(), {})):
+            yield r
+
+    @filter.command(CMD_DT_MATS, "四种文明燃料目标与获取途径")
+    async def handle_dt_mats(self, event: AstrMessageEvent):
+        async for r in self._dt_dispatch(event, "文明燃料",
+                lambda d, i, w, y, td, t: (True, dt_mod.materials_text(), {})):
+            yield r
+
+    @filter.command(CMD_DT_FORGE, "大道熔炉进度（五阶段世界年）")
+    async def handle_dt_forge(self, event: AstrMessageEvent):
+        async for r in self._dt_dispatch(event, "大道熔炉",
+                lambda d, i, w, y, td, t: (True, dt_mod.forge_panel(w, y), {})):
+            yield r
+
+    @filter.command(CMD_DT_OPEN, "炼器师立全服唯一大道炉（1-10 字器名）")
+    async def handle_dt_open(self, event: AstrMessageEvent, arg: str = ""):
+        a = self._xt_clean(arg)
+        async for r in self._dt_dispatch(event, "开铸大道至宝",
+                lambda d, i, w, y, td, t: dt_mod.open_forge(d, a, w, y)):
+            yield r
+
+    @filter.command(CMD_DT_FUEL, "献祭四种燃料：材料*数，齐备自动点炉")
+    async def handle_dt_fuel(self, event: AstrMessageEvent, arg: str = ""):
+        a = self._xt_clean(arg)
+        async for r in self._dt_dispatch(event, "献祭文明",
+                lambda d, i, w, y, td, t: dt_mod.contribute(d, i, a, w, y, t), True):
+            yield r
+
+    @filter.command(CMD_DT_GUARD, "前四阶段各留一道文明道痕（每阶段需 3 人）")
+    async def handle_dt_guard(self, event: AstrMessageEvent):
+        async for r in self._dt_dispatch(event, "镇守大道炉",
+                lambda d, i, w, y, td, t: dt_mod.guard_forge(d, w, y, t)):
+            yield r
+
+    @filter.command(CMD_DT_TRIB, "第五阶段打自身镜像，胜者计为镇守")
+    async def handle_dt_trib(self, event: AstrMessageEvent):
+        async for r in self._dt_dispatch(event, "渡大道器劫",
+                lambda d, i, w, y, td, t: dt_mod.tribulation(
+                    d, w, y, self._stats(d), random.Random(f"{d.uid}:dt:{t}"), t)):
+            yield r
+
+    @filter.command(CMD_DT_MY, "领取成器 + 完整度 / 权柄 / 文明本源面板", alias={CMD_DT_MY_ALIAS})
+    async def handle_dt_my(self, event: AstrMessageEvent):
+        async for r in self._dt_dispatch(event, "文明大道至宝",
+                lambda d, i, w, y, td, t: (True, dt_mod.treasure_panel(d, w, y), {})):
+            yield r
+
+    @filter.command(CMD_DT_RENAME, "改器名（填本名可复原）")
+    async def handle_dt_rename(self, event: AstrMessageEvent, arg: str = ""):
+        a = self._xt_clean(arg)
+        async for r in self._dt_dispatch(event, "大道至宝改名",
+                lambda d, i, w, y, td, t: dt_mod.rename(d, a, w)):
+            yield r
+
+    @filter.command(CMD_DT_DECREE, "敕令大道 生死|命运|万法|世界：定战斗开场权柄")
+    async def handle_dt_decree(self, event: AstrMessageEvent, arg: str = ""):
+        a = self._xt_clean(arg)
+        async for r in self._dt_dispatch(event, "敕令大道",
+                lambda d, i, w, y, td, t: dt_mod.decree(d, a, w)):
+            yield r
+
+    @filter.command(CMD_DT_REPAIR, "耗四种燃料补残缺权柄，完整度 +20")
+    async def handle_dt_repair(self, event: AstrMessageEvent, arg: str = ""):
+        a = self._xt_clean(arg)
+        async for r in self._dt_dispatch(event, "修复大道权柄",
+                lambda d, i, w, y, td, t: dt_mod.repair(d, i, a, w), True):
+            yield r
+
+    @filter.command(CMD_DT_LIFE, "耗 6 本源改写生死（@目标 需对方 60 秒同意）")
+    async def handle_dt_life(self, event: AstrMessageEvent, arg: str = ""):
+        async for r in self._dt_dispatch(event, "改写生死",
+                lambda d, i, w, y, td, t: dt_mod.rewrite(
+                    d, td, "", "life", w, self.content, t), need_target=True):
+            yield r
+
+    @filter.command(CMD_DT_FATE, "耗 3 本源改写命格（@目标 需对方 60 秒同意）")
+    async def handle_dt_fate(self, event: AstrMessageEvent, arg: str = ""):
+        a = self._xt_clean(arg)
+        async for r in self._dt_dispatch(event, "改写命格",
+                lambda d, i, w, y, td, t: dt_mod.rewrite(
+                    d, td, a, "fate", w, self.content, t), need_target=True):
+            yield r
+
+    @filter.command(CMD_DT_APT, "耗 3/6 本源重塑天资（十级，改三维乘区）")
+    async def handle_dt_apt(self, event: AstrMessageEvent, arg: str = ""):
+        a = self._xt_clean(arg)
+        async for r in self._dt_dispatch(event, "重塑天资",
+                lambda d, i, w, y, td, t: dt_mod.rewrite(
+                    d, td, a, "apt", w, self.content, t), need_target=True):
+            yield r
+
+    @filter.command(CMD_DT_ACCEPT, "被改命者在 60 秒内确认邀请")
+    async def handle_dt_accept(self, event: AstrMessageEvent):
+        async for r in self._dt_dispatch(event, "同意大道改命",
+                lambda d, i, w, y, td, t: dt_mod.accept_rewrite(d, w, self.content, t)):
+            yield r
+
+    @filter.command(CMD_DT_TECH, "耗 8 本源推演终极功法（每件至宝一次）")
+    async def handle_dt_tech(self, event: AstrMessageEvent, arg: str = ""):
+        a = self._xt_clean(arg)
+        async for r in self._dt_dispatch(event, "推演终极功法",
+                lambda d, i, w, y, td, t: dt_mod.deduce(d, a, w)):
+            yield r
+
+    @filter.command(CMD_DT_WORLD, "耗 12 本源开辟大道界（每件至宝一次）")
+    async def handle_dt_world(self, event: AstrMessageEvent, arg: str = ""):
+        a = self._xt_clean(arg)
+        async for r in self._dt_dispatch(event, "开辟大道界",
+                lambda d, i, w, y, td, t: dt_mod.create_world(d, a, w)):
+            yield r

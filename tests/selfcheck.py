@@ -5448,6 +5448,153 @@ async def main():
     assert "每纪元" in xt42.rules_text() and "孤儿" in xt42.rules_text()
     print("W8-C2 xtzb ok")
 
+    # ── 43. W8-C3 大道炼器 ──────────────────────────────────────────────
+    from types import SimpleNamespace
+    from core import daotreasure as dt43
+    from core import authority as au43
+    au43.reset_tracks()          # 第 42 组注册的第三轨不污染本组权柄判定
+
+    class _Content43:
+        def table(self, name):
+            if name == "item/命格词条":
+                return [{"name": "天命孤星", "id": "A1", "effects": {"攻击加成": 1.0}}]
+            return []
+
+    c43 = _Content43()
+    t43 = 1_800_000.0
+    d43 = PlayerDoc(uid="w8dt0", name="器主", realm_index=25,
+                    ext={"occupation": "炼器师", "occupation_level": 24})
+    bad43 = PlayerDoc(uid="w8dt9", name="散修", realm_index=3, ext={})
+    w43 = dt43.world_of({})
+
+    assert len(dt43.APTITUDES) == 10 and len(dt43.STAGES) == 5
+    assert sum(dt43.FUEL.values()) == 1160 and dt43.FORGE_YEARS == 50_000
+    assert "#大道权柄" in dt43.help_text() and "彼岸铸宝" in dt43.help_text()
+    assert "纪元" in dt43.rules_text() and "shortcut" in dt43.rules_text()
+
+    # ① 开铸三重校验 + 全服唯一工程
+    ok43, msg43, _ = dt43.open_forge(bad43, "无道炉", w43, 1000)
+    assert not ok43 and "炼器师" in msg43
+    d43b = d43.model_copy(deep=True)
+    d43b.realm_index = 3
+    ok43, msg43, _ = dt43.open_forge(d43b, "无道炉", w43, 1000)
+    assert not ok43 and "祭道" in msg43
+    d43c = d43.model_copy(deep=True)
+    d43c.ext["occupation_level"] = 2
+    ok43, msg43, _ = dt43.open_forge(d43c, "无道炉", w43, 1000)
+    assert not ok43 and "炉火纯青" in msg43
+    ok43, _, _ = dt43.open_forge(d43, "文明炉", w43, 1000)
+    assert ok43 and w43["project"]["status"] == "gathering"
+    ok43, _, _ = dt43.open_forge(d43, "第二炉", w43, 1000)
+    assert not ok43
+
+    # ② 四种燃料齐备自动点炉，扣料走 delta
+    inv43 = dict(dt43.FUEL)
+    for k43, v43 in dt43.FUEL.items():
+        ok43, _, delta43 = dt43.contribute(d43, inv43, f"{k43}*{v43}", w43, 2000, t43)
+        assert ok43 and delta43[k43] == -v43
+    assert w43["project"]["status"] == "forging"
+    assert w43["project"]["start_year"] == 2000
+
+    # ③ 镇守去重：仅阶段 0 满 3 人 → 成器完整度 20、四权柄残缺
+    g43 = [PlayerDoc(uid=f"w8dtg{i}", name=f"守{i}", ext={}) for i in range(3)]
+    for g in g43:
+        ok43, _, _ = dt43.guard_forge(g, w43, 2000, t43)
+        assert ok43
+    ok43, _, _ = dt43.guard_forge(g43[0], w43, 2000, t43)
+    assert not ok43
+    dt43.advance(w43, 2000 + 40_000, t43)
+    assert w43["project"]["stage_index"] == 4
+    ok43, msg43, _ = dt43.guard_forge(g43[0], w43, 42_000, t43)
+    assert not ok43 and "渡劫" in msg43
+
+    # ④ 器劫：胜写 guardians、败无任何惩罚（双分支都可接受）
+    st43 = SimpleNamespace(atk=100_000, defense=50_000, hp=500_000, bao=0.2)
+    ok43, msg43, _ = dt43.tribulation(d43, w43, 42_000, st43, _random.Random(43), t43)
+    guards43 = w43["project"]["stages"][4]["guardians"]
+    if ok43:
+        assert "斩道功成" in msg43 and str(d43.uid) in guards43
+    else:
+        assert "未破" in msg43 and not guards43
+
+    notes43 = dt43.advance(w43, 2000 + 50_000, t43)
+    assert any("出世" in n for n in notes43)
+    tr43 = w43["treasure"]
+    assert w43["project"]["status"] == "completed"
+    assert tr43["integrity"] == 20 and tr43["body"] == "完整"
+    assert all(v == "残缺" for v in tr43["authorities"].values())
+    assert tr43["origin"] == 12 and tr43["delivery"] == "pending"
+
+    # ⑤ 本源跨一纪元恢复 4（按 epoch 差一次性补算）
+    tr43["origin"] = 0
+    ep43 = dt43.epoch_of(52_000)
+    tr43["last_recovery_epoch"] = ep43
+    dt43.advance(w43, 52_000 + 50_000, t43)
+    assert tr43["origin"] == 4 and tr43["last_recovery_epoch"] == ep43 + 1
+
+    # ⑥ 领取成器 + 镜像全服状态给纯读出口
+    assert "文明大道至宝" in dt43.treasure_panel(d43, w43, 102_000)
+    assert tr43["delivery"] == "delivered" and dt43._player(d43)["owned"] == "文明炉"
+    dt43.sync_treasure(d43, w43)
+    b43 = dt43.bonus(d43)
+    assert b43[0] > 0 and b43[1] > 0 and b43[2] > 0
+    assert dt43.combat(d43)["dealt"] == 0.0
+
+    # ⑦ 修权柄耗四种材料、完整度 +20；残缺权柄不可敕令
+    inv43b = dict(dt43.REPAIR_COST)
+    ok43, msg43, _ = dt43.decree(d43, "万法", w43)
+    assert not ok43 and "残缺" in msg43
+    for k43 in dt43.AUTHORITIES:
+        ok43, _, delta43 = dt43.repair(d43, inv43b, k43, w43)
+        assert ok43 and all(delta43[x] == -y for x, y in dt43.REPAIR_COST.items())
+    assert tr43["integrity"] == 100
+    dt43.sync_treasure(d43, w43)
+    ok43, _, _ = dt43.decree(d43, "生死", w43)
+    assert ok43 and dt43.combat(d43)["revive"] is True
+    ok43, _, _ = dt43.decree(d43, "万法", w43)
+    assert ok43 and dt43.combat(d43)["dealt"] >= 0.25
+
+    # ⑧ 改命：自己立即生效 / 他人须 60 秒同意 / 邀请过期
+    tr43["origin"] = 12
+    ok43, _, _ = dt43.rewrite(d43, None, "无演无尽", "apt", w43, c43, t43)
+    assert ok43 and dt43._player(d43)["aptitude"] == "无演无尽"
+    assert dt43.combat(d43)["dealt"] >= 0.54
+    ok43, _, _ = dt43.rewrite(d43, None, "天命孤星", "fate", w43, c43, t43)
+    assert ok43 and d43.ext["mingge"]["name"] == "天命孤星"
+    other43 = PlayerDoc(uid="w8dt1", name="道友", realm_index=10, ext={})
+    tr43["origin"] = 12
+    ok43, msg43, _ = dt43.rewrite(d43, other43, "绝世天骄", "apt", w43, c43, t43)
+    assert ok43 and "60" in msg43 and "w8dt1" in w43["invites"]
+    assert not dt43._player(other43).get("aptitude")
+    ok43, _, _ = dt43.accept_rewrite(other43, w43, c43, t43 + 10)
+    assert ok43 and dt43._player(other43)["aptitude"] == "绝世天骄"
+    assert "w8dt1" not in w43["invites"]
+    tr43["origin"] = 12
+    dt43.rewrite(d43, other43, "平庸之资", "apt", w43, c43, t43)
+    ok43, msg43, _ = dt43.accept_rewrite(other43, w43, c43, t43 + 61)
+    assert not ok43 and "消散" in msg43
+
+    # ⑨ 终极功法 / 大道界每件至宝各一次；改名同步 owned
+    tr43["origin"] = 12
+    ok43, _, _ = dt43.deduce(d43, "无上道经 攻伐", w43)
+    assert ok43 and dt43.combat(d43)["dealt"] >= 0.74
+    tr43["origin"] = 12
+    ok43, msg43, _ = dt43.deduce(d43, "再来一部", w43)
+    assert not ok43 and "一次" in msg43
+    tr43["origin"] = 12
+    ok43, _, _ = dt43.create_world(d43, "大罗天", w43)
+    assert ok43 and dt43.combat(d43)["taken"] >= 0.15
+    ok43, _, _ = dt43.create_world(d43, "另一个", w43)
+    assert not ok43
+    ok43, _, _ = dt43.rename(d43, "太初炉", w43)
+    assert ok43 and tr43["name"] == "太初炉" and dt43._player(d43)["owned"] == "太初炉"
+
+    # ⑩ 秘境燃料投放 + 面板/名录
+    drops43 = [dt43.roll_drop(_random.Random(i)) for i in range(200)]
+    assert all(x is None or set(x) <= set(dt43.FUEL) for x in drops43) and any(drops43)
+    assert "众生念力" in dt43.materials_text() and "纪元" in dt43.forge_panel(w43, 102_000)
+    print("W8-C3 daotreasure ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

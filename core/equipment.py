@@ -265,6 +265,17 @@ def aggregate(
     except Exception:
         pass
 
+    # W8-C3 文明大道至宝：成器本体固定三维 + 全属性比例（按完整度缩放）
+    try:
+        from . import daotreasure as _dt
+        c3_flat, c3_ratio, c3_bao = _dt.bonus(doc)
+        for _k in flat:
+            flat[_k] += c3_flat
+        dt_all += c3_ratio
+        dt_bao += c3_bao
+    except Exception:
+        pass
+
     # W8-B6 道伤：三维 -5%/层（下限 0.7），作用于主体乘区、不削岁云云月之莲固定加成
     dz_mult = 1.0
     try:

@@ -147,6 +147,12 @@ def main() -> int:
                   "handle_xt_wuliang", "handle_xt_star", "handle_xt_spring", "handle_xt_furnace",
                   "handle_xt_bodhi", "handle_xt_causality", "handle_xt_temper", "handle_xt_dinghai",
                   "handle_xt_eternal", "handle_xt_history", "handle_xt_rewrite")),
+        ("大道炼器", ("handle_dt_help", "handle_dt_rules", "handle_dt_mats",
+                  "handle_dt_forge", "handle_dt_open", "handle_dt_fuel",
+                  "handle_dt_guard", "handle_dt_trib", "handle_dt_my",
+                  "handle_dt_rename", "handle_dt_decree", "handle_dt_repair",
+                  "handle_dt_life", "handle_dt_fate", "handle_dt_apt",
+                  "handle_dt_accept", "handle_dt_tech", "handle_dt_world")),
         ("帮助", ("handle_help",)),
     ]
     grouped = {}
