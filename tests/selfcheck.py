@@ -6050,6 +6050,119 @@ async def main():
     assert "无手续费" in xg46.rules_text() and "#星阁内场验资" in xg46.help_text()
     print("W8-D2 auction ok")
 
+    # ── 47. W8-D3 诡异大祭 / 位面后果 / 永久覆灭与回滚 ──
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    from core import sacrifice as ss47
+
+    st47 = SimpleNamespace(atk=100_000, defense=100_000, hp=1_000_000, bao=0.1)
+    t47, y47 = 1_800_000.0, 5_000
+    r47 = _random.Random(47)
+
+    # ① 状态归一 / 管理员开关
+    w47 = ss47.world_of({"sacrifice": {"phase": "bad", "damage": None, "small_count": -3}})
+    assert w47["damage"] == {} and w47["small_count"] == 0 and w47["small_due"] is None
+    ok47, msg47, _, _ = ss47.open_event(w47, "small", y47, t47, st47, False)
+    assert not ok47 and "管理员" in msg47
+    ok47, _, _, _ = ss47.open_event(w47, "big", y47, t47, st47, True)
+    assert ok47 and w47["phase"] == "big" and w47["active"]["hpmax"] > 0
+    ok47, msg47, _, _ = ss47.open_event(w47, "small", y47, t47, st47, True)
+    assert not ok47 and "已有" in msg47
+
+    # ② 门槛 / 每人每轮一次
+    weak47 = PlayerDoc(uid="weak", realm_index=10, ext={})
+    ok47, msg47, _, _ = ss47.fight(w47, weak47, st47, y47, t47, r47, "big")
+    assert not ok47 and "权柄" in msg47
+    emp47 = PlayerDoc(uid="emp", realm_index=63, stones=0, exp=0, ext={})
+    with patch("core.battle.spar_full", return_value=(0, [], 100, 0)):
+        ok47, msg47, _, _ = ss47.fight(w47, emp47, st47, y47, t47, r47, "big")
+    assert ok47 and "迎战功成" in msg47 and emp47.stones > 0
+    w47["damage"]["emp"] > 0 and w47["active"]["hp"] < w47["active"]["hpmax"]
+    ok47, msg47, _, _ = ss47.fight(w47, emp47, st47, y47, t47, r47, "big")
+    assert not ok47 and ("调息" in msg47 or "本轮" in msg47), msg47
+
+    # ③ 战败 → 24h 身灭道消 + 天意一刀计数
+    w47c = ss47.world_of({})
+    ss47.open_event(w47c, "small", y47, t47, st47, True)
+    loser47 = PlayerDoc(uid="loser", realm_index=60, ext={})
+    with patch("core.battle.spar_full", return_value=(1, [], 0, 100)):
+        ok47, msg47, _, _ = ss47.fight(w47c, loser47, st47, y47, t47, r47, "small")
+    assert ok47 and "迎战失利" in msg47
+    pst47 = ss47.state_of(loser47)
+    assert pst47["deathlock_until"] == t47 + ss47.DEATHLOCK_SEC and pst47["slash_count"] == 1
+    ok47, msg47, _, _ = ss47.fight(w47c, loser47, st47, y47, t47, r47, "small")
+    assert not ok47 and "身灭道消" in msg47
+
+    # ④ 未达终局档 → 因果回溯（本源复原、战绩清空、可再战）
+    w47d = ss47.world_of({})
+    ss47.open_event(w47d, "big", y47, t47, st47, True)
+    w47d["active"]["hp"] = 1
+    mid47 = PlayerDoc(uid="mid", realm_index=57, ext={})
+    with patch("core.battle.spar_full", return_value=(0, [], 100, 0)):
+        ok47, msg47, _, ops47 = ss47.fight(w47d, mid47, st47, y47, t47, r47, "big")
+    assert ok47 and "因果回溯" in msg47 and w47d["rewinds"] == 1
+    assert w47d["active"]["hp"] == w47d["active"]["hpmax"] and w47d["participants"] == {}
+
+    # ⑤ 满档终局 → 三重永久标记，此后无法再开祭
+    w47e = ss47.world_of({})
+    ss47.open_event(w47e, "big", y47, t47, st47, True)
+    w47e["active"]["hp"] = 1
+    with patch("core.battle.spar_full", return_value=(0, [], 100, 0)):
+        ok47, msg47, _, ops47e = ss47.fight(w47e, emp47, st47, y47,
+                                            t47 + ss47.FIGHT_CD_SEC + 1, r47, "big")
+    assert ok47 and "高原彻底覆灭" in msg47 and w47e["plateau_destroyed"], msg47
+    assert w47e["phase"] == "destroyed" and w47e["active"] is None
+    assert any(o[0] == "mark" and o[1] == ss47.HIGHLAND for o in ops47e)
+    ok47, msg47, _, _ = ss47.open_event(w47e, "big", y47 + 1, t47, st47, True)
+    assert not ok47 and "永不复启" in msg47
+
+    # ⑥ 守界失败 → 崩灭 2 处位面 + 永寂名单只收低档且在被毁位面者
+    w47f = ss47.world_of({})
+    ss47.open_event(w47f, "big", y47, t47, st47, True)
+    ok47, msg47, _, ops47f = ss47.settle(w47f, y47, t47, True, _random.Random(6))
+    marks47 = [o[1] for o in ops47f if o[0] == "mark"]
+    assert ok47 and len(marks47) == 2 and len(set(marks47)) == 2
+    assert set(marks47) <= set(ss47.SACRIFICE_PLANES) and "凡间" not in marks47
+    n47 = ss47.record_yongji(w47f, [("a", "甲", marks47[0], 5),
+                                    ("b", "乙", marks47[0], 20),
+                                    ("c", "丙", "凡间", 5)], t47)
+    assert n47 == 1 and "a" in w47f["yongji"]
+
+    # ⑦ 回滚：#复苏厄土高原 三重同清；#恢复诸天位面 修界门 + 清名单
+    w47g = ss47.world_of({})
+    w47g["plateau_destroyed"], w47g["phase"] = True, "destroyed"
+    w47g["plane_log"] = [ss47.HIGHLAND, "界海"]
+    w47g["yongji"] = {"a": {"name": "甲", "plane": "界海", "at": t47}}
+    ok47, msg47, _, ops47g = ss47.restore_highland(w47g, y47 + 10, t47, True)
+    assert ok47 and not w47g["plateau_destroyed"] and w47g["phase"] == "dormant"
+    assert w47g["small_due"] == y47 + 10 + ss47.SMALL_INTERVAL
+    assert ("clear", ss47.HIGHLAND) in ops47g and ("clear", "界海") in ops47g
+    assert w47g["yongji"] == {} and w47g["plane_log"] == []
+    ok47, msg47, _, ops47g2 = ss47.repair_all(w47g, False)
+    assert not ok47
+    w47g["plane_log"], w47g["yongji"] = ["遮天位面"], {"z": {}}
+    ok47, msg47, _, ops47g2 = ss47.repair_all(w47g, True)
+    assert ok47 and ("clear_all",) in ops47g2 and w47g["yongji"] == {}
+
+    # ⑧ 惰性 advance：世界年到期自动结算 + 24h 无活动兜底
+    w47h = ss47.world_of({})
+    ss47.open_event(w47h, "small", y47, t47, st47, True)
+    notes47, ops47h = ss47.advance(w47h, y47 + ss47.ACTIVE_YEARS, t47 + 10, st47, _random.Random(8))
+    assert notes47 and w47h["active"] is None and w47h["big_due"] == y47 + ss47.ACTIVE_YEARS + ss47.BIG_DELAY
+    w47i = ss47.world_of({})
+    ss47.open_event(w47i, "big", y47, t47, st47, True)
+    notes47, _ = ss47.advance(w47i, y47, t47 + ss47.INACTIVE_SEC + 1, st47, _random.Random(9))
+    assert notes47 and "24h" in notes47[0] and w47i["active"] is None
+
+    # ⑨ 面板与帮助不空
+    assert "世界年" in ss47.status_text(w47h, y47) and "始祖" in ss47.ancestor_text(w47i)
+    assert "#复苏厄土高原" in ss47.help_text() and "无 cron" in ss47.rules_text()
+    assert "贡献" in ss47.rank_text(w47f) or "尚无" in ss47.rank_text(w47f)
+    box47 = {}
+    ss47.set_world(box47, dict(w47h, destroyed_view={"界海": {}}))
+    assert "destroyed_view" not in box47["sacrifice"] and "phase" in box47["sacrifice"]
+    print("W8-D3 sacrifice ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

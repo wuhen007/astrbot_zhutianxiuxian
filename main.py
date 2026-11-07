@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, authority as authority_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -770,6 +770,25 @@ CMD_XG_INNER_OPEN = "#开启星阁内场体系"
 CMD_XG_INNER_CANCEL = "#取消星阁内场体系"
 CMD_XG_INNER_CLOSE = "#关闭星阁内场体系"
 CMD_XG_VERIFY = "#星阁内场验资"
+# W8-D3：诡异大祭 / 厄土高原（原版 16 条字面量 + 帮助/规则 2 条补位）
+CMD_SS_HELP = "#诡异大祭帮助"
+CMD_SS_RULES = "#诡异大祭规则"
+CMD_SS_STATUS = "#诡异祭礼状态"
+CMD_SS_ANCESTOR = "#诡异始祖状态"
+CMD_SS_SLASH = "#天意一刀状态"
+CMD_SS_FIGHT_SMALL = "#迎战诡异小祭"
+CMD_SS_FIGHT_BIG = "#迎战诡异大祭"
+CMD_SS_FIGHT_ALIAS = "#迎战厄土高原"
+CMD_SS_OPEN_SMALL = "#开启诡异小祭万界"
+CMD_SS_OPEN_BIG = "#开启诡异大祭万界"
+CMD_SS_CLOSE_SMALL = "#关闭诡异小祭万界"
+CMD_SS_CLOSE_BIG = "#关闭诡异大祭万界"
+CMD_SS_SETTLE = "#结算诡异祭礼"
+CMD_SS_RESTORE = "#复苏厄土高原"
+CMD_SS_RANK = "#扫平厄土高原贡献榜"
+CMD_SS_PLANES = "#位面毁灭状态"
+CMD_SS_REPAIR_ALL = "#恢复诸天位面"
+CMD_SS_YONGJI = "#永寂名单"
 CMD_IMPERIAL = "#认主"
 CMD_IMPERIAL_MY = "#已认主"
 CMD_SECT_SECRET = "#宗门秘境"
@@ -1809,6 +1828,17 @@ class ZhutianPlugin(Star):
                 (f"{CMD_XG_INNER_BID} 金额", "内场出价（别名 #内场竞价，NPC 有概率抬价）"),
                 (f"{CMD_XG_INNER_OPEN} / {CMD_XG_INNER_CANCEL} / {CMD_XG_INNER_CLOSE}", "管理员：内场三开关"),
                 ("⚠️ 2 分钟无人加价即成交", "本移植无 cron，结算挂在每个星阁指令入口惰性执行"),
+            ]},
+            {"title": "诡异大祭 · 厄土高原", "lines": [
+                (f"{CMD_SS_HELP} / {CMD_SS_RULES}", "全部指令 / 纪年、门槛、回滚完整口径"),
+                (f"{CMD_SS_STATUS} / {CMD_SS_ANCESTOR} / {CMD_SS_SLASH}", "祭礼纪年 / 始祖本源 / 个人天意一刀"),
+                (f"{CMD_SS_FIGHT_SMALL} / {CMD_SS_FIGHT_BIG}", "镜像迎战（别名 #迎战厄土高原，5 分钟 CD）"),
+                (f"{CMD_SS_OPEN_SMALL} / {CMD_SS_OPEN_BIG}", "管理员：强制开启小祭 / 大祭"),
+                (f"{CMD_SS_CLOSE_SMALL} / {CMD_SS_CLOSE_BIG} / {CMD_SS_SETTLE}", "管理员：关闭 / 结算祭礼"),
+                (f"{CMD_SS_RANK} / {CMD_SS_PLANES} / {CMD_SS_YONGJI}", "贡献榜 / 界门毁灭状态 / 永寂名单（只读）"),
+                (CMD_SS_REPAIR_ALL, "管理员：修复全部界门 + 清空永寂名单"),
+                (CMD_SS_RESTORE, "管理员：唯一解除高原永久覆灭、重置祭礼纪年"),
+                ("⚠️ 位面后果不可逆", "大祭守界失败会永久封闭 2 处界门，靠上面两条回滚"),
             ]},
         ]
 
@@ -17765,4 +17795,162 @@ class ZhutianPlugin(Star):
         async for r in self._xg_dispatch(event, "内场开关",
                 lambda d, i, w, t, r: xg_mod.switch(w, "close", True, "", bool(event.is_admin)),
                 admin=True):
+            yield r
+
+
+    # ---------------------------------------------------------------- W8-D3 诡异大祭
+    async def _ss_dispatch(self, event, title, fn, admin=False):
+        """统一分发：惰性 advance → 执行指令 → 落位面后果/永寂名单/全服状态 → 落玩家档。"""
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if admin and not bool(event.is_admin):
+            yield event.plain_result("此权柄唯管理员可执。")
+            return
+        state = calamity.ensure(await self.db.get_calamity())
+        w = ss_mod.world_of(state)
+        years = int((await self._era_state()).get("years_total") or 0)
+        now = time.time()
+        rng = random.Random(f"{doc.uid}:ss:{time.time_ns()}")
+        stats = self._stats(doc)
+        notes, ops = ss_mod.advance(w, years, now, stats, rng)
+        # 临时视图：core 的 world_of 只保留 DEFAULTS 键，故不会落库
+        w["destroyed_view"] = dict(state.get("destroyed_planes") or {})
+        ok, msg, delta, ops2 = fn(doc, w, years, now, rng, bool(event.is_admin), stats)
+        ops = list(ops) + list(ops2)
+        rows = state.setdefault("destroyed_planes", {})
+        if not isinstance(rows, dict):
+            rows = state["destroyed_planes"] = {}
+        marked = False
+        for op in ops:
+            kind = op[0]
+            if kind == "mark":
+                rows[op[1]] = {"source": op[2], "at": now, "by": doc.name or doc.uid}
+                marked = True
+            elif kind == "clear":
+                rows.pop(op[1], None)
+            elif kind == "clear_all":
+                rows.clear()
+        if marked:
+            players = []
+            for raw in await self.db.all_players():
+                try:
+                    pd = PlayerDoc(**raw)
+                    players.append((pd.uid, pd.name or pd.uid,
+                                    plane.state_of(pd)["current"], authority_mod.authority_21(pd)))
+                except Exception:
+                    continue
+            ss_mod.record_yongji(w, players, now)
+        ss_mod.set_world(state, w)
+        await self.db.save_calamity(state)
+        if notes:
+            msg = "\n".join(notes) + "\n" + msg
+        async for r in self._dz_finish(event, doc, (ok, msg, delta), title):
+            yield r
+
+    @filter.command(CMD_SS_HELP, "诡异大祭全部指令一览")
+    async def handle_ss_help(self, event: AstrMessageEvent):
+        async for r in self._ss_dispatch(event, "诡异大祭帮助",
+                lambda d, w, y, t, r, a, s: (True, ss_mod.help_text(), {}, [])):
+            yield r
+
+    @filter.command(CMD_SS_RULES, "诡异大祭纪年与回滚规则")
+    async def handle_ss_rules(self, event: AstrMessageEvent):
+        async for r in self._ss_dispatch(event, "诡异大祭规则",
+                lambda d, w, y, t, r, a, s: (True, ss_mod.rules_text(), {}, [])):
+            yield r
+
+    @filter.command(CMD_SS_STATUS, "祭礼纪年状态", alias={CMD_SS_ANCESTOR})
+    async def handle_ss_status(self, event: AstrMessageEvent):
+        async for r in self._ss_dispatch(event, "诡异祭礼状态",
+                lambda d, w, y, t, r, a, s: (True, ss_mod.status_text(w, y)
+                                             + "\n" + ss_mod.ancestor_text(w), {}, [])):
+            yield r
+
+    @filter.command(CMD_SS_SLASH, "天意一刀状态")
+    async def handle_ss_slash(self, event: AstrMessageEvent):
+        async for r in self._ss_dispatch(event, "天意一刀状态",
+                lambda d, w, y, t, r, a, s: (True, ss_mod.slash_text(w, d, y, t), {}, [])):
+            yield r
+
+    @filter.command(CMD_SS_FIGHT_SMALL, "迎战诡异小祭")
+    async def handle_ss_fight_small(self, event: AstrMessageEvent):
+        async for r in self._ss_dispatch(event, "迎战诡异小祭",
+                lambda d, w, y, t, r, a, s: ss_mod.fight(w, d, s, y, t, r, "small")):
+            yield r
+
+    @filter.command(CMD_SS_FIGHT_BIG, "迎战诡异大祭", alias={CMD_SS_FIGHT_ALIAS})
+    async def handle_ss_fight_big(self, event: AstrMessageEvent):
+        async for r in self._ss_dispatch(event, "迎战诡异大祭",
+                lambda d, w, y, t, r, a, s: ss_mod.fight(w, d, s, y, t, r, "big")):
+            yield r
+
+    @filter.command(CMD_SS_OPEN_SMALL, "管理员开启诡异小祭")
+    async def handle_ss_open_small(self, event: AstrMessageEvent):
+        async for r in self._ss_dispatch(event, "开启小祭",
+                lambda d, w, y, t, r, a, s: ss_mod.open_event(w, "small", y, t, s, a),
+                admin=True):
+            yield r
+
+    @filter.command(CMD_SS_OPEN_BIG, "管理员开启诡异大祭")
+    async def handle_ss_open_big(self, event: AstrMessageEvent):
+        async for r in self._ss_dispatch(event, "开启大祭",
+                lambda d, w, y, t, r, a, s: ss_mod.open_event(w, "big", y, t, s, a),
+                admin=True):
+            yield r
+
+    @filter.command(CMD_SS_CLOSE_SMALL, "管理员关闭诡异小祭")
+    async def handle_ss_close_small(self, event: AstrMessageEvent):
+        async for r in self._ss_dispatch(event, "关闭小祭",
+                lambda d, w, y, t, r, a, s: ss_mod.close_event(w, "small", y, t, a, r),
+                admin=True):
+            yield r
+
+    @filter.command(CMD_SS_CLOSE_BIG, "管理员关闭诡异大祭")
+    async def handle_ss_close_big(self, event: AstrMessageEvent):
+        async for r in self._ss_dispatch(event, "关闭大祭",
+                lambda d, w, y, t, r, a, s: ss_mod.close_event(w, "big", y, t, a, r),
+                admin=True):
+            yield r
+
+    @filter.command(CMD_SS_SETTLE, "管理员结算诡异祭礼")
+    async def handle_ss_settle(self, event: AstrMessageEvent):
+        async for r in self._ss_dispatch(event, "结算祭礼",
+                lambda d, w, y, t, r, a, s: ss_mod.settle(w, y, t, a, r),
+                admin=True):
+            yield r
+
+    @filter.command(CMD_SS_RESTORE, "管理员复苏厄土高原")
+    async def handle_ss_restore(self, event: AstrMessageEvent):
+        async for r in self._ss_dispatch(event, "复苏厄土高原",
+                lambda d, w, y, t, r, a, s: ss_mod.restore_highland(w, y, t, a),
+                admin=True):
+            yield r
+
+    @filter.command(CMD_SS_RANK, "厄土高原贡献榜")
+    async def handle_ss_rank(self, event: AstrMessageEvent):
+        async for r in self._ss_dispatch(event, "厄土高原贡献榜",
+                lambda d, w, y, t, r, a, s: (True, ss_mod.rank_text(w), {}, [])):
+            yield r
+
+    @filter.command(CMD_SS_PLANES, "位面毁灭状态")
+    async def handle_ss_planes(self, event: AstrMessageEvent):
+        async for r in self._ss_dispatch(event, "位面毁灭状态",
+                lambda d, w, y, t, r, a, s: (True, ss_mod.planes_text(w), {}, [])):
+            yield r
+
+    @filter.command(CMD_SS_REPAIR_ALL, "管理员恢复诸天位面")
+    async def handle_ss_repair_all(self, event: AstrMessageEvent):
+        async for r in self._ss_dispatch(event, "恢复诸天位面",
+                lambda d, w, y, t, r, a, s: ss_mod.repair_all(w, a),
+                admin=True):
+            yield r
+
+    @filter.command(CMD_SS_YONGJI, "永寂名单")
+    async def handle_ss_yongji(self, event: AstrMessageEvent):
+        async for r in self._ss_dispatch(event, "永寂名单",
+                lambda d, w, y, t, r, a, s: (True, ss_mod.yongji_text(w), {}, [])):
             yield r
