@@ -6,7 +6,7 @@
 
 移植版与原版的三处有意差异（见 rules_text）：
 1. 原版入口被 model/openingArrival.js 封堵，新玩家无法入界 → 本移植开放入界，
-   入界时存主线快照，可随时 `#复活地球 放弃 确认` 恢复（原版无中途退出）。
+   入界时存主线快照，可随时发送「#复活地球 放弃 确认」恢复（原版无中途退出）。
 2. 原版在 active 期间全局拦截其它指令 → 本移植不拦，主线照常可玩，
    离界/放弃按快照恢复，避免改动 773 条既有指令。
 3. 原版离界无条件把主线推到 level_id=42 → 本移植只升不降，
@@ -245,7 +245,7 @@ def help_text() -> str:
     return "\n".join([
         "【复活地球·独立凡间路线】",
         "独立六境：凡人→炼气→筑基→金丹→元婴→化神；本版止于化神初期。",
-        "单入口：#复活地球 子命令（空参=状态），#复活全人类 亦为状态。",
+        "单入口「#复活地球」+ 空格子命令（空参=状态）；「#复活全人类」亦为状态。",
         "① 塔监狱：塔规/观察/交谈/事件/抉择/推演/候时/越狱 确认",
         "② 空间站：站务/工作/委托/研读/修炼/突破/制作/蕴养/筹备/站务危机",
         "③ 地表：外勤/探索/应对/深入/地表修炼/撤离/调查 信号/核验/异常档案",
@@ -262,7 +262,7 @@ def rules_text() -> str:
         "--- 复活地球 · 规则口径 ---",
         "· 状态：doc.ext['earth'] 单一对象（原版玩家档顶层 复活地球 v7），无全服态、无 redis。",
         "· 计时：全部为真实时间分钟数，惰性 tick（原文设定由 30s cron 扫描）；",
-        "  到期后发任意指令或 #复活地球 结算 即结算，行动期间不接受新动作。",
+        "  到期后发任意指令，或发送「#复活地球 结算」；行动期间不接受新动作。",
         "· 越狱失败率：推演后 25%，候时后 5%；旧表误差 +15pp、同行 +10pp。",
         "· 观察/越狱都会触发死亡重塑：清本世境界、随身袋、外勤、塔窗口；",
         "  永久保留：knowledge、storage、facilities、塔规线索、站务贡献/债务/资格、成瘾、积分余额。",
@@ -304,7 +304,7 @@ def tower_text(e: dict) -> str:
     if ev:
         lines.append(f"待抉择【{ev}】{TOWER_EVENTS[ev]['npc']}：" +
                      " / ".join(f"{k}({v[0]}分)" for k, v in TOWER_EVENTS[ev]["choices"].items()))
-        lines.append("格式：#复活地球 抉择 选项 确认")
+        lines.append("格式：「#复活地球 抉择 选项 确认」")
     return "\n".join(lines)
 
 
@@ -331,7 +331,7 @@ def prep_text(e: dict) -> str:
              f"下一突破：{br['minutes']} 分 / {br['credits']} 积分 / 材料 {br['items'] or '无'} / 风险 {br['risk']:.0%}"]
     gaps = [f"{k}×{v - int(e['bag'].get(k, 0) or 0)}" for k, v in br["items"].items()
             if int(e["bag"].get(k, 0) or 0) < v]
-    lines.append("材料缺口：" + ("、".join(gaps) if gaps else "无（可先 取出 / 制作 / 探索）"))
+    lines.append("材料缺口：" + ("、".join(gaps) if gaps else "无（可用子命令「取出」「制作」「探索」补齐）"))
     lines.append(f"积分缺口：{max(0, br['credits'] - int(e['credits'])):,}（工作 / 委托 / 交付委托）")
     return "\n".join(lines)
 
@@ -339,7 +339,7 @@ def prep_text(e: dict) -> str:
 def field_text(e: dict) -> str:
     x = e.get("expedition")
     if not x:
-        return "---- 地表外勤 ----\n当前无外勤。格式：#复活地球 探索 目标 确认\n目标：" + \
+        return "---- 地表外勤 ----\n当前无外勤。格式：「#复活地球 探索 目标 确认」\n目标：" + \
                " / ".join(f"{k}({v['cost']}分)" for k, v in EXPEDITIONS.items())
     sig = x.get("signal")
     lines = [f"---- 地表外勤 · {x['target']} ----",
@@ -347,7 +347,7 @@ def field_text(e: dict) -> str:
              f"施法余量 {x['casts']}｜信号：{(sig or {}).get('pattern') or '未发现'}"]
     if sig:
         lines.append(f"调查 {sig['investigated']}｜核验 {sig['verified']}｜" +
-                     ("证据：" + sig["clue"] if sig["verified"] else "先 调查 信号 / 核验 手工|科技"))
+                     ("证据：" + sig["clue"] if sig["verified"] else "先用子命令「调查 信号」「核验 手工|科技」"))
     return "\n".join(lines)
 
 
@@ -385,7 +385,7 @@ def _start(e: dict, act_kind: str, title: str, minutes: float, ts: float, **payl
     # 系统字段后写，避免 payload 里的同名键（如突破的 kind）覆盖行动类型
     e["action"] = {**payload, "kind": act_kind, "title": title,
                    "end_at": ts + minutes * MIN, "started_at": ts}
-    return f"已开始【{title}】，需 {minutes:g} 分钟，到期后发任意指令或 #复活地球 结算 领取结果。"
+    return f"已开始【{title}】，需 {minutes:g} 分钟；到期后发任意指令，或发送「#复活地球 结算」领取结果。"
 
 
 def resolve_action(e: dict, a: dict, rng: random.Random) -> str:
@@ -657,25 +657,25 @@ def tick(e: dict, ts: float, rng: random.Random) -> list[str]:
 
 def enter(doc: Any, ts: float, confirmed: bool) -> tuple[str, bool]:
     if state_of(doc):
-        return "已有复活地球记录，发送 #复活地球 状态 查看。", False
+        return "已有复活地球记录，发送「#复活地球 状态」查看。", False
     sword = (doc.ext or {}).get("sword")
     if isinstance(sword, dict) and sword.get("status") == "active":
-        return "剑与魔法进行中，两条平行开局互斥；先 #剑与魔法 放弃 确认 或完成飞升。", False
+        return "剑与魔法进行中，两条平行开局互斥；先发送「#剑与魔法 放弃 确认」，或完成飞升。", False
     if not confirmed:
         return ("【入界预览】本路线从塔监狱凡人开始，独立六境、死亡清本世修为；"
-                "主线数值会存快照，可随时 #复活地球 放弃 确认 恢复。\n"
-                "确认请发送：#复活地球 入界 确认"), False
+                "主线数值会存快照，入界后可随时发送「#复活地球 放弃 确认」恢复。\n"
+                "确认请发送「#复活地球 入界 确认」。"), False
     doc.ext[KEY] = new_state(doc, ts)
     doc.state = "复活地球"
     doc.state_start = ts
     return ("入界成功：你身在塔监狱。本世与主线互不换算，主线快照已保存。\n"
-            "先 #复活地球 塔规 / 观察 规章，再 交谈 → 抉择 → 推演 → 候时 → 越狱 确认。"), True
+            "先发送「#复活地球 塔规」看规则；其余子命令均拼在「#复活地球 」后：观察 / 交谈 / 抉择 / 推演 / 候时 / 越狱。"), True
 
 
 def abandon(doc: Any, e: dict, ts: float, confirmed: bool) -> tuple[str, bool]:
     if not confirmed:
         return ("【放弃确认】将丢弃本世全部进度（含永久知识/仓储/贡献），并恢复入界前主线快照。\n"
-                "确认请发送：#复活地球 放弃 确认"), False
+                "确认请发送「#复活地球 放弃 确认」。"), False
     s = e.get("snapshot") or {}
     _restore(doc, e)
     return (f"已放弃复活地球，主线恢复至第 {int(s.get('realm_index', 0)) + 1} 境 / "
@@ -687,15 +687,15 @@ def ascend(doc: Any, e: dict, ts: float, confirmed: bool) -> tuple[str, bool]:
     if b["realm"] < 5:
         return f"离界需【化神】，当前 {realm_name(e)}。", False
     if not e["knowledge"].get("离界坐标"):
-        return "缺少永久知识【离界坐标】：先 探索 离界测绘。", False
+        return "缺少永久知识【离界坐标】：发送「#复活地球 探索 离界测绘 确认」。", False
     if not e["facilities"].get("接引装置"):
-        return "缺少设施【接引装置】：先 制作 接引装置。", False
+        return "缺少设施【接引装置】：发送「#复活地球 制作 接引装置」。", False
     if e["station"]["debt"]:
-        return f"尚欠 {int(e['station']['debt'])} 积分，须先 还款。", False
+        return f"尚欠 {int(e['station']['debt'])} 积分，须先发送「#复活地球 还款 金额」。", False
     if not confirmed:
         return ("【离界预览】本世六境不做换算；主线将至少提升至地仙（第 42 境），"
                 "高阶角色不降级。档案封存只读。\n"
-                "确认请发送：#复活地球 离界 确认"), False
+                "确认请发送「#复活地球 离界 确认」。"), False
     snap = e.get("snapshot") or {}
     before = int(doc.realm_index)
     if before < ASCEND_REALM:
@@ -717,7 +717,7 @@ def _break_kind(e: dict) -> tuple[str, str]:
     b = e["body"]
     r = b["realm"]
     if r == 0:
-        return "", "凡人需先 修炼。"
+        return "", "凡人需先执行子命令「修炼」。"
     if r == 1:
         if b["cultivation"] < STUDY_NEED[r]:
             return "", f"小突破需修为 {STUDY_NEED[r]}（现 {int(b['cultivation'])}）。"
@@ -757,7 +757,7 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random) -> tuple[str, b
             return enter(doc, ts, confirmed)
         if verb in ("帮助", "规则"):
             return (help_text() if verb == "帮助" else rules_text()), False
-        return (f"尚未入界。发送 #复活地球 入界 预览代价，确认后 #复活地球 入界 确认。\n"
+        return (f"尚未入界。发送「#复活地球 入界」预览代价，确认后发送「#复活地球 入界 确认」。\n"
                 + help_text()), False
 
     settled = tick(e, ts, rng)
@@ -783,7 +783,7 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random) -> tuple[str, b
 
     # ---- 退出 / 毕业 ----
     if verb == "入界":
-        return prefix + "已有复活地球记录，发送 #复活地球 状态 查看；或 放弃 确认 清除本篇。", bool(settled)
+        return prefix + "已有复活地球记录，发送「#复活地球 状态」查看；或发送「#复活地球 放弃 确认」清除本篇。", bool(settled)
     if verb == "放弃":
         return abandon(doc, e, ts, confirmed)
     if verb == "离界":
@@ -800,12 +800,13 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random) -> tuple[str, b
     review = {"工作", "还款", "接受清退", "委托", "交付委托", "取消委托",
               "存入", "取出", "接应预算"}
     if e["station"]["debt"] > 0 and e["station"]["grace"] <= 0 and verb not in review:
-        return prefix + "欠款逾期进入清退审查：仅可 工作 / 还款 / 接受清退 / 委托 / 存入 / 取出 / 接应预算。", True
+        return prefix + "欠款逾期进入清退审查：仅放行子命令「工作」「还款」「接受清退」「委托」「存入」「取出」「接应预算」。", True
 
     # 突破只有污染结婴需要确认（在下方单独处理），其余 NEED_CONFIRM 统一二次确认
     if verb in NEED_CONFIRM and verb != "突破" and not confirmed:
-        return prefix + f"【{verb}】需二次确认：#复活地球 {verb}" + \
-               (f" {target}" if target else "") + (" " + num if num else "") + " 确认", True
+        cmd = f"#复活地球 {verb}" + (f" {target}" if target else "") \
+              + (" " + num if num else "") + " 确认"
+        return prefix + f"【{verb}】需二次确认，请发送「{cmd}」。", True
 
     # ---- 即时动作 ----
     if verb == "存入" or verb == "取出":
@@ -820,7 +821,7 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random) -> tuple[str, b
         if target not in CONTRACTS:
             return prefix + "可选委托：" + " / ".join(CONTRACTS), True
         if e["station"]["contract"]:
-            return prefix + "已有委托，先 交付委托 或 取消委托。", True
+            return prefix + "已有委托，先执行子命令「交付委托」或「取消委托」。", True
         e["station"]["contract"] = target
         return prefix + f"已领【{target}】：材料 {CONTRACTS[target]['cost']}，交付时扣除。", True
     if verb == "取消委托":
@@ -934,7 +935,7 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random) -> tuple[str, b
         return prefix + _start(e, "wait", "候时", 5, ts), True
     if verb == "越狱":
         if e["tower"]["window"] <= 0:
-            return prefix + "越狱需先 推演 开启窗口。", True
+            return prefix + "越狱需先执行子命令「推演」开启窗口。", True
         risk = tower_risk(e)
         return prefix + _start(e, "escape", "越狱", 10, ts, risk=risk, roll=rng.random()), True
     if verb == "工作":
@@ -993,7 +994,7 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random) -> tuple[str, b
         if e["credits"] < cfg["credits"] or not _have(e["bag"], cfg["items"]):
             return prefix + f"突破需 {cfg['credits']} 积分 + {cfg['items'] or '无材料'}。", True
         if kind == "nascent" and not confirmed:
-            return prefix + "污染结婴有 65% 死亡风险，确认请发送：#复活地球 突破 确认", True
+            return prefix + "污染结婴有 65% 死亡风险，确认请发送「#复活地球 突破 确认」。", True
         e["credits"] -= cfg["credits"]
         _pay(e["bag"], cfg["items"])
         return prefix + _start(e, "breakthrough", f"突破·{kind}", cfg["minutes"], ts,
@@ -1011,7 +1012,7 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random) -> tuple[str, b
     if verb == "公议":
         cur = e["station"]["crisis"]
         if not cur:
-            return prefix + "先 参与危机 确认。", True
+            return prefix + "先发送「#复活地球 参与危机 确认」。", True
         opts = CRISIS_CHOICES[cur]
         if target not in opts:
             return prefix + "可选：" + " / ".join(opts), True
@@ -1058,7 +1059,7 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random) -> tuple[str, b
     if verb == "核验":
         x = e.get("expedition")
         if not x or not (x.get("signal") or {}).get("investigated"):
-            return prefix + "需先 调查 信号 确认。", True
+            return prefix + "需先发送「#复活地球 调查 信号 确认」。", True
         if target not in ("手工", "科技"):
             return prefix + "核验方式：手工 / 科技。", True
         if target == "科技" and not _have(e["bag"], {"探测器": 1}):
@@ -1102,4 +1103,4 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random) -> tuple[str, b
         e["body"]["cultivation"] = 0
         e["body"]["mortal_steps"] = 0
         return prefix + "动用修为：本世悟道重置（境界保留），化神分路可重走。", True
-    return prefix + f"未知子命令【{verb}】。发送 #复活地球 帮助 查看全部。", bool(settled)
+    return prefix + f"未知子命令【{verb}】。发送「#复活地球 帮助」查看全部。", bool(settled)

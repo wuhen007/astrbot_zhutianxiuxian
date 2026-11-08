@@ -155,14 +155,14 @@ def trait_names(s: dict) -> str:
 def help_text() -> str:
     return "\n".join([
         "【剑与魔法·艾瑟兰】独立开局，六地区计时冒险、三终局、飞升接仙界",
-        "单入口：#剑与魔法 子命令（空参=状态）；#剑与魔法帮助 / #抽取异界词条 亦可用",
+        "单入口「#剑与魔法」+ 空格子命令（空参=状态）；「#剑与魔法帮助」「#抽取异界词条」亦可用",
         "开局：入界 确认 → 抽取词条（8 选 2，仅一次）→ 就职 剑士|魔法师|僧侣|游侠",
         "白桦镇：训练 剑术|魔法|祷告|侦察 / 帮工 / 休养 / 锻造 / 购买|存入|取出 物品 数量 / 使用 药 / 丢弃 / 商店",
         "冒险：地图 → 探索 地区名 → 抉择 选项（真实时间到期结算）→ 撤离 可中止",
         "终局：裂月王庭三选一（对应熟练度 ≥10 且已锻造职业武装）→ 飞升 确认",
         "只读：帮助 / 规则 / 世界观 / 状态 / 结算 / 背包 / 词条 / 地图 / 见闻 / 回顾 / 商店",
         "移植补位：放弃 确认（恢复入界前主线快照，原版只能转世清档）",
-        "⚠️ 不注册 #我的练气/#我/#我的纳戒/#纳戒/#背包/#抽取命格词条：均已被主线指令占用",
+        "⚠️ 不注册「#我的练气」「#我」「#我的纳戒」「#纳戒」「#背包」「#抽取命格词条」：均已被主线指令占用",
     ])
 
 
@@ -172,11 +172,11 @@ def rules_text() -> str:
         "· 状态：doc.ext['sword'] 单对象（原版玩家档顶层 剑与魔法 v1），无 redis；",
         "  power_place=0.7 位面锚在移植版无对应字段，改用 doc.state 标记。",
         "· 计时：**真实时间分钟数 endAt**（不是回合数），原版靠 30s cron 扫描，",
-        "  本移植用惰性 tick：发任意指令或 #剑与魔法 结算 即结算；行动期间不接受新动作。",
+        "  本移植用惰性 tick：发任意指令，或发送「#剑与魔法 结算」；行动期间不接受新动作。",
         "· 取证纠偏：「地脉点 / 地脉技能」全仓零命中，是旧稿臆造；实际是古代晶片 + 4 熟练度。",
         "· 8 天赋加权合计 100，两次不重复加权抽；4 职业只给主熟练度 5 + 应对 +7。",
         "· 6 地区按顺序开放（index ≤ chapter 且 level ≥ region.level），每次消耗野营口粮×1；",
-        "  随身 12 格上限；重伤需先 休养。重复探索收益减半但记一次委托。",
+        "  随身 12 格上限；重伤需先执行子命令「休养」。重复探索收益减半但记一次委托。",
         "· 战力 = 等级×5 + 熟练度 + 主职 7 + 武装 8 + 天赋加成；",
         "  危险率钳制 3%~65%，战败 hp 归 1 + 重伤 + 暂获清空 + 铜币 -15。",
         "· 三终局均需对应熟练度 ≥10 且已锻造武装；终局本身不发数值奖励，只写 ending。",
@@ -266,7 +266,7 @@ def _start(s: dict, act_kind: str, title: str, minutes: float, ts: float, **payl
     # 系统字段后写，避免 payload 同名键覆盖行动类型
     s["action"] = {**payload, "kind": act_kind, "title": title,
                    "end_at": ts + minutes * MIN, "started_at": ts}
-    return f"已开始【{title}】，需 {minutes:g} 分钟，到期后发任意指令或 #剑与魔法 结算 领取结果。"
+    return f"已开始【{title}】，需 {minutes:g} 分钟；到期后发任意指令，或发送「#剑与魔法 结算」领取结果。"
 
 
 def _power(s: dict, skill: str, choice: str) -> int:
@@ -335,7 +335,7 @@ def resolve_action(s: dict, a: dict, rng: random.Random) -> str:
         s["encounter"] = {"region": a["index"], "repeat": a["repeat"]}
         s["place"] = r["name"]
         return (f"抵达【{r['name']}】。遭遇待抉择，可发：\n"
-                + " / ".join(r["choices"]) + "\n格式：#剑与魔法 抉择 选项")
+                + " / ".join(r["choices"]) + "\n格式：「#剑与魔法 抉择 选项」")
     if k == "choice":
         idx = a["index"]
         r = REGIONS[idx]
@@ -356,7 +356,7 @@ def resolve_action(s: dict, a: dict, rng: random.Random) -> str:
             s["coins"] = max(0, int(s["coins"]) - 15)
             s["place"] = "白桦镇"
             s["encounter"] = None
-            return head + "\n战败撤回：HP 1、重伤、铜币 -15，需先 休养。"
+            return head + "\n战败撤回：HP 1、重伤、铜币 -15，需先执行子命令「休养」。"
         repeat = bool(a["repeat"])
         bonus = (1 if choice == "调查" else 0) + (1 if choice == "调查" and "wanderer" in s["traits"] else 0)
         amount = min(r["item"] + bonus, BAG_CAP - load(s))
@@ -405,18 +405,18 @@ def tick(s: dict, ts: float, rng: random.Random) -> list[str]:
 
 def enter(doc: Any, ts: float, confirmed: bool) -> tuple[str, bool, list]:
     if state_of(doc):
-        return "已有剑与魔法记录，发送 #剑与魔法 状态 查看。", False, []
+        return "已有剑与魔法记录，发送「#剑与魔法 状态」查看。", False, []
     if active_earth(doc):
-        return "复活地球进行中，两条平行开局互斥；先 #复活地球 放弃 确认 或完成离界。", False, []
+        return "复活地球进行中，两条平行开局互斥；先发送「#复活地球 放弃 确认」，或完成离界。", False, []
     if not confirmed:
         return ("【入界预览】从白桦镇凡人开始，独立等级/熟练度/六地区计时冒险；"
-                "主线数值会存快照，可随时 #剑与魔法 放弃 确认 恢复。\n"
-                "确认请发送：#剑与魔法 入界 确认"), False, []
+                "主线数值会存快照，入界后可随时发送「#剑与魔法 放弃 确认」恢复。\n"
+                "确认请发送「#剑与魔法 入界 确认」。"), False, []
     doc.ext[KEY] = new_state(doc, ts)
     doc.state = "剑与魔法"
     doc.state_start = ts
     return ("入界成功：抵达白桦镇。主线快照已保存。\n"
-            "先 #剑与魔法 抽取词条（8 选 2），再 就职 剑士|魔法师|僧侣|游侠。"), True, []
+            "先发送「#剑与魔法 抽取词条」（8 选 2），再发送「#剑与魔法 就职 剑士」（另有 魔法师/僧侣/游侠）。"), True, []
 
 
 def active_earth(doc: Any) -> bool:
@@ -429,7 +429,7 @@ def abandon(doc: Any, s: dict, confirmed: bool) -> tuple[str, bool, list]:
         return "本篇已飞升封存，主线奖励已入账，不可再放弃回滚。", False, []
     if not confirmed:
         return ("【放弃确认】将丢弃本篇全部进度并恢复入界前主线快照。\n"
-                "确认请发送：#剑与魔法 放弃 确认"), False, []
+                "确认请发送「#剑与魔法 放弃 确认」。"), False, []
     snap = s.get("snapshot") or {}
     _restore(doc, s)
     return (f"已放弃剑与魔法，主线恢复至第 {int(snap.get('realm_index', 0)) + 1} 境 / "
@@ -441,13 +441,13 @@ def ascend(doc: Any, s: dict, ts: float, confirmed: bool,
     if s["chapter"] < 6 or not s["ending"]:
         return f"飞升需六地区通关（现 {s['chapter']}/6）并定下终局。", False, []
     if not s["weapon"]:
-        return "飞升需职业武装（先 锻造）。", False, []
+        return "飞升需职业武装，发送「#剑与魔法 锻造」。", False, []
     if s["level"] < 8:
         return f"飞升需等级 ≥8（现 {s['level']}）。", False, []
     if not confirmed:
         return ("【飞升预览】主线至少提升至 39 境（只升不降）、灵石 +铜币×100、"
                 "附加命格 +2、命格槽 +2、1 件终局信物；本篇档案封存只读。\n"
-                "确认请发送：#剑与魔法 飞升 确认"), False, []
+                "确认请发送「#剑与魔法 飞升 确认」。"), False, []
     before = int(doc.realm_index)
     if before < ASCEND_REALM:
         doc.realm_index = ASCEND_REALM
@@ -496,7 +496,7 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random,
             return enter(doc, ts, confirmed)
         if verb in ("帮助", "规则", "世界观"):
             return ({"帮助": help_text, "规则": rules_text, "世界观": lore_text}[verb])(), False, []
-        return ("尚未入界。发送 #剑与魔法 入界 预览代价，确认后 #剑与魔法 入界 确认。\n"
+        return ("尚未入界。发送「#剑与魔法 入界」预览代价，确认后发送「#剑与魔法 入界 确认」。\n"
                 + help_text()), False, []
 
     settled = tick(s, ts, rng)
@@ -515,7 +515,7 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random,
         return prefix + ("上述行动已结算。" if settled else "当前没有到期行动。"), bool(settled), []
 
     if verb == "入界":
-        return prefix + "已有剑与魔法记录，发送 #剑与魔法 状态 查看；或 放弃 确认 清除本篇。", bool(settled), []
+        return prefix + "已有剑与魔法记录，发送「#剑与魔法 状态」查看；或发送「#剑与魔法 放弃 确认」清除本篇。", bool(settled), []
     if verb == "放弃":
         return abandon(doc, s, confirmed)
     if not active(s):
@@ -545,7 +545,7 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random,
         if target not in PROFESSIONS:
             return prefix + "职业：" + " / ".join(PROFESSIONS), True, []
         if s["drawn_at"] is None:
-            return prefix + "须先 抽取词条。", True, []
+            return prefix + "须先执行子命令「抽取词条」。", True, []
         if s["profession"]:
             return prefix + f"已就职【{s['profession']}】，本世不可改。", True, []
         s["profession"] = target
@@ -563,7 +563,7 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random,
             if s["coins"] < cost:
                 return prefix + f"铜币不足：需 {cost:,}。", True, []
             if load(s) + qty > BAG_CAP:
-                return prefix + f"背包不足（{load(s)}/{BAG_CAP}），先 存入 腾位。", True, []
+                return prefix + f"背包不足（{load(s)}/{BAG_CAP}），先执行子命令「存入」腾位。", True, []
             s["coins"] -= cost
             _add(s["bag"], target, qty)
             return prefix + f"购买【{target}】×{qty}，花费 {cost:,} 铜币。", True, []
@@ -583,7 +583,7 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random,
     # ---- 计时动作 ----
     if verb == "训练":
         if not s["profession"] or s["drawn_at"] is None:
-            return prefix + "须先 抽取词条 + 就职。", True, []
+            return prefix + "须先执行子命令「抽取词条」「就职」。", True, []
         if target not in SKILLS:
             return prefix + "熟练度：" + " / ".join(SKILLS), True, []
         if s["coins"] < 10:
@@ -613,9 +613,9 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random,
         return prefix + _start(s, "return", "撤回白桦镇", 3, ts), True, []
     if verb == "探索":
         if not s["profession"] or s["drawn_at"] is None:
-            return prefix + "须先 抽取词条 + 就职。", True, []
+            return prefix + "须先执行子命令「抽取词条」「就职」。", True, []
         if s["wounded"]:
-            return prefix + "重伤未愈，先 休养。", True, []
+            return prefix + "重伤未愈，先执行子命令「休养」。", True, []
         if not _has(s["bag"], "野营口粮", 1) or load(s) > BAG_CAP - 1:
             return prefix + "探索需 野营口粮×1 且留 1 格背包空间。", True, []
         idx = next((i for i, r in enumerate(REGIONS) if r["name"] == target), -1)
@@ -631,7 +631,7 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random,
     if verb == "抉择":
         enc = s.get("encounter")
         if not enc:
-            return prefix + "当前没有待抉择遭遇（先 探索 地区名）。", True, []
+            return prefix + "当前没有待抉择遭遇（先发送「#剑与魔法 探索 地区名」）。", True, []
         r = REGIONS[enc["region"]]
         if target not in r["choices"]:
             return prefix + "可选：" + " / ".join(r["choices"]), True, []
@@ -653,7 +653,7 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random,
                                repeat=enc["repeat"], roll=rng.random()) + \
                (f"（魔力 -{cost}）" if cost else ""), True, []
 
-    return prefix + f"未知子命令【{verb}】。发送 #剑与魔法 帮助 查看全部。", bool(settled), []
+    return prefix + f"未知子命令【{verb}】。发送「#剑与魔法 帮助」查看全部。", bool(settled), []
 
 
 def _has(bag: dict, name: str, qty: int) -> bool:

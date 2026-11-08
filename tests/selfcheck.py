@@ -6743,7 +6743,7 @@ async def main():
     assert "锻造完成" in step51("锻造") and s51["weapon"] is True
     assert "未开放" in text51("探索 裂月王庭")
     s51["wounded"] = True
-    assert "先 休养" in text51("探索 风鸣林")
+    assert "「休养」" in text51("探索 风鸣林")
     s51["wounded"] = False
     s51["traits"] = ["wanderer", "will"]
     out51 = text51("探索 风鸣林")
