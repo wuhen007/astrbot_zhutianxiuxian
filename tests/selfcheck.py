@@ -7464,6 +7464,109 @@ async def main():
     assert "sx_mod.claim_jar" in src55 and "sx_mod.salary" in src55
     print("W8-F4 shengxu ok")
 
+    # ---------------- 56. W8-F5 上苍之上 ----------------
+    import random as _random56
+    from core import shangcang as sc56
+
+    t56 = 1_800_000_000.0
+    rows56 = sc56.place_rows(store.table(sc56.TABLE))
+    assert len(rows56) == 2 and [r["name"] for r in rows56] == ["魂河", "天帝葬坑"]
+
+    def mk56(uid="sc56", realm=52, **ext56):
+        ext = {"yuanshi": 10 ** 10, "xueqi": 10 ** 10, "shouyuan": 200_000, "hp": 10 ** 6}
+        ext.update(ext56)
+        return PlayerDoc(uid=uid, name="帝" + uid[-2:], realm_index=realm,
+                         exp=10 ** 11, stones=10 ** 11, ext=ext)
+
+    # ① 成本折算：灵石原值 / 源石与寿元 ÷1000 / 元神不实现
+    c56 = sc56.cost_of(rows56[0])
+    assert c56["灵石"] == 10_000_000_000, "灵石照原值"
+    assert c56["源石"] == 2_000_000 and c56["寿元"] == 20_000, "源石与寿元 ÷1000"
+    assert c56["修为"] == 300_000_000 and c56["血气"] == 300_000_000
+    assert "元神" not in c56, "本移植无独立元神池"
+    assert sc56.find_place(rows56, "魂河")["name"] == "魂河" and sc56.find_place(rows56, "无") is None
+    print("F5 cost ok")
+
+    # ② 门槛与资源
+    assert "仙帝权柄" in sc56.begin(mk56("low56", realm=49), sc56.state_of(mk56("low56", realm=49)),
+                                   rows56[0], 1, t56)[1]
+    poor56 = mk56("poor56")
+    poor56.stones = 1
+    assert "资源不足" in sc56.begin(poor56, sc56.state_of(poor56), rows56[0], 1, t56)[1]
+    print("F5 gate ok")
+
+    # ③ 起历练：扣资源 / 提速 / 连探
+    d56 = mk56("go56")
+    st56 = sc56.state_of(d56)
+    ok56, msg56 = sc56.begin(d56, st56, rows56[0], 1, t56)
+    assert ok56 and "预计 60 分钟" in msg56
+    assert d56.stones == 10 ** 11 - 10_000_000_000 and d56.ext["shouyuan"] == 180_000
+    assert d56.exp == 10 ** 11 - 300_000_000
+    assert not sc56.begin(d56, st56, rows56[1], 1, t56)[0], "行动中不得再起"
+
+    d56b = mk56("fast56", **{"gongfa": ["行字秘"]})
+    minute56, notes56 = sc56.duration_minutes(d56b, daofa_active=True)
+    assert minute56 == 56 and any("行字秘" in n for n in notes56) and any("道法" in n for n in notes56)
+    assert sc56.duration_minutes(mk56("none56"))[0] == 60
+
+    d56c = mk56("more56")
+    ok56, msg56 = sc56.begin(d56c, sc56.state_of(d56c), rows56[0], 3, t56)
+    assert ok56 and "×3" in msg56 and "180 分钟" in msg56
+    print("F5 begin ok")
+
+    # ④ 结算：未到期 / 胜利掉落 / 胜场进度 / 纪元奖励 / 回执
+    assert not sc56.settle(d56, sc56.state_of(d56), t56 + 60, _random56.Random(1), rows56)[0]
+    st56["progress"] = 2
+    era56 = sc56.fashan.era_of(d56)
+    ok56, msg56, items56 = sc56.settle(d56, sc56.state_of(d56), t56 + 7200,
+                                      _random56.Random(1), rows56)
+    assert ok56 and "胜" in msg56
+    assert items56, "guaranteed 档必掉"
+    assert st56["wins"] == 1 and st56["progress"] == 0, "满 3 胜换纪元并归零"
+    assert sc56.fashan.era_of(d56) == era56 + 5
+    assert st56["receipts"] and "魂河" in st56["receipts"][-1]
+
+    # 失败：血量降到 1，不发奖
+    lost56 = False
+    for seed in range(40):
+        c = mk56("lose56")
+        stc = sc56.state_of(c)
+        sc56.begin(c, stc, rows56[0], 1, t56)
+        c.ext["hp"] = 9_999
+        _ok, m, it = sc56.settle(c, stc, t56 + 7200, _random56.Random(seed), rows56)
+        if "败" in m:
+            assert c.ext["hp"] == 1 and not it and stc["wins"] == 0
+            lost56 = True
+            break
+    assert lost56, "应能失败"
+
+    # 回执截断
+    st56["receipts"] = [f"r{i}" for i in range(30)]
+    ok56, _m, _i = sc56.settle_now(d56, st56, "魂河", 1, t56 + 9000, _random56.Random(1), rows56[0])
+    assert ok56 and len(st56["receipts"]) == sc56.RECEIPT_CAP
+    print("F5 settle ok")
+
+    # ⑤ 面板与文案
+    panel56 = sc56.panel_text(d56, sc56.state_of(d56), t56, rows56)
+    assert "上苍之上" in panel56 and "魂河" in panel56 and "胜场" in panel56
+    assert "仙帝权柄" in sc56.rules_text() and "#沉迷上苍之上" in sc56.help_text()
+    assert sc56.win_rate(mk56("wr56", realm=60)) > sc56.win_rate(mk56("wr56", realm=50))
+    print("F5 panel ok")
+
+    # ⑥ DB 往返 + main.py 接线
+    d56d = mk56("db56")
+    sc56.begin(d56d, sc56.state_of(d56d), rows56[0], 2, t56)
+    await db.save_player(d56d.model_dump())
+    row56 = await db.get_player("db56")
+    assert sc56.state_of(PlayerDoc(**row56))["action"]["count"] == 2
+
+    src56 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    miss56 = [c for c in ("CMD_SC", "CMD_SC_ADDICT") if f"@filter.command({c}" not in src56]
+    assert miss56 == [], f"漏注册：{miss56}"
+    assert "sc_mod.settle(" in src56 and "sc_mod.begin(" in src56
+    assert "sc_mod.panel_text(" in src56 and "sc_mod.TABLE" in src56
+    print("W8-F5 shangcang ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

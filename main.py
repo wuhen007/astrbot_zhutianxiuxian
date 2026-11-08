@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -423,6 +423,10 @@ CMD_SX_FIELD = "#场域"
 CMD_SX_FIELD_ALIAS = "#场域状态"
 CMD_SX_FIELD_UP = "#参悟场域"
 CMD_SX_RANK = "#圣墟榜"
+# ---- W8-F5 上苍之上（原版 ShangcangTask 无 rule，指令在 SecretPlace 的上苍分支）----
+CMD_SC = "#上苍之上"
+CMD_SC_ADDICT = "#沉迷上苍之上"
+
 
 
 
@@ -2147,6 +2151,17 @@ class ZhutianPlugin(Star):
                 (f"{CMD_SX_RANK} [N]", "花粉路榜单：境界＞场域＞通关数＞极境＞积淀"),
                 ("⚠️ 折算", "场域原版给三维 +3%/重天，本移植沿 B0 决策改为圣墟胜率 +2%/重天；"
                             "入场成本不套记忆命途折扣；神术只做参悟与面板，不接战斗触发"),
+            ]},
+            {"title": "上苍之上 · 两处禁地", "lines": [
+                (CMD_SC, "面板 / 结算到期历练；两处禁地 魂河、天帝葬坑"),
+                (f"{CMD_SC} 魂河", "起一次历练（仙帝权柄 50 档；60 分钟 − 行字秘/天璇步法/道法仙术）"),
+                (f"{CMD_SC_ADDICT} 魂河*3", "连探 1~12 次，成本与时长叠加"),
+                ("成本（原值 → 本移植）", "灵石 100 亿照原值｜源石 20 亿 ÷1000=200 万｜修为/血气 3 亿照原值"
+                                          "｜寿元 2000 万 ÷1000=2 万｜元神不实现"),
+                ("胜负", "胜率 = 0.55 + (权柄−50)×0.02，钳 25%~90%；失败血量降至 1 且不掉落"),
+                ("掉落 / 纪元", "四档池 guaranteed 必得 1~3 份 + chance 判定；每胜进度 +1，满 3 换 5 点纪元积累"),
+                ("⚠️ 折算", "原版 ShangcangTask cron 15 秒扫 redis → 本移植惰性 tick + 回执（保留 20 条）；"
+                            "战斗由 zd_battle 改权柄差胜率模型"),
             ]},
         ]
 
@@ -7132,6 +7147,81 @@ class ZhutianPlugin(Star):
         async for r in self._smart(
                 event, prefix + sx_mod.rank_text(rows, limit, (doc.name if doc else ""))):
             yield r
+
+    # ---- W8-F5 上苍之上（ext["shangcang"]，db 仍 v17） ----
+
+    async def _sc_open(self, event: AstrMessageEvent):
+        """取玩家 + 惰性结算到期历练。返回 (doc, st, prefix, err)。"""
+        doc, err = await self._require_player(event)
+        if err:
+            return None, None, "", err
+        now = time.time()
+        st = sc_mod.state_of(doc)
+        ok, msg, items = sc_mod.settle(
+            doc, st, now, random.Random(f"{doc.uid}:sc:{int(now)}"),
+            self.content.table(sc_mod.TABLE))
+        prefix = ""
+        if ok:
+            if items:
+                await self.db.add_items(doc.uid, items)
+            await self.db.save_player(doc.model_dump())
+            prefix = msg + "\n"
+        return doc, st, prefix, None
+
+    @filter.command(CMD_SC, "上苍之上（空参 = 面板/结算）")
+    async def handle_sc(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, st, prefix, err = await self._sc_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        rows = sc_mod.place_rows(self.content.table(sc_mod.TABLE))
+        name = (self._adm_tail(event) or "").strip()
+        if not name:
+            async for r in self._smart(event, prefix + sc_mod.panel_text(
+                    doc, st, time.time(), rows,
+                    daofa.active(doc, time.time()))):
+                yield r
+            return
+        row = sc_mod.find_place(rows, name)
+        if not row:
+            yield event.plain_result(
+                "上苍禁地仅：" + "、".join(str(r.get("name")) for r in rows))
+            return
+        ok, msg = sc_mod.begin(doc, st, row, 1, time.time(),
+                              daofa.active(doc, time.time()))
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_SC_ADDICT, "沉迷上苍之上（连探）")
+    async def handle_sc_addict(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, st, prefix, err = await self._sc_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        raw = (self._adm_tail(event) or "").strip().replace("＊", "*").replace("×", "*")
+        if "*" not in raw:
+            yield event.plain_result(f"格式：「{CMD_SC_ADDICT} 魂河*3」（1~12 次）。")
+            return
+        name, count = raw.split("*", 1)
+        if not count.strip().isdigit():
+            yield event.plain_result("次数须为 1~12 的整数。")
+            return
+        rows = sc_mod.place_rows(self.content.table(sc_mod.TABLE))
+        row = sc_mod.find_place(rows, name.strip())
+        if not row:
+            yield event.plain_result(
+                "上苍禁地仅：" + "、".join(str(r.get("name")) for r in rows))
+            return
+        ok, msg = sc_mod.begin(doc, st, row, int(count.strip()), time.time(),
+                              daofa.active(doc, time.time()))
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(prefix + msg)
 
     # ---- 师徒试炼 / 商店 / 神兵重铸 / 双修 ----
 
