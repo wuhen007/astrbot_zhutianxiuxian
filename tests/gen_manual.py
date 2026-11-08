@@ -37,6 +37,15 @@ def main() -> int:
             rv_fns.append(pseudo)
     rv_fns.append("handle_rv")
 
+    # W8-E2 同为单入口 + 子命令
+    sm_fns = []
+    for cname, cval in consts.items():
+        if cname.startswith("CMD_SM_SUB_"):
+            pseudo = "_sm_" + cname
+            entries.append((cval, "剑与魔法子命令（见 #剑与魔法 帮助）", pseudo))
+            sm_fns.append(pseudo)
+    sm_fns += ["handle_sm", "handle_sm_draw"]
+
     # 分组归属：按 handler 名与帮助分组的近似映射（人工维护组标签）
     GROUPS = [
         ("基础修炼", ("handle_start", "handle_status", "handle_sign", "handle_closed", "handle_open", "handle_break",
@@ -176,6 +185,7 @@ def main() -> int:
         ("组队迎战帝尊 · 团本", ("handle_tb_help", "handle_tb_rules", "handle_tb_create", "handle_tb_join", "handle_tb_start", "handle_tb_status", "handle_tb_dps", "handle_tb_log", "handle_tb_leave", "handle_tb_mojun", "handle_tb_loot", "handle_tb_system", "handle_tb_enable", "handle_tb_disable", "handle_tb_reset_cd", "handle_tb_shutdown", "handle_tb_awaken", "handle_tb_revive")),
         ("若陀龙王 · 竞价团", ("handle_dr_help", "handle_dr_rules", "handle_dr_system", "handle_dr_list", "handle_dr_status", "handle_dr_rank", "handle_dr_fight", "handle_dr_join", "handle_dr_leave", "handle_dr_loot", "handle_dr_bid", "handle_dr_assign", "handle_dr_open", "handle_dr_close")),
         ("复活地球 · 平行开局", tuple(rv_fns)),
+        ("剑与魔法 · 艾瑟兰", tuple(sm_fns)),
         ("帮助", ("handle_help",)),
     ]
     grouped = {}

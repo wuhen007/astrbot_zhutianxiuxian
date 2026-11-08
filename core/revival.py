@@ -658,6 +658,9 @@ def tick(e: dict, ts: float, rng: random.Random) -> list[str]:
 def enter(doc: Any, ts: float, confirmed: bool) -> tuple[str, bool]:
     if state_of(doc):
         return "已有复活地球记录，发送 #复活地球 状态 查看。", False
+    sword = (doc.ext or {}).get("sword")
+    if isinstance(sword, dict) and sword.get("status") == "active":
+        return "剑与魔法进行中，两条平行开局互斥；先 #剑与魔法 放弃 确认 或完成飞升。", False
     if not confirmed:
         return ("【入界预览】本路线从塔监狱凡人开始，独立六境、死亡清本世修为；"
                 "主线数值会存快照，可随时 #复活地球 放弃 确认 恢复。\n"

@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -319,6 +319,37 @@ CMD_RV_SUB_PERMIT = "#复活地球 申请"
 CMD_RV_SUB_CHRONICLE = "#复活地球 复盘"
 CMD_RV_SUB_ASCEND = "#复活地球 离界"
 CMD_RV_SUB_ABANDON = "#复活地球 放弃"
+# ---- W8-E2 剑与魔法·艾瑟兰：单入口 + 子命令（SUB 常量仅供帮助/手册）----
+CMD_SM = "#剑与魔法"
+CMD_SM_HELP_ALIAS = "#剑与魔法帮助"
+CMD_SM_DRAW = "#抽取异界词条"
+CMD_SM_DRAW_ALIAS = "#抽取词条"
+CMD_SM_SUB_HELP = "#剑与魔法 帮助"
+CMD_SM_SUB_RULES = "#剑与魔法 规则"
+CMD_SM_SUB_LORE = "#剑与魔法 世界观"
+CMD_SM_SUB_ENTER = "#剑与魔法 入界"
+CMD_SM_SUB_STATUS = "#剑与魔法 状态"
+CMD_SM_SUB_SETTLE = "#剑与魔法 结算"
+CMD_SM_SUB_DRAW = "#剑与魔法 抽取词条"
+CMD_SM_SUB_JOB = "#剑与魔法 就职"
+CMD_SM_SUB_TRAIN = "#剑与魔法 训练"
+CMD_SM_SUB_WORK = "#剑与魔法 帮工"
+CMD_SM_SUB_REST = "#剑与魔法 休养"
+CMD_SM_SUB_FORGE = "#剑与魔法 锻造"
+CMD_SM_SUB_SHOP = "#剑与魔法 商店"
+CMD_SM_SUB_BUY = "#剑与魔法 购买"
+CMD_SM_SUB_STORE = "#剑与魔法 存入"
+CMD_SM_SUB_USE = "#剑与魔法 使用"
+CMD_SM_SUB_BAG = "#剑与魔法 背包"
+CMD_SM_SUB_TRAITS = "#剑与魔法 词条"
+CMD_SM_SUB_MAP = "#剑与魔法 地图"
+CMD_SM_SUB_LORE_VIEW = "#剑与魔法 见闻"
+CMD_SM_SUB_REVIEW = "#剑与魔法 回顾"
+CMD_SM_SUB_EXPLORE = "#剑与魔法 探索"
+CMD_SM_SUB_CHOOSE = "#剑与魔法 抉择"
+CMD_SM_SUB_RETREAT = "#剑与魔法 撤离"
+CMD_SM_SUB_ASCEND = "#剑与魔法 飞升"
+CMD_SM_SUB_ABANDON = "#剑与魔法 放弃"
 CMD_ENDLESS = "#无尽劫境"
 CMD_ENDLESS_START = "#开启无尽劫境"
 CMD_ENDLESS_MAP = "#劫途星图"
@@ -1939,6 +1970,18 @@ class ZhutianPlugin(Star):
                 (f"{CMD_RV_SUB_CRISIS} / 参与危机 / 公议 / {CMD_RV_SUB_PERMIT} / 透支", "单人公共危机 3 段 / 配给居住接应资格 / 债务与清退审查"),
                 (f"{CMD_RV_SUB_PATH} 化凡|信仰 / 立愿 / {CMD_RV_SUB_ASCEND} 确认", "化神分路 → 化神 + 离界坐标 + 接引装置 + 无欠款 → 飞升（只升不降）"),
                 ("⚠️ 状态挂 ext[\"earth\"]，db 仍 v17", "原版入口被封堵 / 全局拦截 / 离界强制 42 境，本移植分别改为开放入界、不拦截、只升不降"),
+            ]},
+            {"title": "剑与魔法 · 艾瑟兰", "lines": [
+                (f"{CMD_SM} / {CMD_SM_HELP_ALIAS} / {CMD_SM_DRAW}", "单入口（空参=状态）/ 无空格帮助 / 抽取双天赋快捷指令"),
+                (f"{CMD_SM_SUB_ENTER} 确认 / {CMD_SM_SUB_ABANDON} 确认", "二次确认入界（存主线快照）/ 移植补位：放弃并恢复快照"),
+                (f"{CMD_SM_SUB_HELP} / {CMD_SM_SUB_RULES} / {CMD_SM_SUB_LORE}", "全部子命令 / 完整规则与移植差异 / 世界观母本浓缩"),
+                (f"{CMD_SM_SUB_DRAW} / {CMD_SM_SUB_JOB} 职业 / {CMD_SM_SUB_TRAITS}", "8 天赋加权 8 选 2（仅一次）→ 剑士|魔法师|僧侣|游侠 → 主熟练度 5"),
+                (f"{CMD_SM_SUB_TRAIN} / {CMD_SM_SUB_WORK} / {CMD_SM_SUB_REST} / {CMD_SM_SUB_FORGE}", "4 熟练度 / 帮工 15 铜币 / 休养解重伤 / 古代晶片×4 造职业武装"),
+                (f"{CMD_SM_SUB_SHOP} / {CMD_SM_SUB_BUY} / {CMD_SM_SUB_STORE} / {CMD_SM_SUB_USE} / {CMD_SM_SUB_BAG}", "3 件有价商品 / 存取出 / 疗伤药魔力药 / 12 格背包上限"),
+                (f"{CMD_SM_SUB_MAP} / {CMD_SM_SUB_EXPLORE} 地区 / {CMD_SM_SUB_CHOOSE} 选项 / {CMD_SM_SUB_RETREAT}", "六地区真实时间计时冒险，探索→抉择分段结算，可 3 分钟撤回"),
+                (f"{CMD_SM_SUB_BAG} / {CMD_SM_SUB_LORE_VIEW} / {CMD_SM_SUB_REVIEW} / {CMD_SM_SUB_STATUS} / {CMD_SM_SUB_SETTLE}", "只读面板与履历；结算 = 手动推进到期行动（无 cron）"),
+                (f"{CMD_SM_SUB_ASCEND} 确认", "六地区 + 终局 + 武装 + Lv8 → 39 境（只升不降）、灵石 ×100、命格 +2、信物入纳戒"),
+                ("⚠️ 与复活地球互斥", "原版「地脉点/地脉技能」是旧稿臆造；实际是古代晶片 + 4 熟练度；仙宠赠礼与图片面板未搬"),
             ]},
         ]
 
@@ -18763,4 +18806,62 @@ class ZhutianPlugin(Star):
     @filter.command(CMD_RV, "复活地球平行开局：空格后接子命令，空参=状态", alias={CMD_RV_ALIAS})
     async def handle_rv(self, event: AstrMessageEvent):
         async for r in self._rv_dispatch(event, self._rv_rest(event)):
+            yield r
+
+    # ---- W8-E2：剑与魔法·艾瑟兰（ext["sword"]，db 仍 v17，与 E1 互斥） ----
+
+    @staticmethod
+    def _sm_rest(event: AstrMessageEvent) -> str:
+        raw = (event.get_message_str() or "").strip()
+        if raw == CMD_SM_HELP_ALIAS:
+            return "帮助"
+        if raw in (CMD_SM_DRAW, CMD_SM_DRAW_ALIAS):
+            return "抽取词条"
+        if raw.startswith(CMD_SM):
+            return raw[len(CMD_SM):].strip()
+        return ""
+
+    def _sm_fates(self, ending_key: str) -> list[dict]:
+        """飞升命格按 id 从词条表取（原版 2 条传说，1:1 数据，不硬编码效果）。"""
+        want = {"otherworld_returnee", sm_mod.ENDINGS[ending_key]["fate"]} \
+            if ending_key in sm_mod.ENDINGS else set()
+        if not want:
+            return []
+        rows = self.content.table("item/命格词条") or []
+        return [dict(x) for x in rows if isinstance(x, dict) and x.get("id") in want]
+
+    async def _sm_dispatch(self, event: AstrMessageEvent, rest: str):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ts = time.time()
+        rng = random.Random(f"{doc.uid}:sm:{time.time_ns()}")
+        s = sm_mod.state_of(doc)
+        fates = self._sm_fates((s or {}).get("ending") or "")
+        msg, changed, ops = sm_mod.dispatch(doc, rest, ts, rng, fates)
+        if changed:
+            await self.db.save_player(doc.model_dump())
+        for op in ops:
+            if op[0] == "items":
+                await self.db.add_items(doc.uid, {k: int(v) for k, v in op[1].items()})
+        async for r in self._smart(event, msg, "剑与魔法"):
+            yield r
+
+    @filter.command(CMD_SM, "剑与魔法平行开局：空格后接子命令，空参=状态")
+    async def handle_sm(self, event: AstrMessageEvent):
+        async for r in self._sm_dispatch(event, self._sm_rest(event)):
+            yield r
+
+    @filter.command(CMD_SM_DRAW, "抽取异界双天赋（等价 #剑与魔法 抽取词条）", alias={CMD_SM_DRAW_ALIAS})
+    async def handle_sm_draw(self, event: AstrMessageEvent):
+        async for r in self._sm_dispatch(event, "抽取词条"):
+            yield r
+
+    @filter.regex(r"^#剑与魔法帮助$")
+    async def handle_sm_help_bare(self, event: AstrMessageEvent):
+        """原版 rule 里 `#剑与魔法帮助` 是无空格连写形态。"""
+        async for r in self._sm_dispatch(event, "帮助"):
             yield r

@@ -6673,6 +6673,163 @@ async def main():
     assert row50 and rv50.state_of(PlayerDoc(**row50))["snapshot"]["realm_index"] == 3
     print("W8-E1 revival earth ok")
 
+    # ---------------- 51. W8-E2 剑与魔法·艾瑟兰 ----------------
+    import random as _random51
+    from core import sword_magic as sm51
+
+    t51 = 1_800_000_000.0
+    r51 = _random51.Random(13)
+    d51 = PlayerDoc(uid="e2", name="丙", realm_index=40, exp=321, stones=6000)
+    clock51 = [t51]
+
+    def call51(cmd, mins=0, fates=None):
+        clock51[0] += mins * 60
+        return sm51.dispatch(d51, cmd, clock51[0], r51, fates)
+
+    def text51(cmd, mins=0, fates=None):
+        return call51(cmd, mins, fates)[0]
+
+    def step51(cmd, mins=30):
+        a = text51(cmd)
+        b = text51("结算", mins)
+        return a + " || " + b
+
+    # ① 文本 / 入界预览 / 双向互斥 / 快照
+    assert "地脉点" in sm51.rules_text() and "臆造" in sm51.rules_text()
+    assert "不注册" in sm51.help_text() and "六地区" in sm51.lore_text()
+    assert "入界预览" in text51("入界") and sm51.state_of(d51) is None
+    assert "入界成功" in text51("入界 确认")
+    s51 = sm51.state_of(d51)
+    assert s51 and s51["place"] == "白桦镇" and s51["snapshot"]["realm_index"] == 40
+    assert s51["coins"] == 120 and s51["level"] == 1
+    assert sum(v["weight"] for v in sm51.TRAITS.values()) == 100
+    assert len(sm51.REGIONS) == 6 and len(sm51.ENDINGS) == 3
+    # E2 → E1 互斥（E1 的 enter 已加对称检查）
+    e1side = PlayerDoc(uid="e2b", name="丁", ext={"sword": {"status": "active"}})
+    assert "互斥" in rv50.dispatch(e1side, "入界 确认", t51, r51)[0]
+    e2side = PlayerDoc(uid="e2c", name="戊", ext={"earth": {"status": "active"}})
+    assert "互斥" in sm51.dispatch(e2side, "入界 确认", t51, r51)[0]
+
+    # ② 抽天赋 / 就职 / 训练 / 计时与惰性 tick
+    assert "抽取完成" in text51("抽取词条")
+    assert len(s51["traits"]) == 2 and len(set(s51["traits"])) == 2 and s51["drawn_at"]
+    assert "仅一次" in text51("抽取词条")
+    assert "须先 抽取" not in text51("就职 剑士") and s51["skills"]["剑术"] == 5
+    assert "本世不可改" in text51("就职 魔法师")
+    assert "职业：" in text51("就职 未知")
+    assert "熟练度" in text51("训练")
+    assert "已开始【训练 剑术】" in text51("训练 剑术")
+    assert "进行中" in text51("帮工"), "行动期间必须拒绝新动作"
+    assert "训练【剑术】完成" in text51("结算", 10)
+    assert "帮工完成" in step51("帮工")
+    assert "当前没有到期行动" in text51("结算")
+
+    # ③ 背包：购买 / 容量 / 不可买 / 存取出 / 使用 / 休养
+    assert "不可购买" in text51("购买 古代晶片")
+    assert "购买【野营口粮】×2" in text51("购买 野营口粮 2")
+    assert "存入【野营口粮】×1" in text51("存入 野营口粮 1")
+    assert "取出【野营口粮】×1" in text51("取出 野营口粮 1")
+    s51["bag"] = {"野营口粮": 12}
+    assert "背包不足" in text51("购买 疗伤药 1")
+    s51["bag"] = {"野营口粮": 6, "疗伤药": 2, "魔力药": 1}
+    assert "使用【疗伤药】完成" in step51("使用 疗伤药")
+    s51["hp"] = 1
+    s51["wounded"] = True
+    assert "重伤解除" in step51("休养")
+
+    # ④ 锻造 / 探索门槛 / 旅人洞察减时 / 抉择门禁
+    s51["coins"] = 1000
+    s51["bag"] = {"野营口粮": 6, "古代晶片": 4}
+    assert "锻造完成" in step51("锻造") and s51["weapon"] is True
+    assert "未开放" in text51("探索 裂月王庭")
+    s51["wounded"] = True
+    assert "先 休养" in text51("探索 风鸣林")
+    s51["wounded"] = False
+    s51["traits"] = ["wanderer", "will"]
+    out51 = text51("探索 风鸣林")
+    assert "需 5 分钟" in out51, "旅人洞察应让 6 分钟地区变 5 分钟"
+    assert "进行中" in text51("探索 灰钟地窟")
+    assert "遭遇待抉择" in text51("结算", 10)
+    assert "需天赋" in text51("抉择 精灵交涉")
+    assert "可选：" in text51("抉择 不存在")
+
+    # ⑤ 战力公式 / 危险率钳制 / 战败 / 发奖 / 羁绊
+    s51["encounter"] = {"region": 0, "repeat": False}
+    s51["profession"] = "剑士"
+    p51 = sm51._power(s51, "剑术", "救援")
+    assert p51 == s51["level"] * 5 + s51["skills"]["剑术"] + 7 + 8
+    s51["hp"] = 1
+    s51["encounter"] = {"region": 0, "repeat": False}
+    a51 = {"kind": "choice", "index": 0, "target": "救援", "repeat": False,
+           "roll": 0.0, "end_at": t51}
+    msg51 = sm51.resolve_action(s51, a51, r51)
+    assert "战败撤回" in msg51 and s51["wounded"] is True and s51["defeats"] == 1
+    s51["hp"] = 100
+    s51["wounded"] = False
+    s51["bag"] = {"野营口粮": 2}
+    a51["roll"] = 0.99
+    msg51 = sm51.resolve_action(s51, a51, r51)
+    assert "古代晶片" in msg51 and s51["chapter"] >= 1 and s51["companion"] is True
+    assert len(s51["lore"]) == 1
+
+    # ⑥ 六地区通关 → 三终局（直接构造，避免刷 6 轮计时）
+    s51["level"] = 8
+    s51["skills"] = {k: 15 for k in sm51.SKILLS}
+    s51["chapter"] = 5
+    s51["hp"] = 200
+    s51["bag"] = {"野营口粮": 2}
+    s51["action"] = None
+    assert "已开始【探索 裂月王庭】" in text51("探索 裂月王庭")
+    s51["action"] = None
+    s51["encounter"] = {"region": 5, "repeat": False}
+    assert "已开始" in text51("抉择 重铸勇者誓约")
+    s51["action"] = None
+    a51 = {"kind": "choice", "index": 5, "target": "重铸勇者誓约",
+           "repeat": False, "roll": 0.99, "end_at": t51}
+    assert "断冠纪元终章" in sm51.resolve_action(s51, a51, r51)
+    assert s51["chapter"] == 6 and s51["ending"] == "重铸勇者誓约"
+
+    # ⑦ 飞升：二次确认 / 四门槛 / 只升不降 / 奖励 / ops / 封存 / 禁止放弃回滚
+    s51["weapon"] = False
+    assert "职业武装" in text51("飞升 确认")
+    s51["weapon"] = True
+    s51["level"] = 7
+    assert "等级 ≥8" in text51("飞升 确认")
+    s51["level"] = 8
+    assert "飞升预览" in text51("飞升")
+    fates51 = [
+        {"id": "otherworld_returnee", "name": "异界归人", "effects": {"攻击加成": 0.08}},
+        {"id": "dawn_oath", "name": "黎明之约", "effects": {"攻击加成": 0.1}},
+    ]
+    msg51, changed51, ops51 = call51("飞升 确认", fates=fates51)
+    assert "飞升成功" in msg51 and changed51
+    assert ops51 == [("items", {"黎明誓约剑": 1})], "信物按 name 入纳戒，避开 id 撞号"
+    assert d51.realm_index == 40 and d51.exp == 321, "高阶角色飞升只升不降"
+    assert d51.stones > 6000 and d51.ext["mingge_slots"] == 3
+    assert len(d51.ext["mingge_extra"]) == 2
+    assert s51["status"] == "ascended" and "已封存" in text51("训练 剑术")
+    assert "不可再放弃" in text51("放弃 确认"), "封存后禁止回滚刷奖励"
+    assert "---- 剑与魔法" in text51("状态")
+    # 低阶角色飞升应升到 39 境
+    d51b = PlayerDoc(uid="e2d", name="己", realm_index=0, exp=5, stones=0)
+    sm51.dispatch(d51b, "入界 确认", t51, r51)
+    sb = sm51.state_of(d51b)
+    sb.update(chapter=6, ending="织补地脉", weapon=True, level=8, coins=10)
+    assert "飞升成功" in sm51.dispatch(d51b, "飞升 确认", t51, r51, fates51)[0]
+    assert d51b.realm_index == sm51.ASCEND_REALM and d51b.exp == 0
+
+    # ⑧ 放弃恢复快照 / DB 往返（ext["sword"] 落盘，db 仍 v17）
+    d51c = PlayerDoc(uid="e2e", name="庚", realm_index=7, exp=99, stones=123)
+    assert "入界成功" in sm51.dispatch(d51c, "入界 确认", t51, r51)[0]
+    assert "已放弃" in sm51.dispatch(d51c, "放弃 确认", t51, r51)[0]
+    assert d51c.realm_index == 7 and d51c.exp == 99 and sm51.state_of(d51c) is None
+    d51d = PlayerDoc(uid="e2f", name="辛", realm_index=3)
+    sm51.dispatch(d51d, "入界 确认", t51, r51)
+    await db.save_player(d51d.model_dump())
+    row51 = await db.get_player("e2f")
+    assert row51 and sm51.state_of(PlayerDoc(**row51))["snapshot"]["realm_index"] == 3
+    print("W8-E2 sword magic ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 
