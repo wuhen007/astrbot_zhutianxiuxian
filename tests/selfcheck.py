@@ -7180,6 +7180,114 @@ async def main():
     assert "_wl_compensate" in src53
     print("W8-F2 worldline authority ok")
 
+    # ---------------- 54. W8-F3 超维造物 ----------------
+    from core import superdim as sd54
+
+    t54 = 1_800_000_000.0
+
+    # ① 觉醒门槛：权柄 ≥48 + 小世界
+    low54 = PlayerDoc(uid="s54a", name="甲", realm_index=47, ext={"xiaoshijie": {"name": "紫霄界"}})
+    assert not sd54.gate_of(low54)["ok"] and "权柄需 48" in sd54.gate_of(low54)["reason"]
+    noworld54 = PlayerDoc(uid="s54b", name="乙", realm_index=52)
+    assert not sd54.gate_of(noworld54)["ok"] and "小世界" in sd54.gate_of(noworld54)["reason"]
+    d54 = PlayerDoc(uid="s54", name="丙", realm_index=48,
+                    ext={"xiaoshijie": {"name": "紫霄界", "level": 3}})
+    assert sd54.gate_of(d54)["ok"]
+    print("F3 gate ok")
+
+    # ② 炼化：重复 / 未到期 / 到期结算（三功法 + 神慧者 + 无演无尽 + 超维星界）
+    st54 = sd54.state_of(d54)
+    assert not sd54.settle_refine(d54, st54, t54)[0], "未开始不该结算"
+    ok54, msg54 = sd54.begin_refine(d54, st54, t54)
+    assert ok54 and "8 小时" in msg54
+    assert not sd54.begin_refine(d54, st54, t54 + 10)[0], "炼化中不得重复开启"
+    assert not sd54.settle_refine(d54, st54, t54 + 60)[0], "未到期不得结算"
+    ok54, msg54 = sd54.settle_refine(d54, st54, t54 + sd54.REFINE_MINUTES * 60 + 1)
+    assert ok54 and st54["owned"] and st54["refining"] is None
+    assert d54.ext["gongfa"] == list(sd54.SHENGFA_GONGFA)
+    assert d54.ext["linggen"]["name"] == "神慧者" and d54.ext["linggen"]["超维之光"] is True
+    assert d54.ext["daotreasure"]["aptitude"] == "无演无尽"
+    assert d54.ext["xiaoshijie"]["name"] == "超维星界" and d54.ext["xiaoshijie"]["超维星界"] is True
+    assert d54.ext["xiaoshijie"]["原世界名"] == "紫霄界"
+    assert "超维星界" in msg54 and "神慧者" in msg54
+    print("F3 refine ok")
+
+    # ③ 超维之力产出 / 消耗
+    base54 = t54 + sd54.REFINE_MINUTES * 60 + 1
+    assert sd54.accrue(d54, st54, base54 + 3599) == 0.0, "不足 1 小时不产出"
+    assert round(sd54.accrue(d54, st54, base54 + 3600 * 3), 2) == 0.03
+    assert sd54.power_of(st54) == 0.03
+    assert not sd54.spend(st54), "不足 5 点不得消耗"
+    st54["power"] = 12.0
+    assert sd54.spend(st54) and sd54.power_of(st54) == 7.0
+    assert sd54.power_of(sd54.state_of(PlayerDoc(uid="z"))) == 0.0
+    print("F3 power ok")
+
+    # ④ 面板：未觉醒 / 已觉醒
+    fresh54 = PlayerDoc(uid="s54c", name="丁", realm_index=48,
+                        ext={"xiaoshijie": {"name": "小界"}})
+    panel54 = sd54.panel_text(fresh54, sd54.state_of(fresh54), t54)
+    assert "尚未炼化" in panel54 and "#炼化圣法碎片" in panel54
+    assert "当前：7.00 点" in sd54.panel_text(d54, st54, base54)
+
+    # ⑤ 造物判定：稀有度 <8
+    assert sd54.can_create({"name": "x", "稀有度": 7})
+    assert not sd54.can_create({"name": "x", "稀有度": 8})
+    assert not sd54.can_create({"name": "x"})
+    assert not sd54.can_create(None)
+    print("F3 create gate ok")
+
+    # ⑥ 改写：灵根 / 命格 / 天资
+    roots54 = [{"name": "青莲剑体", "稀有度": 6},
+               {"name": "月华之体", "稀有度": 10, "唯一灵根": True, "不可随机获取": True}]
+    row54, why54 = sd54.find_linggen(roots54, "青莲剑体")
+    assert row54 and not why54
+    bad54, why54 = sd54.find_linggen(roots54, "月华之体")
+    assert bad54 is None and "唯一" in why54
+    assert sd54.find_linggen(roots54, "不存在")[0] is None
+    assert "灵根改写为" in sd54.apply_linggen(d54, row54) and d54.ext["linggen"]["name"] == "青莲剑体"
+
+    fates54 = [{"id": 1, "name": "紫微星主", "effects": {}}]
+    assert sd54.find_fate(fates54, "紫微星主")["name"] == "紫微星主"
+    assert sd54.find_fate(fates54, "1")["id"] == 1 and sd54.find_fate(fates54, "无") is None
+    assert "命格改写为" in sd54.apply_fate(d54, fates54[0])
+    assert d54.ext["mingge"]["name"] == "紫微星主" and d54.ext["mingge"]["大道改写"] is True
+
+    assert sd54.rewrite_name("  绝世天骄  @某人 ") == "绝世天骄"
+    assert sd54.rewrite_name("") == ""
+    print("F3 rewrite ok")
+
+    # ⑦ 时代改写：五个时代 / 非法名
+    era54: dict = {}
+    for idx54, name54 in enumerate(sd54.ERA_NAMES):
+        ok54, msg54 = sd54.era_apply(era54, name54, t54)
+        assert ok54 and era54["years_total"] == idx54 * 10000, (name54, era54.get("years_total"))
+    assert era54["years_total"] == 40000, "绝灵时代是第 5 个"
+    assert not sd54.era_apply(era54, "黄金时代", t54)[0]
+    print("F3 era ok")
+
+    # ⑧ DB 往返 + main.py 接线
+    d54b = PlayerDoc(uid="s54d", name="戊", realm_index=48, ext={"xiaoshijie": {"name": "小界"}})
+    st54b = sd54.state_of(d54b)
+    sd54.begin_refine(d54b, st54b, t54)
+    await db.save_player(d54b.model_dump())
+    row54 = await db.get_player("s54d")
+    assert sd54.state_of(PlayerDoc(**row54))["refining"]["end"] == t54 + 480 * 60
+
+    src54 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    miss54 = [c for c in (
+        "CMD_SD", "CMD_SD_REFINE", "CMD_SD_CREATE", "CMD_SD_REPAIR", "CMD_SD_EVENT",
+        "CMD_SD_ERA", "CMD_SD_FATE", "CMD_SD_APT", "CMD_SD_LG",
+    ) if f"@filter.command({c}" not in src54]
+    assert miss54 == [], f"漏注册：{miss54}"
+    assert "sd_mod.settle_refine(doc, st, now)" in src54
+    assert "sd_mod.accrue(doc, st, now)" in src54
+    assert "sd_mod.era_apply(cal[\"era\"], name" in src54
+    assert "ss_mod.repair_all(w, True)" in src54
+    assert "calamity.spawn_wave" in src54 and 'source="superdimensional"' in src54
+    assert "sd_mod.find_linggen" in src54 and "sd_mod.find_fate" in src54
+    print("W8-F3 superdimensional ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

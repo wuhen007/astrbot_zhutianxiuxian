@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -394,6 +394,17 @@ CMD_WL_REDUCE_ALIAS = "#纪元消债"
 CMD_WL_STRIKE = "#古史打击"
 CMD_WL_REBUILD = "#重塑形神"
 CMD_WL_RETRY = "#重试因果代偿"
+# ---- W8-F3 超维造物（原版 Superdimensional.js 8 条 + 觉醒入口 1 条补位）----
+CMD_SD = "#超维之力"
+CMD_SD_REFINE = "#炼化圣法碎片"
+CMD_SD_CREATE = "#超维造物"
+CMD_SD_REPAIR = "#超维修复位面"
+CMD_SD_EVENT = "#超维引发大事件"
+CMD_SD_ERA = "#超维改写时代"
+CMD_SD_FATE = "#超维改写命格"
+CMD_SD_APT = "#超维改写天资"
+CMD_SD_LG = "#超维改写灵根"
+
 
 
 CMD_ENDLESS = "#无尽劫境"
@@ -2089,6 +2100,20 @@ class ZhutianPlugin(Star):
                 ("⚠️ 债过 200 → 因果雷劫", "20 道 ×血量上限 120% = 必死，道伤 +2，支取封锁 12 小时（每次再叠 5 小时）"),
                 ("⚠️ 债 ≥300 → 众生代偿", "道侣/师父/弟子/同宗门分摊伤害与道伤；不在场者挂起"),
                 ("⚠️ 移植差异", "时间线由「锚点投影」确定性生成（原版读多线备份）；绝灵侵蚀抹物 / 全时间线尽灭→永寂 / 岁云无上庇护未搬"),
+            ]},
+            {"title": "超维造物 · 超维之力", "lines": [
+                (CMD_SD, "面板：力量点数 / 产出速率 / 消耗 / 全部权柄入口（未觉醒显示前置）"),
+                (CMD_SD_REFINE, "觉醒：权柄 ≥48 档 + 已开辟小世界，炼化 480 分钟真实时间"),
+                ("觉醒奖励", "三功法 + 神慧者灵根 + 无演无尽天资 + 小世界升华为超维星界"),
+                (f"{CMD_SD_CREATE} 物品名", "造一件稀有度 <8 的物品（每次一件，耗 5 点）"),
+                (CMD_SD_REPAIR, "修复全服破碎位面与每人档内的毁灭记录（耗 5 点）"),
+                (CMD_SD_EVENT, "强行推演一场域外灾劫（耗 5 点）"),
+                (f"{CMD_SD_ERA} 时代名", "神话 / 太古 / 天命 / 末法 / 绝灵（耗 5 点）"),
+                (f"{CMD_SD_FATE} 命格名 [@道友]", "命格整条快照替换（耗 5 点，可改写他人）"),
+                (f"{CMD_SD_APT} 天资名 [@道友]", "十级天资表，三维乘区同源（耗 5 点）"),
+                (f"{CMD_SD_LG} 灵根名 [@道友]", "拒绝唯一灵根 / 不可随机获取（岁云一脉）"),
+                ("⚠️ 移植差异", "原版前置是「圣法碎片」道具（圣法残片×1000、掉率百万分之一）；"
+                              "本移植 data 与源 1:1 且残片无产出点，折算为权柄+小世界门槛，炼化时长与奖励照原版"),
             ]},
         ]
 
@@ -6562,6 +6587,288 @@ class ZhutianPlugin(Star):
             out.append(res)
         await self.db.save_player(doc.model_dump())
         async for r in self._smart(event, wl_mod.compensation_text(out)):
+            yield r
+
+    # ---- W8-F3 超维造物（ext["superdim"]，db 仍 v17） ----
+
+    async def _sd_open(self, event: AstrMessageEvent):
+        """取玩家并惰性结算（炼化到期 / 超维星界产出）。返回 (doc, st, prefix, err)。"""
+        doc, err = await self._require_player(event)
+        if err:
+            return None, None, "", err
+        now = time.time()
+        st = sd_mod.state_of(doc)
+        _done, msg = sd_mod.settle_refine(doc, st, now)
+        gained = sd_mod.accrue(doc, st, now)
+        prefix = ""
+        if msg:
+            prefix = msg + "\n"
+        elif gained > 0:
+            prefix = f"超维星界产出 +{gained:.2f} 点（现 {sd_mod.power_of(st):.2f}）。\n"
+        return doc, st, prefix, None
+
+    def _sd_spend_or_warn(self, doc: PlayerDoc, st: dict) -> str | None:
+        """超维权柄前置：已觉醒 + 力量够 5 点。返回拒绝文案或 None。"""
+        if not st.get("owned"):
+            return ("你尚未炼化圣法碎片，超维权柄沉睡（发送「"
+                    f"{CMD_SD}」查看觉醒前置）。")
+        if sd_mod.power_of(st) < sd_mod.POWER_COST:
+            return (f"超维之力不足 {sd_mod.POWER_COST} 点"
+                    f"（现 {sd_mod.power_of(st):.2f}，超维星界每现实小时 +"
+                    f"{sd_mod.POWER_PER_HOUR} 点）。")
+        return None
+
+    @filter.command(CMD_SD, "超维之力")
+    async def handle_sd(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, st, prefix, err = await self._sd_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, prefix + sd_mod.panel_text(doc, st, time.time())):
+            yield r
+
+    @filter.command(CMD_SD_REFINE, "炼化圣法碎片（超维觉醒）")
+    async def handle_sd_refine(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, st, prefix, err = await self._sd_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = sd_mod.begin_refine(doc, st, time.time())
+        await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, prefix + msg):
+            yield r
+
+    @filter.command(CMD_SD_CREATE, "超维造物")
+    async def handle_sd_create(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, st, prefix, err = await self._sd_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        name = (self._adm_tail(event) or "").strip()
+        if not name:
+            await self.db.save_player(doc.model_dump())
+            yield event.plain_result("格式：「#超维造物 物品名」（稀有度 <8，每次一件）。")
+            return
+        item = self.item_index.get(name)
+        if not sd_mod.can_create(item):
+            await self.db.save_player(doc.model_dump())
+            yield event.plain_result("只能变化确实存在且稀有度低于 8 的物品。")
+            return
+        warn = self._sd_spend_or_warn(doc, st)
+        if warn:
+            yield event.plain_result(warn)
+            return
+        sd_mod.spend(st)
+        st["creates"] = int(st.get("creates") or 0) + 1
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            await self.db.add_items(doc.uid, {name: 1})
+        async for r in self._smart(event, prefix +
+                f"超维之光重写物质定义，你获得【{name}】×1，消耗 {sd_mod.POWER_COST} 点超维之力。"):
+            yield r
+
+    @filter.command(CMD_SD_REPAIR, "超维修复位面")
+    async def handle_sd_repair(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, st, prefix, err = await self._sd_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        warn = self._sd_spend_or_warn(doc, st)
+        if warn:
+            await self.db.save_player(doc.model_dump())
+            yield event.plain_result(warn)
+            return
+        sd_mod.spend(st)
+        cal = calamity.ensure(await self.db.get_calamity())
+        w = ss_mod.world_of(cal)
+        _ok, msg, _delta, ops = ss_mod.repair_all(w, True)
+        rows = cal.setdefault("destroyed_planes", {})
+        if not isinstance(rows, dict):
+            rows = cal["destroyed_planes"] = {}
+        for op in ops:
+            if op[0] == "clear":
+                rows.pop(op[1], None)
+            elif op[0] == "clear_all":
+                rows.clear()
+        ss_mod.set_world(cal, w)
+        await self.db.save_calamity(cal)
+        fixed = 0
+        async with self.db.transaction():
+            for raw in await self.db.all_players():
+                pd = PlayerDoc(**raw)
+                pst = plane.state_of(pd)
+                dead = [k for k in (pst.get("destroyed") or {})]
+                if not dead:
+                    continue
+                for key in dead:
+                    plane.repair_plane(pst, key)
+                fixed += 1
+                await self.db.save_player(pd.model_dump())
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(
+            prefix + msg + f"\n（另有 {fixed} 人档内的位面毁灭记录一并抹去，"
+            f"消耗 {sd_mod.POWER_COST} 点超维之力。）")
+
+    @filter.command(CMD_SD_EVENT, "超维引发大事件")
+    async def handle_sd_event(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, st, prefix, err = await self._sd_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        warn = self._sd_spend_or_warn(doc, st)
+        if warn:
+            await self.db.save_player(doc.model_dump())
+            yield event.plain_result(warn)
+            return
+        avg = await self._calamity_avg()
+        rng = random.Random()
+        cal = calamity.ensure(await self.db.get_calamity())
+        made = calamity.spawn_wave(cal, int(cal["era"]["years"]), 1, avg, rng,
+                                   source="superdimensional")
+        if not made:
+            await self.db.save_player(doc.model_dump())
+            yield event.plain_result("域外灾厄已达存世上限，超维之力未消耗。")
+            return
+        sd_mod.spend(st)
+        await self.db.save_calamity(cal)
+        await self.db.save_player(doc.model_dump())
+        ent = made[0]
+        async for r in self._smart(event, prefix +
+                f"超维之光撕开维度壁障，强行推演一场域外灾劫：\n"
+                f"· {ent['name']}（{ent['type']}·{ent['hp']:,} 气血）\n"
+                f"消耗 {sd_mod.POWER_COST} 点超维之力。"):
+            yield r
+
+    @filter.command(CMD_SD_ERA, "超维改写时代")
+    async def handle_sd_era(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, st, prefix, err = await self._sd_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        name = sd_mod.rewrite_name(self._adm_tail(event))
+        if name not in sd_mod.ERA_NAMES:
+            await self.db.save_player(doc.model_dump())
+            yield event.plain_result("可改写时代：" + " / ".join(sd_mod.ERA_NAMES))
+            return
+        warn = self._sd_spend_or_warn(doc, st)
+        if warn:
+            await self.db.save_player(doc.model_dump())
+            yield event.plain_result(warn)
+            return
+        cal = calamity.ensure(await self.db.get_calamity())
+        ok, msg = sd_mod.era_apply(cal["era"], name, time.time())
+        if not ok:
+            await self.db.save_player(doc.model_dump())
+            yield event.plain_result(msg)
+            return
+        sd_mod.spend(st)
+        st["rewrites"] = int(st.get("rewrites") or 0) + 1
+        await self.db.save_calamity(cal)
+        await self.db.save_player(doc.model_dump())
+        yield event.plain_result(prefix + msg + f"消耗 {sd_mod.POWER_COST} 点超维之力。")
+
+    async def _sd_rewrite(self, event: AstrMessageEvent, kind: str):
+        """改写命格 / 天资 / 灵根：可 @他人，名称取尾部第一个词。"""
+        doc, st, prefix, err = await self._sd_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        name = sd_mod.rewrite_name(self._adm_tail(event))
+        if not name:
+            await self.db.save_player(doc.model_dump())
+            yield event.plain_result(f"格式：「{kind[0]} {kind[1]}名 [@道友]」。")
+            return
+        target_uid = self._at_target(event) or doc.uid
+        if str(target_uid) == str(doc.uid):
+            target = doc
+        else:
+            raw = await self.db.get_player(str(target_uid))
+            if not raw:
+                await self.db.save_player(doc.model_dump())
+                yield event.plain_result("目标尚未踏入修仙界。")
+                return
+            target = PlayerDoc(**raw)
+
+        if kind[1] == "命格":
+            snap = sd_mod.find_fate(self.content.table("item/命格词条"), name)
+            if not snap:
+                await self.db.save_player(doc.model_dump())
+                yield event.plain_result(f"没有名为【{name}】的命格词条。")
+                return
+            detail = sd_mod.apply_fate(target, snap)
+        elif kind[1] == "天资":
+            if name not in dt_mod.APTITUDES:
+                await self.db.save_player(doc.model_dump())
+                yield event.plain_result("天资名须为十级之一："
+                                         + " / ".join(dt_mod.APTITUDES) + "。")
+                return
+            apt = target.ext.get("daotreasure")
+            if not isinstance(apt, dict):
+                apt = {}
+            apt["aptitude"] = name
+            target.ext["daotreasure"] = apt
+            detail = (f"天资改写为【{name}】：{dt_mod.APTITUDES[name]}｜"
+                      f"三维乘区 {dt_mod.APTITUDE_MULT[name]:+.0%}。")
+        else:
+            if sd_mod.same_linggen(target, name):
+                await self.db.save_player(doc.model_dump())
+                yield event.plain_result(f"目标的灵根本即【{name}】。")
+                return
+            row, why = sd_mod.find_linggen(self.content.table("item/灵根列表"), name)
+            if not row:
+                await self.db.save_player(doc.model_dump())
+                yield event.plain_result(why)
+                return
+            detail = sd_mod.apply_linggen(target, row)
+
+        warn = self._sd_spend_or_warn(doc, st)
+        if warn:
+            await self.db.save_player(doc.model_dump())
+            yield event.plain_result(warn)
+            return
+        sd_mod.spend(st)
+        st["rewrites"] = int(st.get("rewrites") or 0) + 1
+        async with self.db.transaction():
+            await self.db.save_player(target.model_dump())
+            if target.uid != doc.uid:
+                await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, prefix +
+                f"超维之光已将{target.name or target.uid}的{kind[1]}改写：{detail}"
+                f"\n消耗 {sd_mod.POWER_COST} 点超维之力。"):
+            yield r
+
+    @filter.command(CMD_SD_FATE, "超维改写命格")
+    async def handle_sd_fate(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        async for r in self._sd_rewrite(event, ("#超维改写", "命格")):
+            yield r
+
+    @filter.command(CMD_SD_APT, "超维改写天资")
+    async def handle_sd_apt(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        async for r in self._sd_rewrite(event, ("#超维改写", "天资")):
+            yield r
+
+    @filter.command(CMD_SD_LG, "超维改写灵根")
+    async def handle_sd_lg(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        async for r in self._sd_rewrite(event, ("#超维改写", "灵根")):
             yield r
 
     # ---- 师徒试炼 / 商店 / 神兵重铸 / 双修 ----
