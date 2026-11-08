@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -382,6 +382,19 @@ CMD_AD_INIT_NO = "#取消诸天初始化"
 CMD_AD_NOTIFY = "#同步公告群"
 CMD_AD_NOTIFY_VIEW = "#查看公告群"
 CMD_AD_DIFFICULTY = "#选择难度"
+# ---- W8-F2 时间线权柄（原版 WorldlineAuthority.js 8 条 rule，其中 3 条是状态别名）----
+CMD_WL = "#时间线权能"
+CMD_WL_ALIAS = "#古史状态"
+CMD_WL_ALIAS2 = "#因果债"
+CMD_WL_TAKE = "#支取时间线"
+CMD_WL_TAKE_OK = "#确认支取时间线"
+CMD_WL_TAKE_NO = "#取消支取时间线"
+CMD_WL_REDUCE = "#消减因果债"
+CMD_WL_REDUCE_ALIAS = "#纪元消债"
+CMD_WL_STRIKE = "#古史打击"
+CMD_WL_REBUILD = "#重塑形神"
+CMD_WL_RETRY = "#重试因果代偿"
+
 
 CMD_ENDLESS = "#无尽劫境"
 CMD_ENDLESS_START = "#开启无尽劫境"
@@ -2064,6 +2077,18 @@ class ZhutianPlugin(Star):
                 (f"{CMD_AD_DIFFICULTY} 简单|普通|困难", "诸天往生难度：寿元是否流逝 / 耗尽是否强制轮回"),
                 (f"{CMD_AD_INIT} → {CMD_AD_INIT_OK} 确认码", "诸天初始化：60 秒二次确认 + 自动备份 + 清空全服数据"),
                 ("⚠️ 状态挂 calamity_state[\"admin\"]，db 仍 v17", "原版 30 条 rule 中「补登唯一机缘」属仙古遗迹，本移植不做仙古遗迹故不移植"),
+            ]},
+            {"title": "时间线权柄 · 因果债", "lines": [
+                (f"{CMD_WL} / {CMD_WL_ALIAS} / {CMD_WL_ALIAS2}", "面板：权柄档位 / 因果债四档 / 封锁剩余 / 六条古史线 / 最近古史"),
+                (f"{CMD_WL_TAKE} 类别*物品名", "把「别的时间线里你曾拥有的东西」提前取出（须先真的拥有它作锚点）"),
+                (f"{CMD_WL_TAKE_OK} 1,3 / {CMD_WL_TAKE_NO}", "10 分钟内确认；42 档只能取 1 条线且线号不可见"),
+                (f"{CMD_WL_REDUCE} N / {CMD_WL_REDUCE_ALIAS} N", "花纪元积累降债：倍率 1.5 / 3 / 5 / 免费，按权柄档位提升"),
+                (f"{CMD_WL_STRIKE} 类型*名称 @道友", "改写他人既定事实；类型 证道/创道/造化/功法/物品/至宝/关系"),
+                (f"{CMD_WL_REBUILD} @道友", "救回形神俱灭者（血气恢复 20%），施术者债 +60"),
+                (f"{CMD_WL_RETRY}", "补结算挂起的众生代偿（同一事件不二次受罚）"),
+                ("⚠️ 债过 200 → 因果雷劫", "20 道 ×血量上限 120% = 必死，道伤 +2，支取封锁 12 小时（每次再叠 5 小时）"),
+                ("⚠️ 债 ≥300 → 众生代偿", "道侣/师父/弟子/同宗门分摊伤害与道伤；不在场者挂起"),
+                ("⚠️ 移植差异", "时间线由「锚点投影」确定性生成（原版读多线备份）；绝灵侵蚀抹物 / 全时间线尽灭→永寂 / 岁云无上庇护未搬"),
             ]},
         ]
 
@@ -6238,6 +6263,306 @@ class ZhutianPlugin(Star):
         if ok:
             await self._adm_note(event, f"诸天难度 → {name}")
         yield event.plain_result(msg)
+
+    # ---- W8-F2 时间线权柄（ext["worldline"]，db 仍 v17） ----
+
+    def _wl_max_hp(self, doc: PlayerDoc) -> int:
+        return max(1, int(self._hp_pair(doc)[1]))
+
+    def _wl_weight(self, name: str) -> int:
+        """支取计价：按物品稀有度（1-9），查不到按 3。"""
+        row = self.item_index.get(str(name)) or {}
+        try:
+            return max(1, min(9, int(row.get("稀有度") or 3)))
+        except (TypeError, ValueError):
+            return 3
+
+    async def _wl_compensate(self, doc: PlayerDoc, st: dict, now: float) -> list[str]:
+        """因果债到「众生代偿」档：把惩罚摊给道侣/师父/弟子/同宗门。"""
+        debt = int(st.get("debt") or 0)
+        if wl_mod.tier_of(debt)["level"] < 2:
+            return []
+        links = list(wl_mod.related_of(doc))
+        sect = str(doc.ext.get("sect") or "")
+        if sect:
+            for raw in await self.db.all_players():
+                if len(links) >= wl_mod.COMPENSATION_MAX_TARGETS:
+                    break
+                if str((raw.get("ext") or {}).get("sect") or "") != sect:
+                    continue
+                if raw.get("uid") in (doc.uid, *(u for _r, u in links)):
+                    continue
+                links.append(("同门", str(raw.get("uid"))))
+        event_id = f"wl:{doc.uid}:{int(now)}"
+        lines: list[str] = []
+        for relation, uid in links[: wl_mod.COMPENSATION_MAX_TARGETS]:
+            raw = await self.db.get_player(uid)
+            if not raw:
+                wl_mod.push_pending(st, uid, relation, debt, event_id, now)
+                continue
+            other = PlayerDoc(**raw)
+            res = wl_mod.compensate(other, debt, event_id, doc.name,
+                                    now, self._wl_max_hp(other))
+            if res.get("dedup"):
+                continue
+            await self.db.save_player(other.model_dump())
+            lines.append(f"· {res['name']}（{relation}）血气 -{res['damage']:,}、"
+                         f"道伤 +{res['wound']}")
+        if lines:
+            lines.insert(0, f"【众生代偿】因果债 {debt} 牵连 {len(lines)} 人：")
+        return lines
+
+    @filter.command(CMD_WL, "时间线权能", alias={CMD_WL_ALIAS, CMD_WL_ALIAS2})
+    async def handle_wl(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = wl_mod.state_of(doc)
+        async for r in self._smart(event, wl_mod.status_text(doc, st, time.time())):
+            yield r
+
+    @filter.command(CMD_WL_TAKE, "支取时间线：列出可支取的古史线")
+    async def handle_wl_take(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        now = time.time()
+        st = wl_mod.state_of(doc)
+        tail = self._adm_tail(event)
+        if not tail:
+            yield event.plain_result(wl_mod.help_text())
+            return
+        category, name = wl_mod.parse_item_spec(tail)
+        if not name:
+            yield event.plain_result(
+                "格式：「#支取时间线 类别*物品名」，类别限 "
+                + " / ".join(wl_mod.ITEM_CATEGORIES) + "。")
+            return
+        gate = wl_mod.gate_of(doc)
+        if gate["mode"] == "none":
+            yield event.plain_result(
+                f"权柄不足：支取时间线需 {wl_mod.GATE_WITHDRAW} 档，"
+                f"当前 {gate['level']} 档。")
+            return
+        broken = wl_mod.form_broken_of(doc)
+        if broken:
+            yield event.plain_result(f"形神俱灭（{broken}），无法触碰时间长河。")
+            return
+        left = wl_mod.block_left(st, now)
+        if left:
+            yield event.plain_result(
+                f"支取封锁中：剩余 {left // 3600} 小时 {left % 3600 // 60} 分"
+                f"（因果雷罚反噬）。")
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        base = int(inv.get(name, 0) or 0)
+        if base <= 0:
+            yield event.plain_result(
+                f"现世无【{name}】这一因果锚点——你得先真的拥有它，"
+                f"才谈得上从别的时间线取。")
+            return
+        offers = wl_mod.line_offers(doc.uid, name, max(1, base), st["claims"], st["destroyed"])
+        if not offers:
+            yield event.plain_result(
+                f"【{name}】的六条古史线都已被你取空或抹去了。")
+            return
+        import random as _random
+        if gate["mode"] == "random":
+            offers = [_random.Random(f"{doc.uid}:{int(now // 60)}").choice(offers)]
+        wl_mod.open_session(st, category, name, offers, now)
+        await self.db.save_player(doc.model_dump())
+        lines = [
+            f"--- 支取时间线 · {category}*{name} ---",
+            f"现世锚点：{base} 件｜" + wl_mod.gate_text(gate),
+            wl_mod.offers_text(offers, gate["reveal"]),
+            f"每件计价 {self._wl_weight(name)} 点因果债。",
+            f"确认请发送「{CMD_WL_TAKE_OK} 1,{len(offers) if len(offers) > 1 else 1}」"
+            f"（或「全部」），10 分钟内有效。",
+        ]
+        async for r in self._smart(event, "\n".join(lines)):
+            yield r
+
+    @filter.command(CMD_WL_TAKE_OK, "确认支取时间线")
+    async def handle_wl_take_ok(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        now = time.time()
+        st = wl_mod.state_of(doc)
+        sess = wl_mod.session_of(st, now)
+        if not sess:
+            yield event.plain_result("没有待确认的支取（会话 10 分钟过期），请重新发送「"
+                                     + CMD_WL_TAKE + " 类别*物品名」。")
+            return
+        offers = list(sess.get("offers") or [])
+        ok, picks, why = wl_mod.parse_picks(self._adm_tail(event), len(offers))
+        if not ok:
+            yield event.plain_result(why)
+            return
+        if wl_mod.gate_of(doc)["mode"] == "random" and len(picks) > 1:
+            yield event.plain_result("权柄不足，一次只能取一条线。")
+            return
+        import random as _random
+        rng = _random.Random(f"{doc.uid}:{int(now)}")
+        ok, msg, items = wl_mod.settle_withdraw(
+            doc, st, picks, self._wl_weight(sess["name"]), now,
+            self._wl_max_hp(doc), rng)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            await self.db.add_items(doc.uid, items)
+        extra = await self._wl_compensate(doc, st, now)
+        if extra:
+            await self.db.save_player(doc.model_dump())
+            msg += "\n" + "\n".join(extra)
+        async for r in self._smart(event, msg):
+            yield r
+
+    @filter.command(CMD_WL_TAKE_NO, "取消支取时间线")
+    async def handle_wl_take_no(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = wl_mod.state_of(doc)
+        ok, msg = wl_mod.cancel_session(st)
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_WL_REDUCE, "纪元消债", alias={CMD_WL_REDUCE_ALIAS})
+    async def handle_wl_reduce(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = wl_mod.state_of(doc)
+        want = self._adm_num(event, 0)
+        ok, msg = wl_mod.reduce_debt(doc, st, want, time.time())
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_WL_STRIKE, "古史打击：改写他人既定事实")
+    async def handle_wl_strike(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        now = time.time()
+        ftype, name = wl_mod.parse_fact(self._adm_tail(event))
+        if not ftype:
+            yield event.plain_result(
+                "格式：「#古史打击 类型*名称 @道友」，类型限 "
+                + " / ".join(wl_mod.FACT_WEIGHT) + "。")
+            return
+        target, terr = await self._target_doc(event)
+        if terr:
+            yield event.plain_result(terr)
+            return
+        if target.uid == doc.uid:
+            yield event.plain_result("打自己的古史没有意义（也打不动）。")
+            return
+        atk_st = wl_mod.state_of(doc)
+        tgt_st = wl_mod.state_of(target)
+        ok, msg, plan = wl_mod.strike(doc, atk_st, target, tgt_st,
+                                      ftype, name, now, self._wl_max_hp(doc))
+        erased = ""
+        if plan and plan.get("erase_item"):
+            item = str(plan["erase_item"])
+            holders = total = 0
+            async with self.db.transaction():
+                for uid in await self.db.all_player_uids():
+                    inv = await self.db.get_inventory(uid)
+                    got = adm_mod.wipe_item(inv, item)
+                    if got <= 0:
+                        continue
+                    holders += 1
+                    total += got
+                    await self.db.remove_item(uid, item, got)
+            erased = (f"\n【{item}】从 {holders} 名持有者的现世存档中消失，共抹去 {total} 件。"
+                      if total else f"\n【{item}】在现世本就无人持有。")
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            await self.db.save_player(target.model_dump())
+        yield event.plain_result(msg + erased)
+
+    @filter.command(CMD_WL_REBUILD, "重塑形神")
+    async def handle_wl_rebuild(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        target, terr = await self._target_doc(event)
+        if terr:
+            yield event.plain_result(terr)
+            return
+        now = time.time()
+        tgt_st = wl_mod.state_of(target)
+        ok, msg = wl_mod.rebuild_form(target, doc.name, now, self._wl_max_hp(target))
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        atk_st = wl_mod.state_of(doc)
+        res = wl_mod.add_debt(doc, atk_st, 60, "以大道之力重塑他人形神", now,
+                              self._wl_max_hp(doc))
+        async with self.db.transaction():
+            await self.db.save_player(target.model_dump())
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg + "\n" + "\n".join(wl_mod.debt_lines(res)))
+
+    @filter.command(CMD_WL_RETRY, "重试因果代偿")
+    async def handle_wl_retry(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        now = time.time()
+        st = wl_mod.state_of(doc)
+        rows = wl_mod.take_pending(st)
+        if not rows:
+            yield event.plain_result("没有挂起的因果代偿。")
+            return
+        out: list[dict] = []
+        for row in rows:
+            raw = await self.db.get_player(str(row.get("uid")))
+            if not raw:
+                wl_mod.push_pending(st, str(row.get("uid")), str(row.get("relation")),
+                                    float(row.get("amount") or 0),
+                                    str(row.get("event")), now)
+                out.append({"uid": row.get("uid"), "dedup": True})
+                continue
+            other = PlayerDoc(**raw)
+            res = wl_mod.compensate(other, float(row.get("amount") or 0),
+                                    str(row.get("event")), doc.name, now,
+                                    self._wl_max_hp(other))
+            if not res.get("dedup"):
+                await self.db.save_player(other.model_dump())
+            out.append(res)
+        await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, wl_mod.compensation_text(out)):
+            yield r
 
     # ---- 师徒试炼 / 商店 / 神兵重铸 / 双修 ----
 

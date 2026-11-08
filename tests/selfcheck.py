@@ -6994,6 +6994,192 @@ async def main():
     assert "cmd_extras" not in src52
     print("W8-F1 super admin ok")
 
+    # ---------------- 53. W8-F2 时间线权柄 ----------------
+    from core import worldline as wl53
+
+    t53 = 1_800_000_000.0
+
+    # ① 权柄门槛 / 因果债档位 / 反噬画像
+    gates53 = {r: wl53.gate_of(PlayerDoc(uid="g", realm_index=r))["mode"]
+               for r in (41, 42, 45, 47, 49)}
+    assert gates53 == {41: "none", 42: "random", 45: "target", 47: "scope", 49: "free"}, gates53
+    assert wl53.tier_of(99)["level"] == 0 and wl53.tier_of(99)["name"] == "因果平稳"
+    assert [wl53.tier_of(v)["name"] for v in (100, 300, 600, 1000)] == [
+        "绝灵回响", "众生代偿", "古史清算", "厄土大祭"]
+    assert wl53.penalty_of(1000)["hp"] == 0.30 and wl53.penalty_of(1000)["suppress"] == 2
+    assert wl53.penalty_of(350)["tax"] == 0.10 and wl53.penalty_of(250)["tax"] == 0.05
+    assert wl53.deduct_rate(PlayerDoc(uid="g", realm_index=44)) == 1.5
+    assert wl53.deduct_rate(PlayerDoc(uid="g", realm_index=45)) == 3.0
+    assert wl53.deduct_rate(PlayerDoc(uid="g", realm_index=47)) == 5.0
+    assert wl53.deduct_rate(PlayerDoc(uid="g", realm_index=49)) == 999.0
+    print("F2 gates ok")
+
+    # ② 古史线投影：确定性 / 去重 / 已灭剔除 / 份数随线偏差递增
+    o53a = wl53.line_offers("u53", "青锋剑", 4, [], [])
+    o53b = wl53.line_offers("u53", "青锋剑", 4, [], [])
+    assert len(o53a) == 6 and [o["qty"] for o in o53a] == [o["qty"] for o in o53b], "同人同物必须稳定"
+    assert o53a[0]["qty"] < o53a[-1]["qty"], "越靠后的线偏差越大"
+    o53c = wl53.line_offers("u53", "青锋剑", 4, ["L1|青锋剑"], ["L2"])
+    assert [o["line"] for o in o53c] == ["L3", "L4", "L5", "L6"]
+    assert wl53.line_offers("u53", "青锋剑", 4, [], ["L1", "L2", "L3", "L4", "L5", "L6"]) == []
+    assert "太初混沌纪" in wl53.offers_text(o53a, True)
+    assert "看不穿" in wl53.offers_text(o53a, False)
+
+    # ③ 会话：开启 / 读取 / 过期 / 取消 / 选择解析
+    st53a = wl53.state_of(PlayerDoc(uid="u53", name="甲", realm_index=45))
+    wl53.open_session(st53a, "装备", "青锋剑", o53a[:2], t53)
+    assert wl53.session_of(st53a, t53 + 1)["name"] == "青锋剑"
+    assert wl53.session_of(st53a, t53 + wl53.SESSION_TTL + 1) is None, "10 分钟过期"
+    assert wl53.parse_picks("1,2", 6) == (True, [0, 1], "")
+    assert wl53.parse_picks("全部", 6)[1] == [0, 1, 2, 3, 4, 5]
+    assert not wl53.parse_picks("9", 6)[0] and not wl53.parse_picks("x", 6)[0]
+    assert wl53.cancel_session(st53a)[0] and st53a["session"] is None
+    assert not wl53.cancel_session(st53a)[0]
+    print("F2 session ok")
+
+    # ④ 支取结算：入包 / claim / 计价 / 雷劫击杀 / 封锁
+    d53 = PlayerDoc(uid="u53", name="甲", realm_index=45, ext={"hp": 5000})
+    st53 = wl53.state_of(d53)
+    offers53 = wl53.line_offers(d53.uid, "青锋剑", 4, [], [])
+    wl53.open_session(st53, "装备", "青锋剑", offers53, t53)
+    ok53, msg53, items53 = wl53.settle_withdraw(
+        d53, st53, [0, 1], 6, t53 + 1, 5000)
+    assert ok53 and items53["青锋剑"] == offers53[0]["qty"] + offers53[1]["qty"]
+    assert st53["debt"] == 6 * items53["青锋剑"]
+    assert st53["session"] is None and len(st53["claims"]) == 2
+    assert "因果债" in msg53
+    # 债过 200 → 20 道 ×120% 血量上限 = 必死
+    st53["debt"] = 0
+    res53 = wl53.add_debt(d53, st53, 250, "测试", t53 + 2, 5000)
+    assert res53["backlash"]["triggered"] and res53["backlash"]["killed"]
+    assert res53["backlash"]["damage_per_bolt"] == 6000
+    assert d53.ext["hp"] == 0 and wl53.zhengdao.peek(d53) == 2.0, "雷劫必死 + 道伤 +2"
+    assert wl53.block_left(st53, t53 + 2) >= 12 * 3600, "死亡叠 12 小时封锁"
+    assert any("因果雷罚" in ln for ln in wl53.debt_lines(res53))
+    # 未过阈值不触发
+    st53["debt"] = 0
+    d53.ext["hp"] = 5000
+    assert not wl53.add_debt(d53, st53, 150, "测试", t53 + 3, 5000)["backlash"]["triggered"]
+    # 祭道之上：债恒 0
+    free53 = PlayerDoc(uid="u53f", name="乙", realm_index=49, ext={"hp": 10})
+    stf53 = wl53.state_of(free53)
+    resf53 = wl53.add_debt(free53, stf53, 9999, "测试", t53, 10)
+    assert resf53["free"] and resf53["delta"] == 0 and stf53["debt"] == 0
+    print("F2 withdraw ok")
+
+    # ⑤ 纪元消债：倍率 / 纪元积累消耗 / 清零 / 免费全清
+    d53b = PlayerDoc(uid="u53b", name="丙", realm_index=45, ext={"era_points": 100})
+    st53b = wl53.state_of(d53b)
+    st53b["debt"] = 300
+    ok53, msg53 = wl53.reduce_debt(d53b, st53b, 10, t53)
+    assert ok53 and st53b["debt"] == 270 and d53b.ext["era_points"] == 90, "×3 倍率"
+    assert "倍率 ×3" in msg53
+    ok53, _m = wl53.reduce_debt(d53b, st53b, 0, t53)
+    assert ok53 and st53b["debt"] == 0, "省略数量=能消多少消多少"
+    assert not wl53.reduce_debt(d53b, st53b, 5, t53)[0], "债已清零"
+    d53c = PlayerDoc(uid="u53c", name="丁", realm_index=41)
+    st53c = wl53.state_of(d53c)
+    st53c["debt"] = 50
+    assert not wl53.reduce_debt(d53c, st53c, 1, t53)[0], "权柄不足不能消债"
+    d53d = PlayerDoc(uid="u53d", name="戊", realm_index=49, ext={"era_points": 0})
+    st53d = wl53.state_of(d53d)
+    st53d["debt"] = 88
+    ok53, msg53 = wl53.reduce_debt(d53d, st53d, 1, t53)
+    assert ok53 and st53d["debt"] == 0 and "祭道之上" in msg53
+    print("F2 reduce ok")
+
+    # ⑥ 古史打击：同阶反噬 / 越级反噬 / 路尽反震 / 成功改写 / 路尽目标只灭线
+    atk53 = PlayerDoc(uid="a53", name="攻", realm_index=45, ext={"hp": 9000})
+    ast53 = wl53.state_of(atk53)
+    same53 = PlayerDoc(uid="t53a", name="同阶", realm_index=45)
+    ok53, msg53, plan53 = wl53.strike(atk53, ast53, same53, wl53.state_of(same53),
+                                      "功法", "九转玄功", t53, 9000)
+    assert not ok53 and "古史反噬" in msg53 and ast53["debt"] == 45 and plan53 is None
+
+    ast53["debt"] = 0
+    high53 = PlayerDoc(uid="t53b", name="高阶", realm_index=47)
+    ok53, msg53, _p = wl53.strike(atk53, ast53, high53, wl53.state_of(high53),
+                                  "物品", "青锋剑", t53, 9000)
+    assert not ok53 and ast53["debt"] == 80
+    assert ast53["form_broken"], f"撞 47 档以上应形神俱灭：{msg53}"
+    assert atk53.ext["hp"] == 0
+
+    ast53["form_broken"] = ""
+    ast53["debt"] = 0
+    atk53.ext["hp"] = 9000
+    atk53.realm_index = 46
+    low53 = PlayerDoc(uid="t53c", name="低阶", realm_index=40, exp=999,
+                      ext={"gongfa": ["九转玄功", "青莲剑歌"]})
+    ok53, msg53, plan53 = wl53.strike(atk53, ast53, low53, wl53.state_of(low53),
+                                      "功法", "九转玄功", t53, 9000)
+    assert ok53 and "遗忘" in msg53
+    assert low53.ext["gongfa"] == ["青莲剑歌"]
+    assert ast53["debt"] == 50 and plan53 is None
+
+    low53b = PlayerDoc(uid="t53d", name="低阶二", realm_index=40)
+    ok53, _m, plan53 = wl53.strike(atk53, ast53, low53b, wl53.state_of(low53b),
+                                   "证道", "成帝", t53, 9000)
+    assert ok53 and low53b.realm_index == 39, "证道事实被击穿 → 境界跌落一档"
+    ok53, _m, plan53 = wl53.strike(atk53, ast53, low53b, wl53.state_of(low53b),
+                                   "物品", "青锋剑", t53, 9000)
+    assert ok53 and plan53 == {"erase_item": "青锋剑"}, "物品类要交给主程序做全服抹除"
+    # 目标 47 档 → 只能灭线，不改事实（攻击者须比它更高）
+    line_only = PlayerDoc(uid="t53e", name="路尽", realm_index=48, ext={"gongfa": ["九转玄功"]})
+    atk53b = PlayerDoc(uid="a53b", name="攻二", realm_index=50, ext={"hp": 9999})
+    ast53b = wl53.state_of(atk53b)
+    ok53, msg53, plan53 = wl53.strike(atk53b, ast53b, line_only, wl53.state_of(line_only),
+                                      "功法", "九转玄功", t53, 9999)
+    assert ok53 and plan53 is None and line_only.ext["gongfa"] == ["九转玄功"]
+    assert "路尽" in msg53
+    print("F2 strike ok")
+
+    # ⑦ 众生代偿：伤害 / 道伤 / 事件去重 / 挂起重试
+    rel53 = PlayerDoc(uid="r53", name="道侣", realm_index=10, ext={"hp": 1000})
+    rst53 = wl53.state_of(rel53)
+    r153 = wl53.compensate(rel53, 400, "ev1", "甲", t53, 1000)
+    assert not r153["dedup"] and r153["damage"] == 350 and r153["wound"] == 2, r153
+    assert rel53.ext["hp"] == 650
+    r253 = wl53.compensate(rel53, 400, "ev1", "甲", t53, 1000)
+    assert r253["dedup"] and rel53.ext["hp"] == 650, "同一事件不得二次受罚"
+    assert wl53.related_of(PlayerDoc(uid="x", ext={"daolv": "a", "shifu": "b",
+                                                   "tudi": ["c", "d"]}))[0] == ("道侣", "a")
+    wl53.push_pending(rst53, "ghost", "弟子", 400, "ev2", t53)
+    assert [r["uid"] for r in wl53.take_pending(rst53)] == ["ghost"]
+    assert rst53["pending"] == [] and "没有挂起" in wl53.compensation_text([])
+    assert "道侣" in wl53.compensation_text([{"name": "道侣", "damage": 5, "wound": 1}])
+    print("F2 compensation ok")
+
+    # ⑧ 形神重塑
+    broken53 = PlayerDoc(uid="b53", name="己", realm_index=30, ext={"hp": 0})
+    bst53 = wl53.state_of(broken53)
+    assert not wl53.rebuild_form(broken53, "医", t53, 1000)[0], "形神完好时拒绝"
+    bst53["form_broken"] = "触碰路尽级古史遭本体抹杀"
+    ok53, msg53 = wl53.rebuild_form(broken53, "医", t53, 1000)
+    assert ok53 and bst53["form_broken"] == "" and broken53.ext["hp"] == 200
+    assert "重塑" in msg53
+    print("F2 rebuild ok")
+
+    # ⑨ DB 往返 + main.py 接线
+    d53e = PlayerDoc(uid="u53e", name="庚", realm_index=46)
+    wl53.state_of(d53e)["debt"] = 321
+    await db.save_player(d53e.model_dump())
+    row53 = await db.get_player("u53e")
+    assert wl53.state_of(PlayerDoc(**row53))["debt"] == 321, "ext[\"worldline\"] 必须落盘"
+
+    src53 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    miss53 = [c for c in (
+        "CMD_WL", "CMD_WL_TAKE", "CMD_WL_TAKE_OK", "CMD_WL_TAKE_NO",
+        "CMD_WL_REDUCE", "CMD_WL_STRIKE", "CMD_WL_REBUILD", "CMD_WL_RETRY",
+    ) if f"@filter.command({c}" not in src53]
+    assert miss53 == [], f"漏注册：{miss53}"
+    assert 'alias={CMD_WL_ALIAS, CMD_WL_ALIAS2}' in src53
+    assert 'alias={CMD_WL_REDUCE_ALIAS}' in src53
+    assert "wl_mod.settle_withdraw" in src53 and "wl_mod.strike" in src53
+    assert "wl_mod.compensate" in src53 and "wl_mod.take_pending" in src53
+    assert 'if plan and plan.get("erase_item")' in src53
+    assert "_wl_compensate" in src53
+    print("W8-F2 worldline authority ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 
