@@ -161,6 +161,17 @@ class DataBase:
             await self.conn.commit()
         return True
 
+    @_serialized
+    async def purge_inventory_row(self, uid: str, item: str) -> bool:
+        """整行删除（用于清理数量非法/为负的脏条目，remove_item 会因 qty 校验拒绝）。"""
+        assert self.conn is not None
+        owned = not self.conn.in_transaction
+        cur = await self.conn.execute(
+            "DELETE FROM inventory WHERE uid = ? AND item = ?", (uid, item))
+        if owned:
+            await self.conn.commit()
+        return cur.rowcount > 0
+
     # ---- 玩家文档 ----
 
     async def get_player(self, uid: str) -> Optional[dict[str, Any]]:
@@ -916,6 +927,66 @@ class DataBase:
         assert self.conn is not None
         async with self.conn.execute("SELECT uid, doc FROM players") as cur:
             return [{"uid": r[0], **json.loads(r[1])} for r in await cur.fetchall()]
+
+    # ---- W8-F1 超管：删档 / 备份 / 诸天初始化 ----
+
+    @_serialized
+    async def delete_player(self, uid: str) -> bool:
+        """彻底删档：玩家文档 + 纳戒。返回是否真的删到了东西。"""
+        assert self.conn is not None
+        owned = not self.conn.in_transaction
+        cur = await self.conn.execute("DELETE FROM players WHERE uid = ?", (str(uid),))
+        await self.conn.execute("DELETE FROM inventory WHERE uid = ?", (str(uid),))
+        await self.conn.execute("DELETE FROM daily_tasks WHERE uid = ?", (str(uid),))
+        if owned:
+            await self.conn.commit()
+        return cur.rowcount > 0
+
+    async def all_auctions(self) -> list[dict[str, Any]]:
+        """全量拍卖挂单（超管清场用）。"""
+        assert self.conn is not None
+        async with self.conn.execute(
+            "SELECT id, seller_uid, seller_name, item, qty, price, listed_at"
+            " FROM auction ORDER BY id"
+        ) as cur:
+            return [{"id": r[0], "seller_uid": r[1], "seller_name": r[2],
+                     "item": r[3], "qty": r[4], "price": r[5], "listed_at": r[6]}
+                    for r in await cur.fetchall()]
+
+    @_serialized
+    async def wipe_all(self, tables: tuple[str, ...]) -> dict[str, int]:
+        """诸天初始化：清空给定表的全部行（db_info 不传即不动版本号）。"""
+        assert self.conn is not None
+        owned = not self.conn.in_transaction
+        counts: dict[str, int] = {}
+        for table in tables:
+            async with self.conn.execute(f"SELECT COUNT(*) FROM {table}") as cur:
+                counts[table] = int((await cur.fetchone())[0])
+            await self.conn.execute(f"DELETE FROM {table}")
+        if owned:
+            await self.conn.commit()
+        return counts
+
+    async def backup_to(self, path: Path) -> Path:
+        """一致性快照（VACUUM INTO）；同名文件已存在时自动加序号，不覆盖旧备份。
+
+        返回实际落盘路径（可能带 -1/-2 后缀），调用方据此回报文件名。
+        """
+        assert self.conn is not None
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            stem, suffix = path.stem, path.suffix
+            for i in range(1, 100):
+                cand = path.with_name(f"{stem}-{i}{suffix}")
+                if not cand.exists():
+                    path = cand
+                    break
+        async with self.wlock:
+            if self.conn.in_transaction:
+                await self.conn.rollback()
+            await self.conn.execute("VACUUM INTO ?", (str(path),))
+        return path
 
 
     # ---- 拍卖行（寄售制，物品托管） ----

@@ -67,12 +67,17 @@ def decay_amount(doc: PlayerDoc) -> int:
     return base
 
 
-def daily_decay(doc: PlayerDoc, now: float) -> tuple[int, bool]:
-    """签到时调用：自然日一次流逝。返回 (本次流逝, 是否触发轮回)。"""
+def daily_decay(doc: PlayerDoc, now: float, decay: bool = True) -> tuple[int, bool]:
+    """签到时调用：自然日一次流逝。返回 (本次流逝, 是否触发轮回)。
+
+    `decay=False`（W8-F1 诸天难度「简单」）只盖章当天日期、不扣寿元。
+    """
     day = day_key(now)
     if doc.ext.get("shouyuan_day") == day:
         return 0, False
     doc.ext["shouyuan_day"] = day
+    if not decay:
+        return 0, False
     cur = shouyuan_of(doc)
     left = max(0, cur - decay_amount(doc))
     doc.ext["shouyuan"] = left
@@ -122,9 +127,15 @@ def rescue(doc: PlayerDoc, now: float) -> tuple[bool, str]:
     return True, f"真灵归位！{doc.name or doc.uid} 自轮回路被拉回，寿元重续 {RESCUE_LIFESPAN} 年。"
 
 
-def resolve_if_due(doc: PlayerDoc, now: float) -> str | None:
-    """读时惰性结算：过期的救援窗口 → 转世。返回转世文案或 None。"""
+def resolve_if_due(doc: PlayerDoc, now: float, forced: bool = True) -> str | None:
+    """读时惰性结算：过期的救援窗口 → 转世。返回转世文案或 None。
+
+    `forced=False`（W8-F1 诸天难度「简单/普通」）不强制轮回，真灵会一直
+    停在救援窗口里，等道友救回。
+    """
     if not pending(doc):
+        return None
+    if not forced:
         return None
     try:
         deadline = float(doc.ext.get("rescue_deadline") or 0)

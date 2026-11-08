@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -350,6 +350,39 @@ CMD_SM_SUB_CHOOSE = "#剑与魔法 抉择"
 CMD_SM_SUB_RETREAT = "#剑与魔法 撤离"
 CMD_SM_SUB_ASCEND = "#剑与魔法 飞升"
 CMD_SM_SUB_ABANDON = "#剑与魔法 放弃"
+# ---- W8-F1 超级管理员（原版 AdminSuper 24 条 + GlobalInit 6 条 = 30 条 rule；
+#      「补登唯一机缘」属仙古遗迹不移植 → 可移植 29 条，其中开通道法仙术/重置每日任务已有）----
+CMD_AD_RELIEVE = "#解封"
+CMD_AD_REBIRTH = "#送入轮回"
+CMD_AD_RELIEVE_ALL = "#解除所有"
+CMD_AD_RELIEVE_FS = "#解除法身"
+CMD_AD_KNOCK = "#打落凡间"
+CMD_AD_CLEAR_EXCHANGE = "#清除冲水堂"
+CMD_AD_LOG = "#管理日志"
+CMD_AD_LOG_ALIAS = "#查看日志"
+CMD_AD_DISSOLVE = "#解散宗门"
+CMD_AD_WIPE_ITEM = "#纳戒抹除"
+CMD_AD_SWAP_ITEM = "#纳戒替换"
+CMD_AD_LEVEL = "#补发等级"
+CMD_AD_LEVEL_ALIAS = "#补发职业等级"
+CMD_AD_HELL = "#打入地狱"
+CMD_AD_DIVORCE = "#拆散道侣"
+CMD_AD_JAIL = "#打入天牢"
+CMD_AD_PUSH_ADD = "#全局推送消息"
+CMD_AD_PUSH_DEL = "#删除全局推送"
+CMD_AD_PUSH_VIEW = "#查看全局推送"
+CMD_AD_MASTER = "#设置修仙管理员"
+CMD_AD_NAJIE_FIX = "#全体纳戒修复字段"
+CMD_AD_INVITE = "#发拉新奖励"
+CMD_AD_WENXIAN = "#开启问仙令"
+CMD_AD_EPOCH = "#发放纪元积累"
+CMD_AD_INIT = "#诸天初始化"
+CMD_AD_INIT_OK = "#确认诸天初始化"
+CMD_AD_INIT_NO = "#取消诸天初始化"
+CMD_AD_NOTIFY = "#同步公告群"
+CMD_AD_NOTIFY_VIEW = "#查看公告群"
+CMD_AD_DIFFICULTY = "#选择难度"
+
 CMD_ENDLESS = "#无尽劫境"
 CMD_ENDLESS_START = "#开启无尽劫境"
 CMD_ENDLESS_MAP = "#劫途星图"
@@ -947,6 +980,11 @@ class ZhutianPlugin(Star):
         self.whitelist_groups = [
             str(g) for g in (config.get("ACCESS_CONTROL", {}).get("WHITELIST_GROUPS") or [])
         ]
+        # W8-F1：超管世界状态缓存（难度 / 修仙管理员 / 公告群 / 管理日志），
+        # 启动时从 calamity_state["admin"] 灌入；只有 #选择难度 一类的指令会改写它。
+        self._adm_state: dict = adm_mod.state_of({})
+        self._adm_difficulty: str = adm_mod.DEFAULT_DIFFICULTY
+        self._adm_flags: dict = adm_mod.DIFFICULTIES[self._adm_difficulty]
 
         # 物品索引：从指定类别表构建 名称→物品（同名以先出现者为准）
         self.item_index: dict[str, dict] = {}
@@ -1045,6 +1083,14 @@ class ZhutianPlugin(Star):
 
     async def initialize(self) -> None:
         await self.db.connect()
+        try:
+            self._adm_state = adm_mod.state_of(await self.db.get_calamity())
+            self._adm_difficulty = adm_mod.difficulty_of(self._adm_state)
+            self._adm_flags = adm_mod.flags_of(self._adm_state)
+            logger.info(f"[zhutian] 诸天难度 {self._adm_difficulty}｜"
+                        f"修仙管理员 {len(self._adm_state['masters'])} 人")
+        except Exception as exc:      # 世界状态读失败不能挡住插件启动
+            logger.warning(f"[zhutian] 超管世界状态载入失败：{exc}")
         self._reminder_task = asyncio.create_task(self._daily_reminder_loop())
         self._lingjie_task = asyncio.create_task(self._lingjie_loop())
         logger.info("[zhutian] M0 插件已加载。")
@@ -1110,8 +1156,19 @@ class ZhutianPlugin(Star):
         if not doc:
             return None, f"道友尚未踏入仙途，请发送「{CMD_START}」。"
         if doc.ext.get("banned"):
-            return None, "道友已被打入天牢，静候管理员赦免。"
-        resolved = lifespan.resolve_if_due(doc, now)   # W7-4：24h 救援窗口到期 → 转世
+            # W8-F1 天牢：限时封禁到期自动赦免（#封禁修仙 无 jail_until，仍是永久封禁）
+            try:
+                until = float(doc.ext.get("jail_until") or 0)
+            except (TypeError, ValueError):
+                until = 0.0
+            if until and until <= now:
+                doc.ext["banned"] = False
+                doc.ext.pop("jail_until", None)
+                await self.db.save_player(doc.model_dump())
+            else:
+                return None, "道友已被打入天牢，" + adm_mod.jail_left(doc, now)
+        resolved = lifespan.resolve_if_due(
+            doc, now, forced=bool(self._adm_flags.get("forced", True)))   # 难度「简单/普通」不强制轮回
         if resolved:
             await self.db.save_player(doc.model_dump())
             await self._drop_legacy_ring(doc, now)     # W8-A4：转世留下遗落纳戒
@@ -1985,6 +2042,29 @@ class ZhutianPlugin(Star):
                 ("#我的纳戒 / #纳戒", "E2 进行中被劫持为异界背包；其余情况仍是主线纳戒"),
                 ("⚠️ 与复活地球互斥", "原版「地脉点/地脉技能」是旧稿臆造；实际是古代晶片 + 4 熟练度；仙宠赠礼与图片面板未搬"),
             ]},
+            {"title": "超级管理员", "lines": [
+                (f"{CMD_AD_RELIEVE} @道友", "解除进行中的行动（原版语义是结算行动，不是解封封禁）"),
+                (f"{CMD_AD_RELIEVE_ALL} / {CMD_AD_RELIEVE_FS}", "全服结算所有行动 / 全服清空法身行动"),
+                (f"{CMD_AD_REBIRTH} @道友", "送入轮回（立即转世：境界归 1、灵石折半）"),
+                (f"{CMD_AD_KNOCK} @道友", "打落凡间（位面位置回凡间，不是境界打落）"),
+                (f"{CMD_AD_JAIL} @道友 分钟", "打入天牢（限时封禁，期满自动赦免）"),
+                (f"{CMD_AD_HELL} @道友 确认", "打入地狱 = 彻底删档，必须二次确认"),
+                (f"{CMD_AD_LEVEL} @道友 级", "补发副职业等级（原版 occupation_level，不是境界）"),
+                (f"{CMD_AD_DIVORCE} @道友", "拆散道侣（双向清 daolv）"),
+                (f"{CMD_AD_INVITE} 档位 @道友", "拉新奖励档 1-4（原版定灵仙符为幽灵物品，替换为锁灵仙符）"),
+                (f"{CMD_AD_EPOCH} 数量 @道友", "发放纪元积累（封顶写入）"),
+                (f"{CMD_AD_WENXIAN} @道友", "强制激活问仙令（补齐线索 + 探索步数）"),
+                (f"{CMD_AD_CLEAR_EXCHANGE}", "清除冲水堂：星阁挂单全部原物退还"),
+                (f"{CMD_AD_DISSOLVE} 宗门名", "解散宗门并清空成员宗门字段"),
+                (f"{CMD_AD_WIPE_ITEM} 物品名 / {CMD_AD_SWAP_ITEM} 旧名 新名", "全服纳戒抹除 / 全服替换物品"),
+                (f"{CMD_AD_NAJIE_FIX} 预览", "全服纳戒字段修复（删非法数量，未知物品仅报告）"),
+                (f"{CMD_AD_PUSH_ADD} 群号 / {CMD_AD_PUSH_DEL} 群号 / {CMD_AD_PUSH_VIEW} / {CMD_AD_NOTIFY}", "公告群名单维护（不是发消息）"),
+                (f"{CMD_AD_MASTER} @道友", "任免修仙管理员（仅机器人管理员可执）"),
+                (f"{CMD_AD_LOG}", "最近 60 条管理操作日志"),
+                (f"{CMD_AD_DIFFICULTY} 简单|普通|困难", "诸天往生难度：寿元是否流逝 / 耗尽是否强制轮回"),
+                (f"{CMD_AD_INIT} → {CMD_AD_INIT_OK} 确认码", "诸天初始化：60 秒二次确认 + 自动备份 + 清空全服数据"),
+                ("⚠️ 状态挂 calamity_state[\"admin\"]，db 仍 v17", "原版 30 条 rule 中「补登唯一机缘」属仙古遗迹，本移植不做仙古遗迹故不移植"),
+            ]},
         ]
 
     # 源版帮助目录（config/help/*.yaml 1:1 迁移至 data/help/*.json）
@@ -2067,7 +2147,8 @@ class ZhutianPlugin(Star):
         if card_tier:
             msg += f"\n【{card_tier}】签到灵石 +{daofa.card_bonus(doc, time.time())['sign']:.0%}"
         if ok:
-            lost, dead = lifespan.daily_decay(d, time.time())   # 寿元流逝（W2-2）
+            lost, dead = lifespan.daily_decay(
+                d, time.time(), decay=bool(self._adm_flags.get("decay", True)))   # 寿元流逝（W2-2 / F1 难度）
             if dead:
                 msg = lifespan.mark_death(d, time.time())        # W7-4：先进 24h 救援窗口
             elif lost:
@@ -5581,7 +5662,585 @@ class ZhutianPlugin(Star):
         await self.db.save_player(dt.model_dump())
         yield event.plain_result(f"{target.name} 已被赦免，重获自由。")
 
+    # ---- W8-F1 超级管理员（原版 AdminSuper 24 + GlobalInit 6，可移植 29 条） ----
+
+    def _adm_ok(self, event: AstrMessageEvent) -> bool:
+        """机器人管理员恒有权柄；修仙管理员名单由 `#设置修仙管理员` 追加。"""
+        return adm_mod.is_master(
+            str(event.get_sender_id()), bool(event.is_admin), self._adm_state)
+
+    async def _adm_save(self) -> None:
+        """落库世界状态，并同步内存缓存（难度开关是热路径，不能每条指令去读库）。"""
+        cal = await self.db.get_calamity()
+        cal["admin"] = self._adm_state
+        await self.db.save_calamity(cal)
+        self._adm_difficulty = adm_mod.difficulty_of(self._adm_state)
+        self._adm_flags = adm_mod.flags_of(self._adm_state)
+
+    async def _adm_note(self, event: AstrMessageEvent, text: str) -> None:
+        adm_mod.log_append(self._adm_state, str(event.get_sender_id()), text)
+        await self._adm_save()
+
+    def _adm_deny(self) -> str:
+        return "此权柄唯管理员可执。"
+
+    @staticmethod
+    def _adm_tail(event: AstrMessageEvent) -> str:
+        """取指令名之后的文本，并剔除 @ 标记。
+
+        QQ 官方 @ 群员发的是文本标记 `<qqbot-at-user id="openid"/>`，会占掉
+        `filter.command` 的一个参数位；带 @ 的指令若声明 int 参数会直接抛
+        类型错误，故一律用本方法自己从原文里取数字/关键词。
+        """
+        import re
+        text = str(event.message_str or "")
+        text = re.sub(r'<qqbot-at-user\s+id="[^"]*"\s*/?>', " ", text)
+        text = re.sub(r"<@!?\w+>", " ", text)
+        parts = text.split(None, 1)
+        return (parts[1] if len(parts) > 1 else "").strip()
+
+    @classmethod
+    def _adm_num(cls, event: AstrMessageEvent, default: int = 0) -> int:
+        import re
+        m = re.search(r"-?\d+", cls._adm_tail(event))
+        return int(m.group()) if m else default
+
+    @filter.command(CMD_AD_RELIEVE, "解除进行中的行动（原版语义，非解封封禁）")
+    async def handle_ad_relieve(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result(self._adm_deny())
+            return
+        target, terr = await self._target_doc(event)
+        if terr:
+            yield event.plain_result(terr)
+            return
+        ok, msg = adm_mod.relieve_action(target, time.time())
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self.db.save_player(target.model_dump())
+        await self._adm_note(event, f"解封 {target.name}（{msg}）")
+        yield event.plain_result(f"{target.name}：{msg}")
+
+    @filter.command(CMD_AD_REBIRTH, "送入轮回（立即转世）")
+    async def handle_ad_rebirth(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result(self._adm_deny())
+            return
+        target, terr = await self._target_doc(event)
+        if terr:
+            yield event.plain_result(terr)
+            return
+        msg = adm_mod.send_rebirth(target)
+        await self.db.save_player(target.model_dump())
+        await self._adm_note(event, f"送入轮回 {target.name}")
+        yield event.plain_result(f"{target.name} 被天道伟力打入轮回路。\n{msg}")
+
+    @filter.command(CMD_AD_RELIEVE_ALL, "全服解除进行中的行动")
+    async def handle_ad_relieve_all(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result(self._adm_deny())
+            return
+        rows = await self.db.all_players()
+        hit = 0
+        async with self.db.transaction():
+            for raw in rows:
+                doc = PlayerDoc(**raw)
+                ok, _msg = adm_mod.relieve_action(doc, time.time())
+                if ok:
+                    hit += 1
+                    await self.db.save_player(doc.model_dump())
+        await self._adm_note(event, f"全服解除行动（{hit} 人）")
+        yield event.plain_result(f"全服行动解除完成：{hit}/{len(rows)} 人有进行中的行动。")
+
+    @filter.command(CMD_AD_RELIEVE_FS, "全服解除法身行动")
+    async def handle_ad_relieve_fs(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result(self._adm_deny())
+            return
+        rows = await self.db.all_players()
+        hit = 0
+        async with self.db.transaction():
+            for raw in rows:
+                doc = PlayerDoc(**raw)
+                if adm_mod.relieve_fashan(doc):
+                    hit += 1
+                    await self.db.save_player(doc.model_dump())
+        await self._adm_note(event, f"全服解除法身行动（{hit} 人）")
+        yield event.plain_result(f"法身行动解除完成：{hit} 人的法身恢复空闲。")
+
+    @filter.command(CMD_AD_KNOCK, "打落凡间（位面位置重置回凡间）")
+    async def handle_ad_knock(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result(self._adm_deny())
+            return
+        target, terr = await self._target_doc(event)
+        if terr:
+            yield event.plain_result(terr)
+            return
+        _ok, msg = adm_mod.knock_to_mortal(target)
+        await self.db.save_player(target.model_dump())
+        await self._adm_note(event, f"打落凡间 {target.name}")
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_AD_CLEAR_EXCHANGE, "清除冲水堂（拍卖挂单原物退还）")
+    async def handle_ad_clear_exchange(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result(self._adm_deny())
+            return
+        lots = await self.db.all_auctions()
+        if not lots:
+            yield event.plain_result("拍卖行本就没有挂单。")
+            return
+        async with self.db.transaction():
+            for lot in lots:
+                await self.db.add_items(str(lot["seller_uid"]), {str(lot["item"]): int(lot["qty"])})
+                await self.db.delete_auction(int(lot["id"]))
+        await self._adm_note(event, f"清除冲水堂（退还 {len(lots)} 单）")
+        yield event.plain_result(f"已撤回并原物退还 {len(lots)} 张挂单。")
+
+    @filter.command(CMD_AD_LOG, "管理日志", alias={CMD_AD_LOG_ALIAS})
+    async def handle_ad_log(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result(self._adm_deny())
+            return
+        async for r in self._smart(event, adm_mod.log_text(self._adm_state)):
+            yield r
+
+    @filter.command(CMD_AD_DISSOLVE, "解散宗门")
+    async def handle_ad_dissolve(self, event: AstrMessageEvent, sect_name: str = ""):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result(self._adm_deny())
+            return
+        sect_name = (sect_name or "").strip()
+        if not sect_name:
+            yield event.plain_result("格式：「#解散宗门 宗门名」。")
+            return
+        sect = await self.db.get_sect(sect_name)
+        if not sect:
+            yield event.plain_result(f"宗门【{sect_name}】不存在。")
+            return
+        rows = await self.db.all_players()
+        cleared = 0
+        async with self.db.transaction():
+            for raw in rows:
+                if str((raw.get("ext") or {}).get("sect") or "") != sect_name:
+                    continue
+                doc = PlayerDoc(**raw)
+                doc.ext.pop("sect", None)
+                doc.ext.pop("sect_post", None)
+                await self.db.save_player(doc.model_dump())
+                cleared += 1
+            await self.db.delete_sect(sect_name)
+        await self._adm_note(event, f"解散宗门 {sect_name}（遣散 {cleared} 人）")
+        yield event.plain_result(f"宗门【{sect_name}】已解散，遣散弟子 {cleared} 人。")
+
+    @filter.command(CMD_AD_WIPE_ITEM, "全服抹除某物品")
+    async def handle_ad_wipe_item(self, event: AstrMessageEvent, item_name: str = ""):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result(self._adm_deny())
+            return
+        item_name = (item_name or "").strip()
+        if not item_name:
+            yield event.plain_result("格式：「#纳戒抹除 物品名」。")
+            return
+        uids = await self.db.all_player_uids()
+        holders, total = 0, 0
+        async with self.db.transaction():
+            for uid in uids:
+                inv = await self.db.get_inventory(uid)
+                qty = adm_mod.wipe_item(inv, item_name)
+                if qty <= 0:
+                    continue
+                holders += 1
+                total += qty
+                await self.db.remove_item(uid, item_name, qty)
+        await self._adm_note(event, f"抹除 {item_name}×{total}（{holders} 人）")
+        yield event.plain_result(f"已从 {holders} 人纳戒抹除【{item_name}】共 {total} 件。")
+
+    @filter.command(CMD_AD_SWAP_ITEM, "全服替换某物品")
+    async def handle_ad_swap_item(self, event: AstrMessageEvent,
+                                  old_name: str = "", new_name: str = ""):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result(self._adm_deny())
+            return
+        old_name, new_name = (old_name or "").strip(), (new_name or "").strip()
+        if not old_name or not new_name:
+            yield event.plain_result("格式：「#纳戒替换 旧名 新名」。")
+            return
+        uids = await self.db.all_player_uids()
+        holders, total = 0, 0
+        async with self.db.transaction():
+            for uid in uids:
+                inv = await self.db.get_inventory(uid)
+                qty = adm_mod.swap_item(inv, old_name, new_name)
+                if qty <= 0:
+                    continue
+                holders += 1
+                total += qty
+                await self.db.remove_item(uid, old_name, qty)
+                await self.db.add_items(uid, {new_name: qty})
+        await self._adm_note(event, f"替换 {old_name}→{new_name}×{total}")
+        yield event.plain_result(
+            f"已把 {holders} 人纳戒里的【{old_name}】共 {total} 件换为【{new_name}】。")
+
+    @filter.command(CMD_AD_LEVEL, "补发副职业等级", alias={CMD_AD_LEVEL_ALIAS})
+    async def handle_ad_level(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result(self._adm_deny())
+            return
+        target, terr = await self._target_doc(event)
+        if terr:
+            yield event.plain_result(terr)
+            return
+        ok, msg = adm_mod.grant_occupation_level(target, self._adm_num(event))
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self.db.save_player(target.model_dump())
+        await self._adm_note(event, msg)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_AD_HELL, "打入地狱（彻底删档，需二次确认）")
+    async def handle_ad_hell(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result(self._adm_deny())
+            return
+        target, terr = await self._target_doc(event)
+        if terr:
+            yield event.plain_result(terr)
+            return
+        if (self._adm_tail(event) or "").strip() != "确认":
+            yield event.plain_result(
+                f"此令将彻底抹去 {target.name} 的全部档案（不可恢复）。\n"
+                f"确认请发送「{CMD_AD_HELL} @{target.name} 确认」。")
+            return
+        rows = await self.db.all_players()
+        async with self.db.transaction():
+            for raw in rows:
+                if str((raw.get("ext") or {}).get("daolv") or "") != target.uid:
+                    continue
+                doc = PlayerDoc(**raw)
+                doc.ext.pop("daolv", None)
+                await self.db.save_player(doc.model_dump())
+            await self.db.delete_player(target.uid)
+        await self._adm_note(event, f"打入地狱 {target.name}（{target.uid}）")
+        yield event.plain_result(f"{target.name} 的档案已彻底抹除，前尘尽散。")
+
+    @filter.command(CMD_AD_DIVORCE, "拆散道侣")
+    async def handle_ad_divorce(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result(self._adm_deny())
+            return
+        target, terr = await self._target_doc(event)
+        if terr:
+            yield event.plain_result(terr)
+            return
+        ok, partner = adm_mod.divorce(target)
+        if not ok:
+            yield event.plain_result(partner)
+            return
+        raw = await self.db.get_player(partner)
+        async with self.db.transaction():
+            await self.db.save_player(target.model_dump())
+            if raw:
+                other = PlayerDoc(**raw)
+                other.ext.pop("daolv", None)
+                await self.db.save_player(other.model_dump())
+        await self._adm_note(event, f"拆散道侣 {target.name}／{partner}")
+        yield event.plain_result(f"已拆散 {target.name} 与其道侣的姻缘。")
+
+    @filter.command(CMD_AD_JAIL, "打入天牢（限时封禁）")
+    async def handle_ad_jail(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result(self._adm_deny())
+            return
+        target, terr = await self._target_doc(event)
+        if terr:
+            yield event.plain_result(terr)
+            return
+        _ok, msg = adm_mod.jail(target, self._adm_num(event), time.time())
+        await self.db.save_player(target.model_dump())
+        await self._adm_note(event, msg)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_AD_PUSH_ADD, "把群加入公告名单")
+    async def handle_ad_push_add(self, event: AstrMessageEvent, group_id: str = ""):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result(self._adm_deny())
+            return
+        ok, msg = adm_mod.notify_add(self._adm_state, group_id)
+        if ok:
+            await self._adm_note(event, msg)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_AD_PUSH_DEL, "从公告名单移除群")
+    async def handle_ad_push_del(self, event: AstrMessageEvent, group_id: str = ""):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result(self._adm_deny())
+            return
+        ok, msg = adm_mod.notify_del(self._adm_state, group_id)
+        if ok:
+            await self._adm_note(event, msg)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_AD_PUSH_VIEW, "查看公告名单")
+    async def handle_ad_push_view(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result(self._adm_deny())
+            return
+        yield event.plain_result(adm_mod.notify_text(self._adm_state))
+
+    @filter.command(CMD_AD_MASTER, "设置/收回修仙管理员")
+    async def handle_ad_master(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not event.is_admin:
+            yield event.plain_result("只有机器人管理员能任免修仙管理员。")
+            return
+        target_uid = self._at_target(event)
+        if not target_uid:
+            yield event.plain_result(adm_mod.master_text(self._adm_state)
+                                     + f"\n格式：「{CMD_AD_MASTER} @道友」。")
+            return
+        if target_uid in adm_mod.normalize(self._adm_state)["masters"]:
+            ok, msg = adm_mod.master_del(self._adm_state, target_uid)
+        else:
+            ok, msg = adm_mod.master_add(self._adm_state, target_uid)
+        await self._adm_note(event, msg)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_AD_NAJIE_FIX, "全服纳戒字段修复")
+    async def handle_ad_najie_fix(self, event: AstrMessageEvent, mode: str = ""):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result(self._adm_deny())
+            return
+        preview = (mode or "").strip() in ("预览", "检测", "dry", "查询", "查看")
+        uids = await self.db.all_player_uids()
+        fixed_players, fixed_items = 0, 0
+        unknown: dict[str, int] = {}
+        async with self.db.transaction():
+            for uid in uids:
+                inv = await self.db.get_inventory(uid)
+                info = adm_mod.scan_inventory(inv, self.item_index.keys())
+                for name in info["unknown"]:
+                    unknown[name] = unknown.get(name, 0) + 1
+                bad = list(info["bad_qty"])
+                if not bad:
+                    continue
+                fixed_players += 1
+                fixed_items += len(bad)
+                if preview:
+                    continue
+                for name in bad:
+                    await self.db.purge_inventory_row(uid, name)
+        lines = [f"--- 纳戒字段修复 · {'预览' if preview else '已执行'} ---",
+                 f"扫描修士：{len(uids)} 人",
+                 f"{'待修复' if preview else '已修复'}：{fixed_players} 人 / {fixed_items} 条非法数量"]
+        if preview:
+            lines.append(f"确认无误后发送「{CMD_AD_NAJIE_FIX}」正式执行。")
+        if unknown:
+            top = sorted(unknown.items(), key=lambda kv: -kv[1])[:8]
+            lines.append("未知物品（不在物品表，仅报告不删）：")
+            lines += [f"· {n}（{c} 人）" for n, c in top]
+        await self._adm_note(event, f"纳戒修复 {'预览' if preview else f'{fixed_items} 条'}")
+        async for r in self._smart(event, "\n".join(lines)):
+            yield r
+
+    @filter.command(CMD_AD_INVITE, "发放拉新奖励（档 1-4）")
+    async def handle_ad_invite(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result(self._adm_deny())
+            return
+        target, terr = await self._target_doc(event)
+        if terr:
+            yield event.plain_result(terr)
+            return
+        tier = self._adm_num(event)
+        ok, items, _bonus = adm_mod.invite_pack(tier)
+        if not ok:
+            yield event.plain_result("格式：「#发拉新奖励 档位 @玩家」，档位 1-4。")
+            return
+        dt = target.model_copy(deep=True)
+        dt.stones += adm_mod.INVITE_BASE_STONES
+        async with self.db.transaction():
+            await self.db.save_player(dt.model_dump())
+            await self.db.add_items(dt.uid, items)
+        await self._adm_note(event, f"拉新奖励 档{tier} → {dt.name}")
+        yield event.plain_result(adm_mod.invite_text(tier, dt.name))
+
+    @filter.command(CMD_AD_WENXIAN, "强制开启问仙令")
+    async def handle_ad_wenxian(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result(self._adm_deny())
+            return
+        target, terr = await self._target_doc(event)
+        if terr:
+            yield event.plain_result(terr)
+            return
+        w = wenxian.system_of(target)
+        if w.get("active"):
+            yield event.plain_result(f"{target.name} 的问仙令已经激活，无需重复开启。")
+            return
+        w["clue"] = True
+        w["step"] = int(wenxian.CLUE_STEPS)
+        ok, msg, w2 = wenxian.activate(w, int(target.realm_index))
+        if not ok:
+            yield event.plain_result(f"开启失败：{msg}")
+            return
+        target.ext["wenxian"] = w2
+        await self.db.save_player(target.model_dump())
+        await self._adm_note(event, f"开启问仙令 {target.name}")
+        yield event.plain_result(f"【问仙令·管理员强制开启】\n{msg}")
+
+    @filter.command(CMD_AD_EPOCH, "发放纪元积累")
+    async def handle_ad_epoch(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result(self._adm_deny())
+            return
+        target, terr = await self._target_doc(event)
+        if terr:
+            yield event.plain_result(terr)
+            return
+        ok, msg = adm_mod.epoch_grant(target, self._adm_num(event))
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        await self.db.save_player(target.model_dump())
+        await self._adm_note(event, msg)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_AD_INIT, "诸天初始化（灭维，需二次确认）")
+    async def handle_ad_init(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not event.is_admin:
+            yield event.plain_result("灭维之战只有机器人管理员能发起。")
+            return
+        code = adm_mod.make_code()
+        msg = adm_mod.init_request(self._adm_state, str(event.get_sender_id()), code)
+        await self._adm_save()
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_AD_INIT_OK, "确认诸天初始化")
+    async def handle_ad_init_ok(self, event: AstrMessageEvent, code: str = ""):
+        if not self._allowed(event):
+            return
+        if not event.is_admin:
+            yield event.plain_result("灭维之战只有机器人管理员能执行。")
+            return
+        ok, msg = adm_mod.init_verify(
+            self._adm_state, str(event.get_sender_id()), code, time.time())
+        await self._adm_save()
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        backup = ""
+        try:
+            stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime(time.time() + 8 * 3600))
+            path = self.db.db_path.parent / "_backups" / f"zhutian_{stamp}.db"
+            backup = (await self.db.backup_to(path)).name
+        except Exception as exc:      # 备份失败不允许继续灭维
+            logger.error(f"[zhutian] 诸天初始化备份失败：{exc}")
+            yield event.plain_result(f"备份失败（{exc}），灭维已中止。")
+            return
+        counts = await self.db.wipe_all(adm_mod.INIT_TABLES)
+        adm_mod.log_append(self._adm_state, str(event.get_sender_id()), "诸天初始化")
+        cal = await self.db.get_calamity()
+        cal["admin"] = self._adm_state
+        await self.db.save_calamity(cal)
+        self._adm_difficulty = adm_mod.difficulty_of(self._adm_state)
+        self._adm_flags = adm_mod.flags_of(self._adm_state)
+        yield event.plain_result(adm_mod.init_result_text(counts, backup))
+
+    @filter.command(CMD_AD_INIT_NO, "取消诸天初始化")
+    async def handle_ad_init_no(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not event.is_admin:
+            yield event.plain_result("灭维之战只有机器人管理员能取消。")
+            return
+        ok, msg = adm_mod.init_cancel(self._adm_state)
+        if ok:
+            await self._adm_save()
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_AD_NOTIFY, "把当前群设为唯一公告群", alias={CMD_AD_NOTIFY_VIEW})
+    async def handle_ad_notify(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result(self._adm_deny())
+            return
+        cmd = (event.message_str or "").strip().split(" ")[0]
+        if cmd == CMD_AD_NOTIFY_VIEW:
+            yield event.plain_result(adm_mod.notify_text(self._adm_state))
+            return
+        ok, msg = adm_mod.notify_set(self._adm_state, event.get_group_id() or "")
+        if ok:
+            await self._adm_note(event, msg)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_AD_DIFFICULTY, "查看/设置诸天往生难度")
+    async def handle_ad_difficulty(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result(self._adm_deny())
+            return
+        name = (name or "").strip()
+        if not name:
+            yield event.plain_result(adm_mod.difficulty_text(self._adm_state))
+            return
+        ok, msg = adm_mod.set_difficulty(self._adm_state, name)
+        if ok:
+            await self._adm_note(event, f"诸天难度 → {name}")
+        yield event.plain_result(msg)
+
     # ---- 师徒试炼 / 商店 / 神兵重铸 / 双修 ----
+
 
     SHITU_SHOP = {
         "定情信物": 200, "神石": 300, "世界石": 500, "秘境之匙": 100,

@@ -6838,6 +6838,162 @@ async def main():
     assert "sm_mod.active(sm_mod.state_of(doc))" in src51
     print("W8-E2 sword magic ok")
 
+    # ---------------- 52. W8-F1 超级管理员 ----------------
+    import sqlite3 as _sqlite52
+    from core import admin as adm52
+    from core import lifespan as life52
+
+    t52 = 1_800_000_000.0
+
+    # ① 世界状态：难度 / 修仙管理员 / 公告群 / 管理日志
+    cal52: dict = {}
+    st52 = adm52.state_of(cal52)
+    assert st52["difficulty"] == "困难" and st52["masters"] == [] and st52["init"] is None
+    assert adm52.flags_of(st52) == {"decay": True, "forced": True}
+    assert adm52.is_master("u1", True, st52) and not adm52.is_master("u1", False, st52)
+    assert "已授予" in adm52.master_add(st52, "u1")[1] and adm52.is_master("u1", False, st52)
+    assert "已是" in adm52.master_add(st52, "u1")[1]
+    assert "已收回" in adm52.master_del(st52, "u1")[1] and not adm52.is_master("u1", False, st52)
+    assert "本就不是" in adm52.master_del(st52, "u1")[1]
+    assert "只有机器人管理员" in adm52.master_text({})
+
+    ok52, msg52 = adm52.set_difficulty(st52, "简单")
+    assert ok52 and adm52.flags_of(st52) == {"decay": False, "forced": False}
+    assert not adm52.set_difficulty(st52, "地狱")[0]
+    assert "困难：寿元随时间流逝" in adm52.difficulty_text(st52)
+
+    assert "已在公告名单" not in adm52.notify_add(st52, "123")[1]
+    assert "已在公告名单" in adm52.notify_add(st52, "123")[1]
+    assert "不在公告名单" in adm52.notify_del(st52, "999")[1]
+    assert "已从公告名单移除" in adm52.notify_del(st52, "123")[1]
+    assert "设为唯一公告群" in adm52.notify_set(st52, "456")[1]
+    assert "456" in adm52.notify_text(st52)
+    assert not adm52.notify_add(st52, "abc")[0], "群号必须纯数字"
+
+    for i in range(adm52.LOG_CAP + 7):
+        adm52.log_append(st52, "u1", f"事件{i}", t52 + i)
+    assert len(st52["log"]) == adm52.LOG_CAP, "日志环形缓冲要截断"
+    assert "事件" in adm52.log_text(st52) and "管理日志" in adm52.log_text({})
+    print("F1 world state ok")
+
+    # ② 玩家处置：解封行动 / 天牢 / 补发等级 / 拆道侣 / 打落凡间 / 解除法身
+    d52 = PlayerDoc(uid="f1a", name="甲", state="闭关中", state_start=t52,
+                    ext={"secret": {"end_at": t52 + 600}, "occupation": "炼丹师",
+                         "occupation_level": 3, "daolv": "f1b"})
+    assert adm52.relieve_action(d52, t52)[0]
+    assert d52.state == "空闲" and d52.state_start == 0.0
+    assert d52.ext["secret"]["end_at"] <= t52
+    assert not adm52.relieve_action(d52, t52)[0], "无行动时应如实拒绝"
+
+    _ok52, msg52 = adm52.jail(d52, 0, t52)
+    assert d52.ext["banned"] is True and d52.ext["jail_until"] == t52 + 24 * 3600
+    assert "24.0 小时" in msg52 and "剩余约" in adm52.jail_left(d52, t52 + 60)
+    assert not adm52.grant_occupation_level(PlayerDoc(uid="f1c", name="乙"), 3)[0]
+    assert adm52.grant_occupation_level(d52, 2)[0] and d52.ext["occupation_level"] == 5
+    ok52, partner52 = adm52.divorce(d52)
+    assert ok52 and partner52 == "f1b" and "daolv" not in d52.ext
+    assert not adm52.divorce(d52)[0]
+
+    plane52 = adm52.plane.state_of(d52)
+    plane52["current"], plane52["travel"] = "仙界", {"to": "神界"}
+    assert "打落凡间" in adm52.knock_to_mortal(d52)[1]
+    assert plane52["current"] == "凡间" and plane52["travel"] is None
+
+    fs52 = adm52.fashan.state_of(d52)
+    assert not adm52.relieve_fashan(d52), "未行动的的法身不该被改"
+    fs52["action"], fs52["state"] = {"kind": "探索"}, "行动中"
+    assert adm52.relieve_fashan(d52) and fs52["action"] is None and fs52["state"] == "空闲"
+    print("F1 player ops ok")
+
+    # ③ 纳戒：体检 / 修复 / 抹除 / 替换
+    inv52 = {"丹药": 3, "负数量": -2, "零": 0, "怪东西": 1}
+    info52 = adm52.scan_inventory(inv52, known={"丹药"})
+    assert set(info52["bad_qty"]) == {"负数量", "零"} and info52["unknown"] == ["怪东西"]
+    n52, _s52 = adm52.repair_inventory(inv52)
+    assert n52 == 2 and "负数量" not in inv52 and "怪东西" in inv52, "未知物品只报告不删"
+    assert adm52.wipe_item(inv52, "丹药") == 3 and "丹药" not in inv52
+    inv52["旧名"] = 7
+    assert adm52.swap_item(inv52, "旧名", "新名") == 7
+    assert "旧名" not in inv52 and inv52["新名"] == 7
+
+    # ④ 拉新奖励：基础包 + 三档附加（原版档 4 空、档 1 幽灵物品已替换）
+    ok52, items52, _b52 = adm52.invite_pack(1)
+    assert ok52 and items52["超越宝盒"] == 5 and items52["锁灵仙符"] == 1
+    assert items52["位面传送阵"] == 3 and items52["轮回命签"] == 50
+    assert adm52.invite_pack(3)[1]["超越宝盒"] == 15, "档 3 叠加后共 15"
+    assert adm52.invite_pack(4)[0] and set(adm52.invite_pack(4)[1]) == set(adm52.INVITE_BASE_ITEMS)
+    assert not adm52.invite_pack(5)[0]
+    assert "灵石 ×100,000,000" in adm52.invite_text(2, "甲")
+
+    # ⑤ 诸天初始化：二次确认 / 超时 / 码错 / 取消
+    st52["init"] = None
+    adm52.init_request(st52, "u1", "1234", t52)
+    assert not adm52.init_verify(st52, "u2", "1234", t52 + 1)[0], "非发起者不能确认"
+    assert not adm52.init_verify(st52, "u1", "9999", t52 + 1)[0], "确认码错不得执行"
+    assert adm52.init_verify(st52, "u1", "1234", t52 + 1)[0]
+    assert st52["init"] is None
+    adm52.init_request(st52, "u1", "1234", t52)
+    assert "超时" in adm52.init_verify(st52, "u1", "1234", t52 + 61)[1]
+    adm52.init_request(st52, "u1", "1234", t52)
+    assert "已取消" in adm52.init_cancel(st52)[1] and st52["init"] is None
+    assert "没有待确认" in adm52.init_cancel(st52)[1]
+    assert "players" in adm52.INIT_TABLES and "db_info" not in adm52.INIT_TABLES
+    assert len(adm52.make_code(1234)) == adm52.INIT_CODE_LEN
+
+    # ⑥ DB：删档 / 备份 / 清表
+    await db.save_player(PlayerDoc(uid="f1d", name="丁").model_dump())
+    await db.add_items("f1d", {"丹药": 2})
+    assert await db.delete_player("f1d") is True
+    assert await db.get_player("f1d") is None and await db.get_inventory("f1d") == {}
+
+    bak52 = tmp / "_backups" / "w8f1.db"
+    await db.backup_to(bak52)
+    assert bak52.exists() and bak52.stat().st_size > 0
+    con52 = _sqlite52.connect(bak52)
+    try:
+        assert con52.execute("SELECT version FROM db_info").fetchone()[0] == 17
+    finally:
+        con52.close()
+    await db.backup_to(bak52)      # 同名不覆盖，自动加序号
+    assert (tmp / "_backups" / "w8f1-1.db").exists()
+    counts52 = await db.wipe_all(adm52.INIT_TABLES)
+    assert set(counts52) == set(adm52.INIT_TABLES) and counts52["players"] >= 1
+    assert (await db.all_player_uids()) == [], "灭维后应无任何存档"
+    print("F1 db ops ok")
+
+    # ⑦ 寿元难度开关（简单不流逝 / 普通不强制轮回）
+    d52b = PlayerDoc(uid="f1e", name="戊", realm_index=3)
+    life52.shouyuan_of(d52b)
+    before52 = int(d52b.ext["shouyuan"])
+    assert life52.daily_decay(d52b, t52, decay=False) == (0, False)
+    assert int(d52b.ext["shouyuan"]) == before52, "简单难度不得扣寿元"
+    d52b.ext["awaiting_rescue"] = True
+    d52b.ext["shouyuan"] = 0
+    d52b.ext["rescue_deadline"] = t52 - 10
+    assert life52.resolve_if_due(d52b, t52, forced=False) is None, "普通难度不得强制轮回"
+    assert "轮回往生" in (life52.resolve_if_due(d52b, t52) or ""), "困难难度照旧转世"
+
+    # ⑧ main.py 接线（静态校验）
+    src52 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    regs52 = [c for c in (
+        "CMD_AD_RELIEVE", "CMD_AD_REBIRTH", "CMD_AD_RELIEVE_ALL", "CMD_AD_RELIEVE_FS",
+        "CMD_AD_KNOCK", "CMD_AD_CLEAR_EXCHANGE", "CMD_AD_LOG", "CMD_AD_DISSOLVE",
+        "CMD_AD_WIPE_ITEM", "CMD_AD_SWAP_ITEM", "CMD_AD_LEVEL", "CMD_AD_HELL",
+        "CMD_AD_DIVORCE", "CMD_AD_JAIL", "CMD_AD_PUSH_ADD", "CMD_AD_PUSH_DEL",
+        "CMD_AD_PUSH_VIEW", "CMD_AD_MASTER", "CMD_AD_NAJIE_FIX", "CMD_AD_INVITE",
+        "CMD_AD_WENXIAN", "CMD_AD_EPOCH", "CMD_AD_INIT", "CMD_AD_INIT_OK",
+        "CMD_AD_INIT_NO", "CMD_AD_NOTIFY", "CMD_AD_DIFFICULTY",
+    ) if f"@filter.command({c}" not in src52]
+    assert regs52 == [], f"漏注册：{regs52}"
+    assert 'alias={CMD_AD_LOG_ALIAS}' in src52 and 'alias={CMD_AD_LEVEL_ALIAS}' in src52
+    assert 'alias={CMD_AD_NOTIFY_VIEW}' in src52
+    assert "adm_mod.jail_left(doc, now)" in src52, "天牢到期要自动赦免"
+    assert 'forced=bool(self._adm_flags.get("forced", True))' in src52
+    assert 'decay=bool(self._adm_flags.get("decay", True))' in src52
+    assert "await self.db.backup_to(path)" in src52 and "adm_mod.init_result_text" in src52
+    assert "cmd_extras" not in src52
+    print("W8-F1 super admin ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 
