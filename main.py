@@ -1981,6 +1981,8 @@ class ZhutianPlugin(Star):
                 (f"{CMD_SM_SUB_MAP} / {CMD_SM_SUB_EXPLORE} 地区 / {CMD_SM_SUB_CHOOSE} 选项 / {CMD_SM_SUB_RETREAT}", "六地区真实时间计时冒险，探索→抉择分段结算，可 3 分钟撤回"),
                 (f"{CMD_SM_SUB_BAG} / {CMD_SM_SUB_LORE_VIEW} / {CMD_SM_SUB_REVIEW} / {CMD_SM_SUB_STATUS} / {CMD_SM_SUB_SETTLE}", "只读面板与履历；结算 = 手动推进到期行动（无 cron）"),
                 (f"{CMD_SM_SUB_ASCEND} 确认", "六地区 + 终局 + 武装 + Lv8 → 39 境（只升不降）、灵石 ×100、命格 +2、信物入纳戒"),
+                ("#我 / #我的练气 / #背包", "原版通用别名：平行开局进行中自动路由到本局状态 / 异界背包，否则回主线状态 / 纳戒"),
+                ("#我的纳戒 / #纳戒", "E2 进行中被劫持为异界背包；其余情况仍是主线纳戒"),
                 ("⚠️ 与复活地球互斥", "原版「地脉点/地脉技能」是旧稿臆造；实际是古代晶片 + 4 熟练度；仙宠赠礼与图片面板未搬"),
             ]},
         ]
@@ -2309,6 +2311,11 @@ class ZhutianPlugin(Star):
         doc, err = await self._require_player(event)
         if err:
             yield event.plain_result(err)
+            return
+        # 原版 SwordMagic 的 #我的纳戒 / #纳戒 在异界 active 时劫持为异界背包
+        if sm_mod.active(sm_mod.state_of(doc)):
+            async for r in self._sm_dispatch(event, "背包", doc):
+                yield r
             return
         data = await self._bag_data(doc)
         if not data["rows"]:
@@ -18788,13 +18795,16 @@ class ZhutianPlugin(Star):
                 return raw[len(prefix):].strip()
         return ""
 
-    async def _rv_dispatch(self, event: AstrMessageEvent, rest: str):
-        if not self._allowed(event):
-            return
-        doc, err = await self._require_player(event)
-        if err:
-            yield event.plain_result(err)
-            return
+    async def _rv_dispatch(self, event: AstrMessageEvent, rest: str,
+                           doc: PlayerDoc | None = None):
+        # doc 由别名路由传入时不再重复 _require_player（0.5s 节流会误拦）
+        if doc is None:
+            if not self._allowed(event):
+                return
+            doc, err = await self._require_player(event)
+            if err:
+                yield event.plain_result(err)
+                return
         ts = time.time()
         rng = random.Random(f"{doc.uid}:rv:{time.time_ns()}")
         msg, changed = rv_mod.dispatch(doc, rest, ts, rng)
@@ -18830,13 +18840,16 @@ class ZhutianPlugin(Star):
         rows = self.content.table("item/命格词条") or []
         return [dict(x) for x in rows if isinstance(x, dict) and x.get("id") in want]
 
-    async def _sm_dispatch(self, event: AstrMessageEvent, rest: str):
-        if not self._allowed(event):
-            return
-        doc, err = await self._require_player(event)
-        if err:
-            yield event.plain_result(err)
-            return
+    async def _sm_dispatch(self, event: AstrMessageEvent, rest: str,
+                           doc: PlayerDoc | None = None):
+        # doc 由别名路由传入时不再重复 _require_player（0.5s 节流会误拦）
+        if doc is None:
+            if not self._allowed(event):
+                return
+            doc, err = await self._require_player(event)
+            if err:
+                yield event.plain_result(err)
+                return
         ts = time.time()
         rng = random.Random(f"{doc.uid}:sm:{time.time_ns()}")
         s = sm_mod.state_of(doc)
@@ -18865,3 +18878,46 @@ class ZhutianPlugin(Star):
         """原版 rule 里 `#剑与魔法帮助` 是无空格连写形态。"""
         async for r in self._sm_dispatch(event, "帮助"):
             yield r
+
+    # ---- 原版通用别名：按当前平行开局路由（此前未注册，导致 #我 / #背包 无回复）----
+
+    @filter.regex(r"^#(?:我|我的练气)$")
+    async def handle_parallel_profile(self, event: AstrMessageEvent):
+        """原版 UserStart / RevivalEarth / SwordMagic 共用；active 时显示本局状态。"""
+        if not self._allowed(event):
+            return
+        doc = await self._find_player(event)   # 不写节流，留给下游 handler
+        if not doc:
+            async for r in self.handle_status(event):
+                yield r
+            return
+        if rv_mod.active(rv_mod.state_of(doc)):
+            async for r in self._rv_dispatch(event, "状态", doc):
+                yield r
+        elif sm_mod.active(sm_mod.state_of(doc)):
+            async for r in self._sm_dispatch(event, "状态", doc):
+                yield r
+        else:
+            async for r in self.handle_status(event):
+                yield r
+
+    @filter.regex(r"^#背包$")
+    async def handle_parallel_bag(self, event: AstrMessageEvent):
+        """原版 SwordMagic：active 时显示异界背包，否则放行主线纳戒。"""
+        if not self._allowed(event):
+            return
+        doc = await self._find_player(event)
+        if not doc:
+            async for r in self._bag_view(event):
+                yield r
+            return
+        if sm_mod.active(sm_mod.state_of(doc)):
+            async for r in self._sm_dispatch(event, "背包", doc):
+                yield r
+        elif rv_mod.active(rv_mod.state_of(doc)):
+            # E1 无独立背包子命令，状态面板已含随身 / 仓储摘要
+            async for r in self._rv_dispatch(event, "状态", doc):
+                yield r
+        else:
+            async for r in self._bag_view(event):
+                yield r

@@ -6696,7 +6696,7 @@ async def main():
 
     # ① 文本 / 入界预览 / 双向互斥 / 快照
     assert "地脉点" in sm51.rules_text() and "臆造" in sm51.rules_text()
-    assert "不注册" in sm51.help_text() and "六地区" in sm51.lore_text()
+    assert "通用别名" in sm51.help_text() and "六地区" in sm51.lore_text()
     assert "入界预览" in text51("入界") and sm51.state_of(d51) is None
     assert "入界成功" in text51("入界 确认")
     s51 = sm51.state_of(d51)
@@ -6828,6 +6828,14 @@ async def main():
     await db.save_player(d51d.model_dump())
     row51 = await db.get_player("e2f")
     assert row51 and sm51.state_of(PlayerDoc(**row51))["snapshot"]["realm_index"] == 3
+
+    # ⑨ 通用别名路由（main.py 层，静态校验：注册 + 避开二次节流 + 纳戒转发）
+    src51 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    assert '@filter.regex(r"^#(?:我|我的练气)$")' in src51
+    assert '@filter.regex(r"^#背包$")' in src51
+    assert src51.count("doc: PlayerDoc | None = None") == 2, "两个 dispatch 都要支持传入 doc"
+    assert 'self._sm_dispatch(event, "背包", doc)' in src51
+    assert "sm_mod.active(sm_mod.state_of(doc))" in src51
     print("W8-E2 sword magic ok")
 
     await db.close()
