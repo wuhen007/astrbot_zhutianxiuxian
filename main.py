@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -404,6 +404,26 @@ CMD_SD_ERA = "#超维改写时代"
 CMD_SD_FATE = "#超维改写命格"
 CMD_SD_APT = "#超维改写天资"
 CMD_SD_LG = "#超维改写灵根"
+# ---- W8-F4 场域圣墟（原版 ShengxuContent 13 条 + ShengxuRank 1 条；法身两条已有）----
+CMD_SX_DUNGEONS = "#圣墟副本"
+CMD_SX_EXPLORE = "#探索圣墟"
+CMD_SX_ADDICT = "#沉迷圣墟"
+CMD_SX_FACTIONS = "#圣墟势力"
+CMD_SX_JOIN_BODHI = "#加入菩提基因"
+CMD_SX_JOIN_DREAM = "#加入大梦净土"
+CMD_SX_JOIN_MOUNT = "#加入阳间第一山"
+CMD_SX_SALARY = "#领取圣墟俸禄"
+CMD_SX_JAR = "#石罐"
+CMD_SX_JAR_ALIAS = "#石罐机缘"
+CMD_SX_JAR_CLAIM = "#追寻石罐"
+CMD_SX_BREATH = "#合成呼吸法"
+CMD_SX_SKILLS = "#神术"
+CMD_SX_SKILLS_ALIAS = "#神术列表"
+CMD_SX_FIELD = "#场域"
+CMD_SX_FIELD_ALIAS = "#场域状态"
+CMD_SX_FIELD_UP = "#参悟场域"
+CMD_SX_RANK = "#圣墟榜"
+
 
 
 
@@ -2114,6 +2134,19 @@ class ZhutianPlugin(Star):
                 (f"{CMD_SD_LG} 灵根名 [@道友]", "拒绝唯一灵根 / 不可随机获取（岁云一脉）"),
                 ("⚠️ 移植差异", "原版前置是「圣法碎片」道具（圣法残片×1000、掉率百万分之一）；"
                               "本移植 data 与源 1:1 且残片无产出点，折算为权柄+小世界门槛，炼化时长与奖励照原版"),
+            ]},
+            {"title": "场域圣墟 · 花粉进化路", "lines": [
+                (CMD_SX_DUNGEONS, "12 处副本（地球9/星路1/阳间1/诡异1）与成本；后两篇需在阳间"),
+                (f"{CMD_SX_EXPLORE} 副本名 / {CMD_SX_EXPLORE}", "带名起一次探索；不带参=结算到期/看副本表"),
+                (f"{CMD_SX_ADDICT} 副本名*次数", "连探 1~12 次，逐次判胜负"),
+                (f"{CMD_SX_FACTIONS} / {CMD_SX_SALARY}", "三大势力与每日俸禄（菩提基因2/大梦净土8/阳间第一山12 阶）"),
+                (f"{CMD_SX_JAR} / {CMD_SX_JAR_CLAIM}", "石罐条件（11阶+6处+9线索+两极限+隐患≤50）与认主"),
+                (f"{CMD_SX_BREATH} 名称", "5 张同种残页合成呼吸法（已掌握则折现积淀 +5）"),
+                (f"{CMD_SX_SKILLS}", "已参悟 28 种神术与七妙宝术 7/7 进度"),
+                (f"{CMD_SX_FIELD} / {CMD_SX_FIELD_UP}", "场域九重天：残图 5 张升一重，上限 9 重"),
+                (f"{CMD_SX_RANK} [N]", "花粉路榜单：境界＞场域＞通关数＞极境＞积淀"),
+                ("⚠️ 折算", "场域原版给三维 +3%/重天，本移植沿 B0 决策改为圣墟胜率 +2%/重天；"
+                            "入场成本不套记忆命途折扣；神术只做参悟与面板，不接战斗触发"),
             ]},
         ]
 
@@ -6869,6 +6902,235 @@ class ZhutianPlugin(Star):
         if not self._allowed(event):
             return
         async for r in self._sd_rewrite(event, ("#超维改写", "灵根")):
+            yield r
+
+    # ---- W8-F4 场域圣墟（ext["shengxu"]，db 仍 v17） ----
+
+    async def _sx_open(self, event: AstrMessageEvent):
+        """取玩家 + 惰性结算到期探索。返回 (doc, st, prefix, err)。"""
+        doc, err = await self._require_player(event)
+        if err:
+            return None, None, "", err
+        now = time.time()
+        st = sx_mod.state_of(doc)
+        ok, msg, items, _learned = sx_mod.settle(
+            doc, st, now, random.Random(f"{doc.uid}:sx:{int(now)}"))
+        prefix = ""
+        if ok:
+            if items:
+                await self.db.add_items(doc.uid, items)
+            await self.db.save_player(doc.model_dump())
+            prefix = msg + "\n"
+        return doc, st, prefix, None
+
+    @filter.command(CMD_SX_DUNGEONS, "圣墟副本一览")
+    async def handle_sx_dungeons(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, _st, prefix, err = await self._sx_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, prefix + sx_mod.dungeons_text(doc)):
+            yield r
+
+    @filter.command(CMD_SX_EXPLORE, "探索圣墟（空参 = 结算/查看）")
+    async def handle_sx_explore(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, st, prefix, err = await self._sx_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        name = (self._adm_tail(event) or "").strip()
+        if not name:
+            act = sx_mod.action_of(doc)
+            if act:
+                left = max(0, int(float(act.get("end") or 0) - time.time()))
+                yield event.plain_result(
+                    prefix + f"你仍在【{act.get('dungeon')}】中（{act.get('count')} 次），"
+                    f"还需 {left // 60} 分 {left % 60} 秒。")
+                return
+            async for r in self._smart(event, prefix + sx_mod.dungeons_text(doc)):
+                yield r
+            return
+        ok, msg = sx_mod.begin(doc, name, 1, time.time())
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_SX_ADDICT, "沉迷圣墟（连探）")
+    async def handle_sx_addict(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, _st, prefix, err = await self._sx_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        raw = (self._adm_tail(event) or "").strip().replace("＊", "*").replace("×", "*")
+        if "*" not in raw:
+            yield event.plain_result(f"格式：「{CMD_SX_ADDICT} 副本名*次数」（1~12）。")
+            return
+        name, count = raw.split("*", 1)
+        if not count.strip().isdigit():
+            yield event.plain_result("次数须为 1~12 的整数。")
+            return
+        ok, msg = sx_mod.begin(doc, name.strip(), int(count.strip()), time.time())
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_SX_FACTIONS, "圣墟势力一览")
+    async def handle_sx_factions(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, st, prefix, err = await self._sx_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, prefix + sx_mod.factions_text(st)):
+            yield r
+
+    async def _sx_join(self, event: AstrMessageEvent, name: str):
+        if not self._allowed(event):
+            return
+        doc, st, prefix, err = await self._sx_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, items = sx_mod.join_faction(doc, st, name, time.time())
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            if items:
+                await self.db.add_items(doc.uid, items)
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_SX_JOIN_BODHI, "加入菩提基因")
+    async def handle_sx_join_bodhi(self, event: AstrMessageEvent):
+        async for r in self._sx_join(event, "菩提基因"):
+            yield r
+
+    @filter.command(CMD_SX_JOIN_DREAM, "加入大梦净土")
+    async def handle_sx_join_dream(self, event: AstrMessageEvent):
+        async for r in self._sx_join(event, "大梦净土"):
+            yield r
+
+    @filter.command(CMD_SX_JOIN_MOUNT, "加入阳间第一山")
+    async def handle_sx_join_mount(self, event: AstrMessageEvent):
+        async for r in self._sx_join(event, "阳间第一山"):
+            yield r
+
+    @filter.command(CMD_SX_SALARY, "领取圣墟俸禄")
+    async def handle_sx_salary(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, st, prefix, err = await self._sx_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, items = sx_mod.salary(doc, st, time.time())
+        if not ok:
+            await self.db.save_player(doc.model_dump())
+            yield event.plain_result(msg)
+            return
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            await self.db.add_items(doc.uid, items)
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_SX_JAR, "石罐机缘", alias={CMD_SX_JAR_ALIAS})
+    async def handle_sx_jar(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, st, prefix, err = await self._sx_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        async for r in self._smart(event, prefix + sx_mod.jar_text(doc, st, inv)):
+            yield r
+
+    @filter.command(CMD_SX_JAR_CLAIM, "追寻石罐")
+    async def handle_sx_jar_claim(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, st, prefix, err = await self._sx_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        ok, msg, items = sx_mod.claim_jar(doc, st, inv)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            await self.db.add_items(doc.uid, items)
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_SX_BREATH, "合成呼吸法")
+    async def handle_sx_breath(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, st, prefix, err = await self._sx_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        name = (self._adm_tail(event) or "").strip()
+        ok, msg = sx_mod.synthesize(doc, st, name)
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_SX_SKILLS, "神术", alias={CMD_SX_SKILLS_ALIAS})
+    async def handle_sx_skills(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, _st, prefix, err = await self._sx_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, prefix + sx_mod.skills_text(doc)):
+            yield r
+
+    @filter.command(CMD_SX_FIELD, "场域", alias={CMD_SX_FIELD_ALIAS})
+    async def handle_sx_field(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, st, prefix, err = await self._sx_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result(prefix + sx_mod.field_text(st))
+
+    @filter.command(CMD_SX_FIELD_UP, "参悟场域")
+    async def handle_sx_field_up(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, st, prefix, err = await self._sx_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = sx_mod.advance_field(st)
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_SX_RANK, "圣墟榜")
+    async def handle_sx_rank(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        prefix = ""
+        doc = await self._find_player(event)
+        if doc is not None:
+            _d, _st, prefix, _err = await self._sx_open(event)
+        rows = [PlayerDoc(**raw) for raw in await self.db.all_players()]
+        limit = self._adm_num(event, sx_mod.RANK_LIMIT)
+        async for r in self._smart(
+                event, prefix + sx_mod.rank_text(rows, limit, (doc.name if doc else ""))):
             yield r
 
     # ---- 师徒试炼 / 商店 / 神兵重铸 / 双修 ----

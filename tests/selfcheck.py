@@ -508,7 +508,9 @@ async def main():
     assert ok and w["avatar"]
     w["last_harvest"] -= 3600  # 快进 1 现实小时
     ok, msg, w, out = xs_mod.harvest(w)
-    assert ok and out.get("__stones__", 0) == 6_400_000 and out.get("仙馐果") == 2400, out  # 5级×流速8=8有效小时
+    # harvest 内部用 time.time()，last_harvest 与 now 之间那几毫秒会让 eff_hours 略大于 8，
+    # 故灵石按 8 小时的向下取整值给一个极小容差（原断言写死 6_400_000 会偶发 +1）
+    assert ok and 6_400_000 <= out.get("__stones__", 0) <= 6_401_000 and out.get("仙馐果") == 2400, out
     # 种植：5 级灵气 30000 可种全部种子；大夏神药 12 现实小时成熟
     ok, msg, w = xs_mod.plant(w, "大夏神药种子")
     assert ok and "1.5" in msg, msg  # (3000/1000)×4h ÷ 流速8 = 1.5 现实小时
@@ -7287,6 +7289,180 @@ async def main():
     assert "calamity.spawn_wave" in src54 and 'source="superdimensional"' in src54
     assert "sd_mod.find_linggen" in src54 and "sd_mod.find_fate" in src54
     print("W8-F3 superdimensional ok")
+
+    # ---------------- 55. W8-F4 场域圣墟 ----------------
+    import random as _random55
+    from core import shengxu as sx55
+    from core import plane as pl55
+
+    t55 = 1_800_000_000.0
+
+    def mk55(uid="x55", level=6, **ext55):
+        ext = {"xueqi": 10 ** 9, "shouyuan": 50000,
+               "flower": {"level": level, "accum": 0, "risk": 10, "extremes": []}}
+        ext.update(ext55)
+        d = PlayerDoc(uid=uid, name="墟" + uid[-2:], realm_index=6,
+                      exp=10 ** 9, stones=10 ** 9, ext=ext)
+        pl55.state_of(d)["current"] = "小阴间"
+        return d
+
+    # ① 数据完整性
+    assert len(sx55.DUNGEONS) == 12 and len({d["name"] for d in sx55.DUNGEONS}) == 12
+    assert len(sx55.FACTIONS) == 3 and len(sx55.SKILLS) == 28
+    assert len(sx55.SEVEN_TREASURES) == 7 and len(sx55.BREATHING_REDUCTION) == 6
+    assert sx55.dungeon_of("太行山")["req"] == 2 and sx55.dungeon_of("不存在") is None
+    assert sx55.plane_of(sx55.dungeon_of("太行山")) == "小阴间"
+    assert sx55.plane_of(sx55.dungeon_of("魂河古地")) == "阳间"
+    assert sx55.plane_of(sx55.dungeon_of("阳间名山")) == "阳间"
+    print("F4 data ok")
+
+    # ② 成本 / 耗时（呼吸法提速，下限 5 分钟）
+    d55 = mk55()
+    cost55 = sx55.explore_cost(sx55.dungeon_of("太行山"), 1)
+    assert cost55["xiuwei"] == int(round(1_000_000 * 2 * 0.68))
+    assert cost55["lingshi"] == int(round(500_000 * 2 * 0.68))
+    assert cost55["shouyuan"] == 2, "7 分钟 → ceil(7/5)=2 点寿元"
+    assert sx55.explore_cost(sx55.dungeon_of("太行山"), 3)["xiuwei"] == cost55["xiuwei"] * 3
+    assert sx55.minutes_of(d55, sx55.dungeon_of("太行山")) == 7
+    d55.ext["gongfa"] = ["道引呼吸法"]
+    assert sx55.minutes_of(d55, sx55.dungeon_of("太行山")) == 5, "7-4=3 → 下限 5"
+    assert sx55.minutes_of(d55, sx55.dungeon_of("魂河古地")) == 16, "20-4"
+    d55.ext["gongfa"] = []
+    print("F4 cost ok")
+
+    # ③ 起探索：花粉路 / 位面 / 境界 / 资源 / 成功
+    plain55 = PlayerDoc(uid="p55", name="凡人", ext={"shouyuan": 999})
+    assert "花粉进化路" in sx55.begin(plain55, "太行山", 1, t55)[1]
+    assert "位于" in sx55.begin(mk55("pp55", level=12), "阳间名山", 1, t55)[1], "位面不符要拒绝"
+    low55 = mk55("l55", level=1)
+    assert "花粉境" in sx55.begin(low55, "太行山", 1, t55)[1]
+    poor55 = mk55("q55", level=6)
+    poor55.exp = 0
+    assert "资源不足" in sx55.begin(poor55, "太行山", 1, t55)[1]
+    ok55, msg55 = sx55.begin(d55, "太行山", 2, t55)
+    assert ok55 and "预计 14 分钟" in msg55, msg55
+    assert not sx55.begin(d55, "昆仑山", 1, t55)[0], "行动中不得再起"
+    assert d55.exp < 10 ** 9, "起探索要扣修为"
+    print("F4 begin ok")
+
+    # ④ 结算：未到期 / 胜利发奖 / 失败血量 1
+    assert not sx55.settle(d55, sx55.state_of(d55), t55 + 10, _random55.Random(1))[0]
+    before55 = (d55.exp, sx55.flower_accum(d55))
+    ok55, msg55, items55, learned55 = sx55.settle(
+        d55, sx55.state_of(d55), t55 + 3600, _random55.Random(7))
+    assert ok55 and "胜利" in msg55
+    assert d55.exp > before55[0] and sx55.flower_accum(d55) > before55[1]
+    assert sx55.state_of(d55)["clue"] >= 1 and "太行山" in sx55.state_of(d55)["cleared"]
+    assert isinstance(items55, dict) and isinstance(learned55, list)
+    assert sx55.action_of(d55) is None
+
+    lose55 = mk55("w55", level=2)
+    sx55.begin(lose55, "魂河古地" if False else "太行山", 1, t55)
+    lose55.ext["hp"] = 5000
+    lost = False
+    for seed in range(30):
+        c55 = mk55("w55", level=2)
+        sx55.begin(c55, "太行山", 1, t55)
+        c55.ext["hp"] = 5000
+        _ok, m55, _i, _l = sx55.settle(c55, sx55.state_of(c55), t55 + 3600, _random55.Random(seed))
+        if "失败" in m55:
+            assert c55.ext["hp"] == 1 and sx55.state_of(c55)["clue"] == 0
+            lost = True
+            break
+    assert lost, "低阶打高阶应能失败"
+    print("F4 settle ok")
+
+    # ⑤ 呼吸法：残页 → 5 张合成 → 学会 / 已学会折现 / 不足拒绝
+    d55b = mk55("b55")
+    st55b = sx55.state_of(d55b)
+    for i in range(1, 6):
+        page = sx55.collect_page(st55b, "形意呼吸法", d55b.ext.get("gongfa") or [])
+        assert page["count"] == i
+    assert sx55.synthesize(d55b, st55b, "形意呼吸法")[0]
+    assert "形意呼吸法" in d55b.ext["gongfa"] and st55b["pages"]["形意呼吸法"] == 0
+    assert not sx55.synthesize(d55b, st55b, "形意呼吸法")[0], "已掌握不得重复"
+    assert not sx55.synthesize(d55b, st55b, "不存在的呼吸法")[0]
+    st55b["pages"]["太极呼吸法"] = 2
+    assert "还需 3 张" in sx55.synthesize(d55b, st55b, "太极呼吸法")[1]
+    learned_page = sx55.collect_page(st55b, "形意呼吸法", d55b.ext["gongfa"])
+    assert learned_page["learned"] and learned_page["reward"] == sx55.LEARNED_PAGE_REWARD
+    print("F4 breathing ok")
+
+    # ⑥ 场域：残图 → 5 张升一重 → 上限 9 / 胜率加成
+    d55c = mk55("c55")
+    st55c = sx55.state_of(d55c)
+    assert not sx55.advance_field(st55c)[0], "无残图不得参悟"
+    for _ in range(5):
+        sx55.collect_field_page(st55c)
+    assert sx55.advance_field(st55c)[0] and st55c["field_stage"] == 1
+    assert st55c["field_pages"] == 0
+    st55c["field_stage"], st55c["field_pages"] = 9, 99
+    assert "圆满" in sx55.advance_field(st55c)[1]
+    prof55 = sx55.field_profile({"field_stage": 9})
+    assert abs(prof55["attr"] - 0.27) < 1e-9 and abs(prof55["win"] - 0.18) < 1e-9
+    assert sx55.win_rate(mk55("wr55", level=6), sx55.dungeon_of("太行山"), 9) > \
+        sx55.win_rate(mk55("wr55", level=6), sx55.dungeon_of("太行山"), 0)
+    print("F4 field ok")
+
+    # ⑦ 势力：门槛 / 加入一次 / 日俸一天一次
+    d55d = mk55("d55", level=2)
+    assert not sx55.join_faction(d55d, sx55.state_of(d55d), "大梦净土", t55)[0]
+    assert "圣墟势力仅" in sx55.join_faction(d55d, sx55.state_of(d55d), "不存在", t55)[1]
+    ok55, msg55, gift55 = sx55.join_faction(d55d, sx55.state_of(d55d), "菩提基因", t55)
+    assert ok55 and gift55["普通进化花粉"] == 3 and sx55.flower_accum(d55d) == 5
+    assert not sx55.join_faction(d55d, sx55.state_of(d55d), "菩提基因", t55)[0], "不得二投"
+    st55d = sx55.state_of(d55d)
+    ok55, _m, pay55 = sx55.salary(d55d, st55d, t55)
+    assert ok55 and pay55["普通进化花粉"] == 3 and st55d["faction_day"]
+    assert not sx55.salary(d55d, st55d, t55 + 3600)[0], "同日不得重复领"
+    assert sx55.salary(d55d, st55d, t55 + 86400)[0]
+    assert not sx55.salary(mk55("n55"), sx55.state_of(mk55("n55")), t55)[0]
+    print("F4 faction ok")
+
+    # ⑧ 石罐：条件不足列原因 / 满足发罐 / 已有拒绝
+    d55e = mk55("e55", level=11)
+    st55e = sx55.state_of(d55e)
+    info55 = sx55.jar_requirements(d55e, st55e)
+    assert not info55["ok"] and any("线索" in r for r in info55["reasons"])
+    st55e["cleared"] = {d["name"]: 1 for d in sx55.DUNGEONS[:6]}
+    st55e["clue"] = 9
+    d55e.ext["flower"]["extremes"] = list(sx55.JAR_EXTREMES)
+    assert sx55.jar_requirements(d55e, st55e)["ok"]
+    ok55, msg55, jar55 = sx55.claim_jar(d55e, st55e, {})
+    assert ok55 and jar55[sx55.JAR] == 1 and st55e["jar_claimed"]
+    assert not sx55.claim_jar(d55e, st55e, {})[0], "已有不得重复认主"
+    assert not sx55.claim_jar(mk55("e2"), sx55.state_of(mk55("e2")), {sx55.JAR: 1})[0]
+    print("F4 jar ok")
+
+    # ⑨ 榜单：只收花粉路 / 排序
+    rows55 = [mk55("r1", level=3), mk55("r2", level=9), PlayerDoc(uid="r3", name="无花粉")]
+    sx55.state_of(rows55[1])["field_stage"] = 4
+    entries55 = sx55.rank_entries(rows55)
+    assert len(entries55) == 2 and entries55[0]["name"] == rows55[1].name
+    assert "圣墟榜" in sx55.rank_text(rows55)
+    assert "还没有花粉路修士" in sx55.rank_text([PlayerDoc(uid="z")])
+    print("F4 rank ok")
+
+    # ⑩ DB 往返 + main.py 接线
+    d55f = mk55("f55")
+    sx55.begin(d55f, "太行山", 1, t55)
+    await db.save_player(d55f.model_dump())
+    row55 = await db.get_player("f55")
+    assert sx55.state_of(PlayerDoc(**row55))["action"]["dungeon"] == "太行山"
+
+    src55 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    miss55 = [c for c in (
+        "CMD_SX_DUNGEONS", "CMD_SX_EXPLORE", "CMD_SX_ADDICT", "CMD_SX_FACTIONS",
+        "CMD_SX_JOIN_BODHI", "CMD_SX_JOIN_DREAM", "CMD_SX_JOIN_MOUNT", "CMD_SX_SALARY",
+        "CMD_SX_JAR", "CMD_SX_JAR_CLAIM", "CMD_SX_BREATH", "CMD_SX_SKILLS",
+        "CMD_SX_FIELD", "CMD_SX_FIELD_UP", "CMD_SX_RANK",
+    ) if f"@filter.command({c}" not in src55]
+    assert miss55 == [], f"漏注册：{miss55}"
+    assert 'alias={CMD_SX_JAR_ALIAS}' in src55 and 'alias={CMD_SX_SKILLS_ALIAS}' in src55
+    assert 'alias={CMD_SX_FIELD_ALIAS}' in src55
+    assert "sx_mod.settle(" in src55 and "sx_mod.begin(" in src55
+    assert "sx_mod.claim_jar" in src55 and "sx_mod.salary" in src55
+    print("W8-F4 shengxu ok")
 
     await db.close()
     print("ALL M12 CHECKS PASSED")
