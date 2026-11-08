@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -290,6 +290,35 @@ CMD_DR_LIST = "#若陀龙王团本"
 CMD_DR_LEAVE = "#退出若陀龙王团本"
 CMD_DR_OPEN = "#开启若陀龙王"
 CMD_DR_CLOSE = "#关闭若陀龙王"
+# ---- W8-E1 复活地球：单入口 + 子命令（下列 SUB 常量用于帮助/手册，不单独注册）----
+CMD_RV = "#复活地球"
+CMD_RV_ALIAS = "#复活全人类"
+CMD_RV_SUB_HELP = "#复活地球 帮助"
+CMD_RV_SUB_RULES = "#复活地球 规则"
+CMD_RV_SUB_ENTER = "#复活地球 入界"
+CMD_RV_SUB_STATUS = "#复活地球 状态"
+CMD_RV_SUB_SETTLE = "#复活地球 结算"
+CMD_RV_SUB_TOWER = "#复活地球 塔规"
+CMD_RV_SUB_OBSERVE = "#复活地球 观察"
+CMD_RV_SUB_CHOOSE = "#复活地球 抉择"
+CMD_RV_SUB_ESCAPE = "#复活地球 越狱"
+CMD_RV_SUB_STATION = "#复活地球 站务"
+CMD_RV_SUB_WORK = "#复活地球 工作"
+CMD_RV_SUB_CONTRACT = "#复活地球 委托"
+CMD_RV_SUB_STUDY = "#复活地球 研读"
+CMD_RV_SUB_BREAK = "#复活地球 突破"
+CMD_RV_SUB_CRAFT = "#复活地球 制作"
+CMD_RV_SUB_PREP = "#复活地球 筹备"
+CMD_RV_SUB_EXPEDITION = "#复活地球 探索"
+CMD_RV_SUB_FIELD = "#复活地球 外勤"
+CMD_RV_SUB_SIGNAL = "#复活地球 调查"
+CMD_RV_SUB_ARCHIVE = "#复活地球 异常档案"
+CMD_RV_SUB_CRISIS = "#复活地球 站务危机"
+CMD_RV_SUB_PATH = "#复活地球 化神"
+CMD_RV_SUB_PERMIT = "#复活地球 申请"
+CMD_RV_SUB_CHRONICLE = "#复活地球 复盘"
+CMD_RV_SUB_ASCEND = "#复活地球 离界"
+CMD_RV_SUB_ABANDON = "#复活地球 放弃"
 CMD_ENDLESS = "#无尽劫境"
 CMD_ENDLESS_START = "#开启无尽劫境"
 CMD_ENDLESS_MAP = "#劫途星图"
@@ -1894,6 +1923,22 @@ class ZhutianPlugin(Star):
                 (f"{CMD_DR_LOOT} / {CMD_DR_BID} 编号*价格 / {CMD_DR_ASSIGN} 编号", "5 件掉落 / 加价 ≥30%（填 1 自动）/ 团长分配并平分灵石"),
                 (f"{CMD_DR_OPEN} / {CMD_DR_CLOSE}", "管理员：唤醒新团本（建团即抽定掉落）/ 清空全部并重置退团锁"),
                 ("⚠️ 与帝尊团本不互通", "本团各自单挑 + 竞价；掉落池是 GroupBoss.json 36 条；终结者得起死回生丹 ×5"),
+            ]},
+            {"title": "复活地球 · 平行开局", "lines": [
+                (f"{CMD_RV} / {CMD_RV_ALIAS}", "单入口：空格后接子命令，空参 = 状态；别名等价状态"),
+                (f"{CMD_RV_SUB_ENTER} 确认 / {CMD_RV_SUB_ABANDON} 确认", "二次确认入界（存主线快照）/ 移植补位：随时放弃并恢复快照"),
+                (f"{CMD_RV_SUB_HELP} / {CMD_RV_SUB_RULES} / {CMD_RV_SUB_SETTLE}", "全部子命令 / 完整规则与三处移植差异 / 手动结算到期行动"),
+                (f"{CMD_RV_SUB_TOWER} / {CMD_RV_SUB_OBSERVE} 规章|读数|名册 / {CMD_RV_SUB_CHOOSE} 选项 确认", "第一幕塔监狱：线索永久保留，观察会触发死亡重塑"),
+                ("#复活地球 交谈 / 推演 / 候时", "狱友事件 → 协作 → 粗校窗口（失败率 25%）→ 精校（5%）"),
+                (f"{CMD_RV_SUB_ESCAPE} 确认", "越狱必经死亡重塑；成功后抵达空间站并领 120 积分安置费"),
+                (f"{CMD_RV_SUB_STATION} / {CMD_RV_SUB_WORK} 岗位 轮数 确认 / {CMD_RV_SUB_CONTRACT}", "第二幕空间站：3 岗位 / 1~10 轮连续工作 / 2 种委托"),
+                (f"{CMD_RV_SUB_STUDY} / #复活地球 修炼 / {CMD_RV_SUB_BREAK}", "研读功法 / 修为积累 / 独立六境（结婴 65% 死亡风险）"),
+                (f"{CMD_RV_SUB_CRAFT} / 蕴养 / {CMD_RV_SUB_PREP}", "6 配方与 3 设施 / 筑基五行 / 只读筹备汇总"),
+                (f"{CMD_RV_SUB_EXPEDITION} 目标 确认 / {CMD_RV_SUB_FIELD} / {CMD_RV_SUB_SIGNAL} 信号 确认", "第三幕地表：8 目标 / 应对深入撤离 / 四类信号先取证再处置"),
+                (f"{CMD_RV_SUB_ARCHIVE} / {CMD_RV_SUB_CHRONICLE} / 履历 / 死亡记录", "永久档案（死亡保留）/ 只读复盘 / 本世关键选择"),
+                (f"{CMD_RV_SUB_CRISIS} / 参与危机 / 公议 / {CMD_RV_SUB_PERMIT} / 透支", "单人公共危机 3 段 / 配给居住接应资格 / 债务与清退审查"),
+                (f"{CMD_RV_SUB_PATH} 化凡|信仰 / 立愿 / {CMD_RV_SUB_ASCEND} 确认", "化神分路 → 化神 + 离界坐标 + 接引装置 + 无欠款 → 飞升（只升不降）"),
+                ("⚠️ 状态挂 ext[\"earth\"]，db 仍 v17", "原版入口被封堵 / 全局拦截 / 离界强制 42 境，本移植分别改为开放入界、不拦截、只升不降"),
             ]},
         ]
 
@@ -18688,4 +18733,34 @@ class ZhutianPlugin(Star):
         async for r in self._dr_dispatch(event, "关闭若陀龙王",
                 lambda d, w, t, r, c: (dr_mod.close_all(w, t), [("clear_exit",)]),
                 admin=True):
+            yield r
+
+    # ---- W8-E1：复活地球（单入口 + 子命令，状态全在 ext["earth"]，db 仍 v17） ----
+
+    @staticmethod
+    def _rv_rest(event: AstrMessageEvent) -> str:
+        raw = (event.get_message_str() or "").strip()
+        for prefix in (CMD_RV, CMD_RV_ALIAS):
+            if raw.startswith(prefix):
+                return raw[len(prefix):].strip()
+        return ""
+
+    async def _rv_dispatch(self, event: AstrMessageEvent, rest: str):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ts = time.time()
+        rng = random.Random(f"{doc.uid}:rv:{time.time_ns()}")
+        msg, changed = rv_mod.dispatch(doc, rest, ts, rng)
+        if changed:
+            await self.db.save_player(doc.model_dump())
+        async for r in self._smart(event, msg, "复活地球"):
+            yield r
+
+    @filter.command(CMD_RV, "复活地球平行开局：空格后接子命令，空参=状态", alias={CMD_RV_ALIAS})
+    async def handle_rv(self, event: AstrMessageEvent):
+        async for r in self._rv_dispatch(event, self._rv_rest(event)):
             yield r

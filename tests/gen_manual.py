@@ -28,6 +28,15 @@ def main() -> int:
         name = consts.get(name_tok, name_tok.strip('"')) if name_tok.startswith("CMD_") else name_tok.strip('"')
         entries.append((name, desc, fn))
 
+    # W8-E1 是单入口 + 子命令：子命令以 CMD_RV_SUB_* 文档常量登记进手册
+    rv_fns = []
+    for cname, cval in consts.items():
+        if cname.startswith("CMD_RV_SUB_"):
+            pseudo = "_rv_" + cname
+            entries.append((cval, "复活地球子命令（见 #复活地球 帮助）", pseudo))
+            rv_fns.append(pseudo)
+    rv_fns.append("handle_rv")
+
     # 分组归属：按 handler 名与帮助分组的近似映射（人工维护组标签）
     GROUPS = [
         ("基础修炼", ("handle_start", "handle_status", "handle_sign", "handle_closed", "handle_open", "handle_break",
@@ -166,6 +175,7 @@ def main() -> int:
         ("诡异大祭 · 厄土高原", ("handle_ss_help", "handle_ss_rules", "handle_ss_status", "handle_ss_slash", "handle_ss_fight_small", "handle_ss_fight_big", "handle_ss_open_small", "handle_ss_open_big", "handle_ss_close_small", "handle_ss_close_big", "handle_ss_settle", "handle_ss_restore", "handle_ss_rank", "handle_ss_planes", "handle_ss_repair_all", "handle_ss_yongji")),
         ("组队迎战帝尊 · 团本", ("handle_tb_help", "handle_tb_rules", "handle_tb_create", "handle_tb_join", "handle_tb_start", "handle_tb_status", "handle_tb_dps", "handle_tb_log", "handle_tb_leave", "handle_tb_mojun", "handle_tb_loot", "handle_tb_system", "handle_tb_enable", "handle_tb_disable", "handle_tb_reset_cd", "handle_tb_shutdown", "handle_tb_awaken", "handle_tb_revive")),
         ("若陀龙王 · 竞价团", ("handle_dr_help", "handle_dr_rules", "handle_dr_system", "handle_dr_list", "handle_dr_status", "handle_dr_rank", "handle_dr_fight", "handle_dr_join", "handle_dr_leave", "handle_dr_loot", "handle_dr_bid", "handle_dr_assign", "handle_dr_open", "handle_dr_close")),
+        ("复活地球 · 平行开局", tuple(rv_fns)),
         ("帮助", ("handle_help",)),
     ]
     grouped = {}

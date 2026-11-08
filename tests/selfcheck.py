@@ -6496,6 +6496,183 @@ async def main():
     assert row49 and dr49.player_state_of(PlayerDoc(**row49))["battles"] == 3
     print("W8-D5 teamboss ok")
 
+    # ---------------- 50. W8-E1 复活地球（平行开局） ----------------
+    import random as _random50
+    from core import revival as rv50
+
+    t50 = 1_800_000_000.0
+    r50 = _random50.Random(11)
+    d50 = PlayerDoc(uid="e1", name="甲", realm_index=40, exp=777, stones=8888)
+
+    clock50 = [t50]
+
+    def call50(cmd, dt=0):
+        clock50[0] += dt
+        return rv50.dispatch(d50, cmd, clock50[0], r50)[0]
+    # ① 入界：预览不写档 / 确认建档 / 快照正确 / 别名与空参=状态
+    assert "入界预览" in call50("入界")
+    assert rv50.state_of(d50) is None
+    assert "入界成功" in call50("入界 确认")
+    e50 = rv50.state_of(d50)
+    assert e50 and e50["place"] == "塔监狱" and e50["snapshot"]["realm_index"] == 40
+    assert "已有复活地球记录" in call50("入界 确认")
+    assert "---- 复活地球" in call50("")
+    assert "---- 复活地球" in call50("状态")
+    assert "放弃 确认" in rv50.help_text()
+    assert "openingArrival.js" in rv50.rules_text() and "只升不降" in rv50.rules_text()
+
+    # ② 塔监狱：观察会 die 但线索/校准必须保留（原版顺序坑）
+    for c in rv50.TOWER_CLUES:
+        call50(f"观察 {c}")
+        call50("结算", 400)
+    e50["tower"]["clues"] = list(rv50.TOWER_CLUES)
+    e50["tower"]["calibrated"] = True
+    assert len(e50["tower"]["clues"]) == 3 and e50["deaths"] == 3
+    call50("交谈")
+    call50("结算", 400)
+    ev50 = e50["tower"]["event"]
+    assert ev50 in rv50.TOWER_EVENTS
+    opt50 = list(rv50.TOWER_EVENTS[ev50]["choices"])[0]
+    assert "需二次确认" in call50(f"抉择 {opt50}")
+    call50(f"抉择 {opt50} 确认")
+    call50("结算", 1800)
+    assert e50["tower"]["ally"] is True and e50["tower"]["event"] is None
+    call50("推演")
+    call50("结算", 400)
+    assert e50["tower"]["window"] == 1 and abs(rv50.tower_risk(e50) - 0.25) < 1e-9
+    call50("候时")
+    call50("结算", 400)
+    assert e50["tower"]["window"] == 2 and abs(rv50.tower_risk(e50) - 0.05) < 1e-9
+    e50["tower"]["stale"] = True
+    assert abs(rv50.tower_risk(e50) - 0.20) < 1e-9, "旧表误差 +15pp"
+    e50["tower"]["stale"] = False
+    call50("越狱 确认")
+    assert "进行中" in call50("工作 绿植维护 1 确认"), "行动期间必须拒绝新动作"
+    call50("结算", 800)
+    assert e50["place"] == "空间站" and e50["credits"] >= 120
+    assert e50["tower"]["window"] == 0 and e50["body"]["realm"] == 0, "越狱必经死亡重塑"
+
+    # ③ 死亡重塑边界：清 body/bag/expedition，保留 knowledge/storage/facilities/station
+    e50["body"].update(realm=3, cultivation=400, weapon=True)
+    e50["bag"] = {"灵植": 9}
+    e50["knowledge"]["功法"] = True
+    e50["storage"] = {"燃料": 2}
+    e50["facilities"]["丹炉"] = True
+    e50["station"]["contribution"] = 17
+    e50["expedition"] = {"target": "地表采药", "cargo": {"灵植": 1}}
+    rv50.die(e50, "空间站", t50)
+    assert e50["body"]["realm"] == 0 and e50["bag"] == {} and e50["expedition"] is None
+    assert e50["knowledge"]["功法"] and e50["storage"]["燃料"] == 2
+    assert e50["facilities"]["丹炉"] and e50["station"]["contribution"] == 17
+    assert len(e50["tower"]["clues"]) == 3, "塔规线索永久保留"
+
+    # ④ 站务：工作 / 委托 / 研读 / 修炼 / 突破门槛 / 结婴确认
+    e50["credits"] = 500
+    e50["bag"] = {"灵植": 20, "工程部件": 20, "燃料": 20}
+    call50("工作 绿植维护 3 确认")
+    work50 = call50("结算", 1000)
+    assert e50["station"]["contribution"] >= 3 and "不自动续工" in work50
+    assert "已领【医疗补给】" in call50("委托 医疗补给")
+    assert "交付" in call50("交付委托")
+    call50("研读")
+    call50("结算", 400)
+    assert e50["knowledge"]["功法"]
+    call50("修炼")
+    call50("结算", 800)
+    assert e50["body"]["realm"] == 1
+    assert "修为 100" in call50("突破"), "小突破需修为门槛"
+    e50["body"]["cultivation"] = 100
+    call50("突破")
+    call50("结算", 400)
+    assert e50["body"]["phase"] == 1
+    assert "只读" in call50("筹备")
+    # 污染结婴 65% 风险，必须二次确认（突破是唯一不在统一确认表里的动词）
+    e50["body"].update(realm=3, phase=3, cultivation=9999)
+    e50["knowledge"]["佛道传承"] = True
+    e50["bag"]["金脑丹"] = 1
+    assert "65% 死亡风险" in call50("突破")
+    call50("突破 确认")
+    call50("结算", 8000)
+    assert e50["body"]["realm"] in (0, 4), "结婴成功进元婴，失败死亡重塑回凡人"
+
+    # ⑤ 地表外勤 + 四类信号：先取证再处置，异常档案死亡保留
+    e50["place"] = "空间站"
+    e50["credits"] = 500
+    e50["action"] = None
+    e50["body"]["realm"] = 2
+    call50("探索 地表采药 确认")
+    call50("结算", 800)
+    x50 = e50["expedition"]
+    assert x50 and x50["cargo"], "出发即暂存，返站才入账"
+    x50["signal"] = {"pattern": "回声", "investigated": False, "verified": False,
+                     "clue": "", "choice": ""}
+    call50("调查 信号 确认")
+    call50("结算", 400)
+    assert x50["signal"]["investigated"]
+    call50("核验 手工 确认")
+    call50("结算", 400)
+    assert x50["signal"]["verified"] and "切断广播" in x50["signal"]["clue"]
+    call50("抉择 切断广播 确认")
+    call50("结算", 400)
+    assert any(a["pattern"] == "回声" for a in e50["anomaly_archive"])
+    assert "已核验 1/4" in call50("异常档案")
+    # 误判加风险
+    x50["signal"].update(verified=True, pattern="错时")
+    call50("抉择 切断广播 确认")
+    call50("结算", 400)
+    assert x50["risk"] > 0
+    # 撤离成功：暂存入袋 + 永久知识
+    e50["expedition"]["risk"] = 0.0
+    e50["expedition"]["discoveries"] = ["离界坐标"]
+    call50("撤离 确认")
+    call50("结算", 400)
+    assert e50["expedition"] is None and e50["knowledge"].get("离界坐标"), \
+        f"撤离应成功入账：{call50('状态')}"
+    assert e50["place"] == "空间站"
+
+    # ⑥ 化神分路 + 离界：二次确认、四门槛、只升不降、封存只读
+    assert "可选分路" in call50("化神 化魔"), "化魔原版明确拒绝"
+    e50["body"]["realm"] = 4
+    assert "已选【化凡】" in call50("化神 化凡")
+    e50["body"]["mortal_steps"] = 3
+    assert "愿文须 8~80 字" in call50("立愿 短")
+    call50("立愿 愿以此身记住所有没有回音的名字")
+    e50["body"].update(realm=5, phase=0)
+    e50["station"]["debt"] = 0
+    assert "缺少设施" in call50("离界"), "离界四门槛应逐项校验"
+    e50["facilities"]["接引装置"] = True
+    e50["station"]["debt"] = 10
+    assert "尚欠" in call50("离界")
+    e50["station"]["debt"] = 0
+    assert "离界预览" in call50("离界")
+    assert "离界成功" in call50("离界 确认")
+    assert d50.realm_index >= 40, "高阶角色离界只升不降"
+    assert e50["status"] == "ascended" and "已封存" in call50("工作 绿植维护 1 确认")
+    # 低阶角色离界应升到地仙
+    d50b = PlayerDoc(uid="e1b", name="乙", realm_index=0, exp=5, stones=0)
+    _, _ = rv50.dispatch(d50b, "入界 确认", t50, r50)
+    eb = rv50.state_of(d50b)
+    eb["body"]["realm"] = 5
+    eb["knowledge"]["离界坐标"] = True
+    eb["facilities"]["接引装置"] = True
+    assert "离界成功" in rv50.dispatch(d50b, "离界 确认", t50, r50)[0]
+    assert d50b.realm_index == rv50.ASCEND_REALM and d50b.exp == 0
+
+    # ⑦ 放弃：恢复入界前主线快照并清档
+    assert "放弃确认" in call50("放弃")
+    assert "已放弃" in call50("放弃 确认")
+    assert rv50.state_of(d50) is None
+    assert d50.realm_index == 40 and d50.exp == 777 and d50.stones == 8888
+    assert d50.state != "复活地球"
+
+    # ⑧ DB 往返：ext["earth"] 落盘不丢，db 仍 v17
+    d50c = PlayerDoc(uid="e1c", name="丙", realm_index=3)
+    rv50.dispatch(d50c, "入界 确认", t50, r50)
+    await db.save_player(d50c.model_dump())
+    row50 = await db.get_player("e1c")
+    assert row50 and rv50.state_of(PlayerDoc(**row50))["snapshot"]["realm_index"] == 3
+    print("W8-E1 revival earth ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 
