@@ -186,6 +186,9 @@ def main() -> int:
         ("若陀龙王 · 竞价团", ("handle_dr_help", "handle_dr_rules", "handle_dr_system", "handle_dr_list", "handle_dr_status", "handle_dr_rank", "handle_dr_fight", "handle_dr_join", "handle_dr_leave", "handle_dr_loot", "handle_dr_bid", "handle_dr_assign", "handle_dr_open", "handle_dr_close")),
         ("复活地球 · 平行开局", tuple(rv_fns)),
         ("剑与魔法 · 艾瑟兰", tuple(sm_fns)),
+        ("人傀 · 外来道果", ("handle_pup_craft", "handle_pup_my", "handle_pup_summon",
+                       "handle_pup_repair", "handle_pup_destroy", "handle_pup_refine",
+                       "handle_pup_melt", "handle_pup_retreat")),
         ("帮助", ("handle_help",)),
     ]
     grouped = {}

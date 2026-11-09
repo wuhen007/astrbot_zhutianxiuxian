@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -426,6 +426,15 @@ CMD_SX_RANK = "#圣墟榜"
 # ---- W8-F5 上苍之上（原版 ShangcangTask 无 rule，指令在 SecretPlace 的上苍分支）----
 CMD_SC = "#上苍之上"
 CMD_SC_ADDICT = "#沉迷上苍之上"
+# ---- W8-F6 人傀 / 外来道果（原版 apps/motou/ForbiddenSoul.js 14 rule 中的 8 条）----
+CMD_PUP_CRAFT = "#炼制人傀"
+CMD_PUP_MY = "#我的人傀"
+CMD_PUP_SUMMON = "#驱使人傀"
+CMD_PUP_REPAIR = "#修复人傀"
+CMD_PUP_DESTROY = "#毁去人傀"
+CMD_PUP_REFINE = "#炼化道果"
+CMD_PUP_MELT = "#熔去外来道果"
+CMD_PUP_RETREAT = "#闭关化杂"
 
 
 
@@ -1312,9 +1321,10 @@ class ZhutianPlugin(Star):
             doc.ext.get("enh"), set(doc.ext.get("imperial") or []),
             physique_table=self.content.table("Level/炼体境界"),
         )
-        # 魔头禁术：魔功 + 魂奴 三维加成（乘法叠加）
+        # 魔头禁术：魔功 + 魂奴 三维加成；W8-F6 外来道果/道果裂痕/人傀出战同乘区
         ev = motou.state_of(doc)
-        mult = 1.0 + motou.magic_bonus(ev) + motou.slave_bonus(ev, time.time())
+        mult = (1.0 + motou.magic_bonus(ev) + motou.slave_bonus(ev, time.time())
+                + pup_mod.battle_bonus(ev, time.time()))
         if abs(mult - 1.0) > 1e-9:
             st = equipment.Stats(
                 atk=int(st.atk * mult), defense=int(st.defense * mult),
@@ -1700,9 +1710,10 @@ class ZhutianPlugin(Star):
                 (CMD_EVIL_MAGIC, "修炼魔功（魔道值换三维永久加成，10 层）"),
                 (f"{CMD_EVIL_MOSHI} 数量", "供奉魔石（每颗魔道值 +20）"),
                 (f"{CMD_EVIL_SLAY} @目标", "镇魂（魔道100+境界30+，24h CD，7 天保护期）"),
-                (f"{CMD_EVIL_DISPOSE} 烙印/灭魂", "处置战果（烙印=对方魂印3天+你的魂奴 / 灭魂=遗蜕）"),
-                (CMD_EVIL_REFINE, "炼化遗蜕（修为+魔道值）"),
+                (f"{CMD_EVIL_DISPOSE} 烙印/灭魂/夺果", "处置战果（烙印=魂印+魂奴 / 灭魂=遗蜕 / 夺果=待炼道果）"),
+                (CMD_EVIL_REFINE, "炼化遗蜕（修为+魔道值；也可「#炼制人傀」）"),
                 (CMD_EVIL_BREAK, "冲击魂印（50 万灵石，12h CD）"),
+                (CMD_PUP_MY, "人傀 / 外来道果 / 杂质面板（见下组）"),
             ]},
             {"title": "源石坊赌石", "lines": [
                 (f"{CMD_STONE_MARKET} [外园/地字号/天字号]", "当日 5 块原石（外园 5 万灵石起）"),
@@ -2162,6 +2173,20 @@ class ZhutianPlugin(Star):
                 ("掉落 / 纪元", "四档池 guaranteed 必得 1~3 份 + chance 判定；每胜进度 +1，满 3 换 5 点纪元积累"),
                 ("⚠️ 折算", "原版 ShangcangTask cron 15 秒扫 redis → 本移植惰性 tick + 回执（保留 20 条）；"
                             "战斗由 zd_battle 改权柄差胜率模型"),
+            ]},
+            {"title": "人傀 · 外来道果", "lines": [
+                (CMD_PUP_CRAFT, "待炼遗蜕 + 阴魂木×3 + 神魂结晶×1 + 5000 万灵石 → 人傀（三维遗蜕 ×30%）"),
+                (CMD_PUP_MY, "人傀三维 / 耐久 / 外来道果 / 杂质 / 闭关与裂痕状态"),
+                (CMD_PUP_SUMMON, "每日一次，耐久 ≥20 扣 20，6 小时内三维 +10%"),
+                (CMD_PUP_REPAIR, "阴魂木×1 + 1000 万灵石 → 耐久 +40（上限 100）"),
+                (f"{CMD_PUP_DESTROY} 确认", "彻底毁去人傀，材料不返还（需二次确认）"),
+                (CMD_PUP_REFINE, "待炼道果 → 外来道果槽（全属性 +3%，杂质 +15/60）"),
+                (CMD_PUP_MELT, "熔去外来道果（杂质 -10）"),
+                (CMD_PUP_RETREAT, "闭关 6 小时化解杂质 -30（惰性到期结算）"),
+                ("前置", "「#镇魂 @目标」取胜 →「#处置 灭魂」得遗蜕 /「#处置 夺果」得道果（目标境界 ≥40，道果裂痕 6h -5%）"),
+                ("⚠️ 折算", "原版人傀是下一场战斗的额外战体 → 本移植战斗引擎无伙伴位，改 6h 三维加成；"
+                            "原版耐久无扣减点 → 每次驱使扣 20；原版夺果需「自身之道」→ 改境界门槛；"
+                            "原版闭关占全局 action 锁 → 本移植只做本模块互斥"),
             ]},
         ]
 
@@ -4548,8 +4573,14 @@ class ZhutianPlugin(Star):
         if err:
             yield event.plain_result(err)
             return
-        s = motou.state_of(doc)
-        async for r in self._smart(event, motou.panel(s, time.time()), "邪道 · 魔头之路"):
+        s = pup_mod.state_of(motou.state_of(doc))
+        now = time.time()
+        changed, tick_msg = pup_mod.tick(s, now)
+        if changed:
+            await self.db.save_player(self._evil_save(doc, s).model_dump())
+        text = (f"{tick_msg}\n" if tick_msg else "") + motou.panel(s, now) + "\n" + "\n".join(
+            pup_mod.panel_lines(s, now))
+        async for r in self._smart(event, text, "邪道 · 魔头之路"):
             yield r
 
     # ---- 小世界（对齐原版 Garden/xiaoshijie.js 核心链） ----
@@ -9055,7 +9086,18 @@ class ZhutianPlugin(Star):
             return
         tgt = PlayerDoc(**raw)
         ts = motou.state_of(tgt)
-        ok, msg, s2, tpatch = motou.dispose(s, kind, ts, time.time())
+        # W8-F6：灭魂时把目标三维/灵根/功法写进遗蜕快照，供「#炼制人傀」折算
+        snap = None
+        if kind == "灭魂":
+            st_t = self._stats(tgt)
+            lg = tgt.ext.get("linggen")
+            gf = list(tgt.ext.get("gongfa") or [])
+            snap = {
+                "atk": st_t.atk, "def": st_t.defense, "hp": st_t.hp,
+                "root": str((lg or {}).get("name") or "无") if isinstance(lg, dict) else "无",
+                "gongfa": str(gf[0]) if gf else "无",
+            }
+        ok, msg, s2, tpatch = motou.dispose(s, kind, ts, time.time(), snap, tgt.realm_index)
         if not ok:
             yield event.plain_result(msg)
             return
@@ -9105,6 +9147,151 @@ class ZhutianPlugin(Star):
         d.exp += consume["exp"]
         await self.db.save_player(d.model_dump())
         yield event.plain_result(msg)
+
+    # ---- W8-F6 人傀 / 外来道果（复用 ext["evil"]，db 仍 v17） ----
+
+    async def _pup_open(self, event: AstrMessageEvent):
+        """取玩家 + 惰性结算闭关化杂。返回 (doc, s, prefix, err)。"""
+        doc, err = await self._require_player(event)
+        if err:
+            return None, None, "", err
+        s = pup_mod.state_of(motou.state_of(doc))
+        changed, msg = pup_mod.tick(s, time.time())
+        prefix = ""
+        if changed:
+            await self.db.save_player(self._evil_save(doc, s).model_dump())
+            if msg:
+                prefix = msg + "\n"
+        return doc, s, prefix, None
+
+    async def _pup_pay(self, doc: PlayerDoc, s: dict, items: dict, stones: int) -> None:
+        """炼制/修复：灵石与材料在同一事务里扣，缺料抛错回滚。"""
+        d = self._evil_save(doc, s)
+        d.stones -= stones
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            for name, qty in items.items():
+                if not await self.db.remove_item(doc.uid, name, qty):
+                    raise RuntimeError("INSUFFICIENT")
+
+    @filter.command(CMD_PUP_CRAFT, "炼制人傀")
+    async def handle_pup_craft(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, s, prefix, err = await self._pup_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        gap = pup_mod.cost_gap(doc.stones, inv, pup_mod.CRAFT_ITEMS, pup_mod.CRAFT_STONES)
+        if gap:
+            yield event.plain_result(prefix + gap)
+            return
+        st = self._stats(doc)
+        ok, msg = pup_mod.craft(s, time.time(),
+                                {"atk": st.atk, "defense": st.defense, "hp": st.hp})
+        if ok:
+            await self._pup_pay(doc, s, pup_mod.CRAFT_ITEMS, pup_mod.CRAFT_STONES)
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_PUP_MY, "我的人傀")
+    async def handle_pup_my(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        _doc, s, prefix, err = await self._pup_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        text = (prefix + "\n".join(pup_mod.panel_lines(s, time.time()))
+                + "\n" + pup_mod.rules_text() + "\n" + pup_mod.help_text())
+        async for r in self._smart(event, text, "人傀 · 外来道果"):
+            yield r
+
+    @filter.command(CMD_PUP_SUMMON, "驱使人傀")
+    async def handle_pup_summon(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, s, prefix, err = await self._pup_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = pup_mod.summon(s, time.time())
+        if ok:
+            await self.db.save_player(self._evil_save(doc, s).model_dump())
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_PUP_REPAIR, "修复人傀")
+    async def handle_pup_repair(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, s, prefix, err = await self._pup_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        gap = pup_mod.cost_gap(doc.stones, inv, pup_mod.REPAIR_ITEMS, pup_mod.REPAIR_STONES)
+        if gap:
+            yield event.plain_result(prefix + gap)
+            return
+        ok, msg = pup_mod.repair(s)
+        if ok:
+            await self._pup_pay(doc, s, pup_mod.REPAIR_ITEMS, pup_mod.REPAIR_STONES)
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_PUP_DESTROY, "毁去人傀（需「确认」）")
+    async def handle_pup_destroy(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, s, prefix, err = await self._pup_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if self._adm_tail(event).strip() != "确认":
+            yield event.plain_result(prefix + "销毁后不返还材料。确认请发送「#毁去人傀 确认」。")
+            return
+        ok, msg = pup_mod.destroy(s)
+        if ok:
+            await self.db.save_player(self._evil_save(doc, s).model_dump())
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_PUP_REFINE, "炼化道果")
+    async def handle_pup_refine(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, s, prefix, err = await self._pup_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = pup_mod.refine(s, time.time())
+        if ok:
+            await self.db.save_player(self._evil_save(doc, s).model_dump())
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_PUP_MELT, "熔去外来道果")
+    async def handle_pup_melt(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, s, prefix, err = await self._pup_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = pup_mod.melt(s)
+        if ok:
+            await self.db.save_player(self._evil_save(doc, s).model_dump())
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_PUP_RETREAT, "闭关化杂")
+    async def handle_pup_retreat(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, s, prefix, err = await self._pup_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = pup_mod.retreat(s, time.time())
+        if ok:
+            await self.db.save_player(self._evil_save(doc, s).model_dump())
+        yield event.plain_result(prefix + msg)
 
     # ---- B6：剧情 NPC（狠人大帝/苏灵）+ 凝聚精血 ----
 

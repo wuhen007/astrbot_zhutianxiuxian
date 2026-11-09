@@ -7567,6 +7567,129 @@ async def main():
     assert "sc_mod.panel_text(" in src56 and "sc_mod.TABLE" in src56
     print("W8-F5 shangcang ok")
 
+    # ---------------- 57. W8-F6 人傀 / 外来道果 ----------------
+    import json as _json57
+    from core import puppet as pu57, motou as mt57
+
+    t57 = 1_800_000_000.0
+
+    def mk57(uid="pu57", **ext57):
+        ext = {"modao": 300.0}
+        ext.update(ext57)
+        return PlayerDoc(uid=uid, name="魔" + uid[-2:], realm_index=45,
+                         exp=10 ** 10, stones=10 ** 10, ext=ext)
+
+    # ① 状态与数值（对齐原版 model/forbiddenSoul.js + ForbiddenSoul.js 常量）
+    s57 = pu57.state_of(mt57.state_of(mk57()))
+    assert s57["puppet"] is None and s57["impurity"] == 0 and s57["retreat_until"] == 0
+    assert pu57.day_key(t57) == time.strftime("%Y-%m-%d", time.gmtime(t57 + 8 * 3600))
+    assert pu57.CRAFT_ITEMS == {"阴魂木": 3, "神魂结晶": 1} and pu57.CRAFT_STONES == 50_000_000
+    assert pu57.REPAIR_ITEMS == {"阴魂木": 1} and pu57.REPAIR_STONES == 10_000_000
+    assert pu57.REPAIR_GAIN == 40 and pu57.SUMMON_DURABILITY_COST == 20
+    assert pu57.IMPURITY_CAP == 60 and pu57.RETREAT_REDUCE == 30
+    print("F6 state/cost ok")
+
+    # ② 夺果打通：境界 <40 拒绝；≥40 得待炼道果 + 对方 6h 裂痕
+    win57 = mt57.record_result(mt57.state_of(mk57("win57")), "猎物", True, t57)
+    ok57, why57, _s, _p = mt57.dispose(win57, "夺果", {}, t57 + 60, None, 39)
+    assert not ok57 and "境界" in why57
+    win57 = mt57.record_result(mt57.state_of(mk57("win57b")), "道主", True, t57)
+    ok57, why57, win57, patch57 = mt57.dispose(win57, "夺果", {}, t57 + 60, None, 45)
+    assert ok57 and win57["guo"]["name"] == "道主·道果", why57
+    assert patch57["crack_until"] == t57 + 60 + 6 * 3600
+
+    # ③ 灭魂遗蜕快照（旧 4 参调用仍兼容）
+    sl57 = mt57.record_result(mt57.state_of(mk57("sl57")), "傀材", True, t57)
+    ok57, why57, sl57, _p = mt57.dispose(sl57, "灭魂", {}, t57 + 60,
+                                         {"atk": 1000, "def": 600, "hp": 5000,
+                                          "root": "荒古圣体", "gongfa": "道经"}, 45)
+    assert ok57 and sl57["remains"]["atk"] == 1000, why57
+    sl57 = pu57.state_of(sl57)
+    ok57, why57, old57, _ = mt57.dispose(
+        mt57.record_result(mt57.state_of(mk57("old57")), "旧傀", True, t57), "灭魂", {}, t57 + 60)
+    assert ok57 and "atk" not in old57["remains"], "旧调用不得写快照"
+    print("F6 dispose ok")
+
+    # ④ 成本校验 + 炼制（三维遗蜕 ×30%，不超主人 35%）
+    full57 = {"阴魂木": 3, "神魂结晶": 1}
+    assert pu57.cost_gap(10 ** 10, full57, pu57.CRAFT_ITEMS, pu57.CRAFT_STONES) == ""
+    assert "阴魂木" in pu57.cost_gap(10 ** 10, {"阴魂木": 2, "神魂结晶": 1},
+                                    pu57.CRAFT_ITEMS, pu57.CRAFT_STONES)
+    assert "灵石" in pu57.cost_gap(10, full57, pu57.CRAFT_ITEMS, pu57.CRAFT_STONES)
+    ok57, why57 = pu57.craft(sl57, t57 + 120, {"atk": 1000, "defense": 600, "hp": 5000})
+    assert ok57 and sl57["remains"] is None, why57
+    p57 = sl57["puppet"]
+    assert p57["atk"] == 300 and p57["def"] == 180 and p57["hp"] == 1500
+    assert p57["durability"] == 100 and p57["name"] == "傀材" and p57["root"] == "荒古圣体"
+    assert not pu57.craft(sl57, t57 + 120)[0], "已有人傀不得重炼"
+    low57 = mt57.state_of(mk57("low57"))
+    low57["remains"] = {"name": "弱傀", "atk": 1000, "def": 600, "hp": 5000}
+    pu57.craft(pu57.state_of(low57), t57, {"atk": 100, "defense": 100, "hp": 100})
+    assert low57["puppet"]["atk"] == 35, "出战属性受主人 35% 上限约束"
+    print("F6 craft ok")
+
+    # ⑤ 修复 / 驱使 / 毁去
+    p57["durability"] = 50
+    assert pu57.repair(sl57)[0] and p57["durability"] == 90
+    assert pu57.repair(sl57)[0] and p57["durability"] == 100
+    assert not pu57.repair(sl57)[0], "满耐久不得空耗材料"
+    ok57, why57 = pu57.summon(sl57, t57 + 180)
+    assert ok57 and p57["durability"] == 80 and sl57["puppet_until"] == t57 + 180 + 6 * 3600, why57
+    assert not pu57.summon(sl57, t57 + 200)[0], "同日不得重复出战"
+    sl57["puppet_day"], sl57["puppet_until"] = "", 0
+    p57["durability"] = 10
+    assert not pu57.summon(sl57, t57 + 220)[0], "耐久 <20 拒绝"
+    sl57["puppet_day"], sl57["puppet_until"] = pu57.day_key(t57 + 180), t57 + 180 + 6 * 3600
+    assert abs(pu57.battle_bonus(sl57, t57 + 200) - 0.10) < 1e-9
+    sl57["foreign_fruit"] = {"name": "道果", "bonus": 0.03}
+    sl57["crack_until"] = t57 + 200 + 1000
+    assert abs(pu57.battle_bonus(sl57, t57 + 200) - 0.08) < 1e-9, "外来道果 + 裂痕 + 人傀同乘区"
+    ok57, why57 = pu57.destroy(sl57)
+    assert ok57 and sl57["puppet"] is None and sl57["puppet_until"] == 0
+    assert not pu57.destroy(sl57)[0]
+    print("F6 repair/summon/destroy ok")
+
+    # ⑥ 道果链：炼化 → 熔去 → 闭关 → 到期结算 → 杂质封顶
+    fr57 = pu57.state_of(mt57.state_of(mk57("fr57")))
+    assert not pu57.refine(fr57, t57)[0], "无待炼道果"
+    fr57["guo"] = {"name": "道主·道果", "way": "自身之道"}
+    ok57, why57 = pu57.refine(fr57, t57)
+    assert ok57 and fr57["impurity"] == 15 and fr57["guo"] is None, why57
+    assert abs(pu57.battle_bonus(fr57, t57) - 0.03) < 1e-9
+    assert not pu57.refine(fr57, t57)[0]
+    assert pu57.melt(fr57)[0] and fr57["impurity"] == 5
+    assert pu57.retreat(fr57, t57)[0] and not pu57.retreat(fr57, t57)[0]
+    changed57, why57 = pu57.tick(fr57, t57 + 6 * 3600 + 1)
+    assert changed57 and fr57["impurity"] == 0 and fr57["retreat_until"] == 0
+    fr57["impurity"] = 60
+    fr57["guo"] = {"name": "满杂质"}
+    ok57, why57 = pu57.refine(fr57, t57)
+    assert not ok57 and "杂质" in why57
+    print("F6 fruit/retreat ok")
+
+    # ⑦ 文案 / DB 往返 / main.py 接线 / help 分组
+    lines57 = pu57.panel_lines(sl57, t57)
+    assert any("人傀" in x for x in lines57) and any("杂质" in x for x in lines57)
+    assert "#炼制人傀" in pu57.help_text() and "闭关化杂" in pu57.rules_text()
+    d57 = mk57("db57")
+    s57d = pu57.state_of(mt57.state_of(d57))
+    s57d["remains"] = {"name": "库傀", "atk": 1000, "def": 600, "hp": 5000}
+    pu57.craft(s57d, t57, {"atk": 1000, "defense": 600, "hp": 5000})
+    d57.ext["evil"] = s57d
+    await db.save_player(d57.model_dump())
+    row57 = await db.get_player("db57")
+    assert pu57.state_of(mt57.state_of(PlayerDoc(**row57)))["puppet"]["name"] == "库傀"
+    src57 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    names57 = ["CMD_PUP_CRAFT", "CMD_PUP_MY", "CMD_PUP_SUMMON", "CMD_PUP_REPAIR",
+               "CMD_PUP_DESTROY", "CMD_PUP_REFINE", "CMD_PUP_MELT", "CMD_PUP_RETREAT"]
+    miss57 = [c for c in names57 if f"@filter.command({c}" not in src57]
+    assert miss57 == [], f"漏注册：{miss57}"
+    assert "pup_mod.battle_bonus(" in src57 and "await self._pup_open(event)" in src57
+    assert "pup_mod.craft(" in src57 and "确认请发送「#毁去人傀 确认」" in src57
+    help57 = _json57.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
+    assert len(help57) == 39 and help57[-1]["group"] == "人傀 · 外来道果"
+    print("W8-F6 puppet ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

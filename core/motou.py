@@ -108,8 +108,12 @@ def record_result(s: dict, target_name: str, win: bool, now: float) -> dict:
     return s
 
 
-def dispose(s: dict, kind: str, target_s: dict, now: float) -> tuple[bool, str, dict, dict]:
-    """处置战果。返回 (ok, msg, 自己档, 对方档变更)。"""
+def dispose(s: dict, kind: str, target_s: dict, now: float,
+            target_snapshot: dict | None = None, target_realm: int = 0) -> tuple[bool, str, dict, dict]:
+    """处置战果。返回 (ok, msg, 自己档, 对方档变更)。
+
+    W8-F6：新增两个可选参数，供人傀链写遗蜕快照 / 开放夺果；不传时保持 B5 旧行为。
+    """
     p = s.get("pending")
     if not p:
         return False, "没有待处置的镇魂战果。", s, {}
@@ -132,16 +136,26 @@ def dispose(s: dict, kind: str, target_s: dict, now: float) -> tuple[bool, str, 
     if kind == "灭魂":
         if s.get("remains"):
             return False, "你已有一具待炼遗蜕。", s, {}
-        s["remains"] = {"name": tname, "ts": now}
+        s["remains"] = {"name": tname, "ts": now, **(target_snapshot or {})}
         s["pending"] = None
-        return True, f"你斩灭{tname}一缕真灵，收得一具遗蜕（#炼化遗蜕 可得修为）。", s, {
+        return True, (f"你斩灭{tname}一缕真灵，收得一具遗蜕（可「#炼化遗蜕」得修为，"
+                      f"或「#炼制人傀」成傀）。"), s, {
             "protected_until": now + PROTECTION,
         }
     if kind == "夺果":
         if s.get("guo"):
-            return False, "你已有一枚待炼道果。", s, {}
-        return False, "目标尚未凝成可剥取的高阶道果（本插件未开放道果体系）。", s, {}
-    return False, "可选处置：烙印 / 灭魂。", s, {}
+            return False, "你已有一枚待炼道果，请先「#炼化道果」。", s, {}
+        if int(target_realm) < GUO_MIN_REALM:
+            return False, f"目标尚未凝成可剥取的高阶道果（需境界 ≥{GUO_MIN_REALM}）。", s, {}
+        # W8-F6：原版取目标「自身之道类型/名称」，本移植无该体系 → 折算为目标名号
+        s["guo"] = {"name": f"{tname}·道果", "way": "自身之道", "ts": now}
+        s["pending"] = None
+        return True, (f"你剥取{tname}一枚道果（「#炼化道果」可炼入外来道果槽）；"
+                      f"对方道果裂痕 6 小时（全属性 -5%）。"), s, {
+            "protected_until": now + PROTECTION,
+            "crack_until": now + 6 * 3600,
+        }
+    return False, "可选处置：烙印 / 灭魂 / 夺果。", s, {}
 
 
 def refine_remains(s: dict, realm_index: int) -> tuple[bool, str, dict, dict]:
