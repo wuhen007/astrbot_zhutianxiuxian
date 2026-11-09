@@ -8061,6 +8061,141 @@ async def main():
     gm60 = open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
     assert "位面大事件 · 诸天异象" in gm60 and "handle_ip_fuse" in gm60
     print("W8-F9 realm_event ok")
+    # ========================================================= W9-F1/F2：帝路雷劫 + 悟道道途
+    import json as _json60
+    from core import daolu as dl60, wudao as wd60, era as era60, zhengdao as dz60
+
+    class _Lucky60:
+        """恒过 rng：random()=0.01，uniform 取上界。"""
+        def random(self):
+            return 0.01
+        def uniform(self, a, b):
+            return b
+
+    class _Doom60:
+        """恒败 rng。"""
+        def random(self):
+            return 0.99
+        def uniform(self, a, b):
+            return a
+
+    era60s = era60.state_of(0)   # 神话时代：qi_cost 0.4
+    assert abs(float(era60s["qi_cost"]) - 0.4) < 1e-9
+
+    # —— 五档雷劫：越级 / 门槛 / 失败 / 自动复活 / 成功 / 速通
+    d60 = PlayerDoc(uid="u60", name="渡劫人", realm_index=5, exp=10_000_000,
+                    stones=1_000_000, ext={"xueqi": 10_000_000, "potential": 10.0,
+                                           "shouyuan": 5_000_000, "hp": 100.0})
+    ok60, msg60, _ = dl60.run(d60, "圣人", era60s, time.time(), _Lucky60())
+    assert not ok60 and "逐档" in msg60, msg60
+    ok60, msg60, _ = dl60.run(d60, "斩道", era60s, time.time(), _Lucky60())
+    assert not ok60 and "权柄" in msg60, msg60            # 权柄 5 < 10
+
+    d60.realm_index = 15                                  # 权柄 15 ≥ 10
+    pot60, exp60 = float(d60.ext["potential"]), d60.exp
+    cost60 = int(dl60.BASE_COST * dl60.TIERS[0]["mult"] * float(era60s["qi_cost"]))
+    ok60, msg60, _ = dl60.run(d60, "斩道", era60s, time.time(), _Doom60())
+    assert not ok60 and "失败" in msg60, msg60
+    assert float(d60.ext["potential"]) == pot60 - 1, "潜力消耗"
+    assert d60.exp == int((exp60 - cost60) * 0.75), "失败修为 = (exp-成本)×75%"
+    assert dz60.peek(d60) == 1.0, "失败道伤 +1"
+    assert "复活发动" not in msg60, "无复活功法不武装复活窗口"
+    assert dl60.state_of(d60)["passed"] == -1, "失败不记录档位"
+
+    d60.exp = exp60
+    d60.ext["gongfa"] = ["柳神法"]                        # 自动复活：损耗抵消
+    ok60, msg60, _ = dl60.run(d60, "斩道", era60s, time.time(), _Doom60())
+    assert not ok60 and "复活功法" in msg60, msg60
+    assert d60.exp == exp60 - cost60, "自动复活应回满至扣费后修为"
+    assert dl60.state_of(d60)["passed"] == -1, "失败不记录档位"
+
+    d60.ext["gongfa"] = []
+    ok60, msg60, _ = dl60.run(d60, "斩道", era60s, time.time(), _Lucky60())
+    assert ok60 and "渡过" in msg60, msg60
+    assert dl60.state_of(d60)["passed"] == 0, "斩道档位记录（索引0）"
+    assert abs(dz60.state_of(d60)["power_bonus"] - 0.1) < 1e-9, "帝威 +0.1"
+    ok60, msg60, _ = dl60.run(d60, "斩道", era60s, time.time(), _Lucky60())
+    assert not ok60 and "无需重渡" in msg60, msg60
+    ok60, msg60, _ = dl60.run(d60, "准帝", era60s, time.time(), _Lucky60())
+    assert not ok60 and "逐档" in msg60, msg60
+
+    ok60, msg60, _ = dl60.disperse(d60, "圣人", era60s, time.time(), _Lucky60())
+    assert not ok60 and "权柄" in msg60, msg60            # 权柄 15 < 16 不可打散
+    d60.realm_index = 20                                  # 权柄 20 ≥ 16
+    ok60, msg60, _ = dl60.disperse(d60, "圣人", era60s, time.time(), _Lucky60())
+    assert ok60 and "打散" in msg60 and "双倍" in msg60, msg60
+    assert dl60.state_of(d60)["passed"] == 1, "圣人档记录（索引1）"
+    assert dl60.state_of(d60)["dispersed"] == 1, "速通计数"
+    assert abs(dz60.state_of(d60)["power_bonus"] - 0.3) < 1e-9, "帝威 0.1+0.2"
+    print("W9-F1 daolu ok")
+
+    # —— 悟道：门槛 / 消耗 / 失败损失 / 古茶 / 每日上限 / 面板
+    d61b = PlayerDoc(uid="u61b", name="凡悟", realm_index=2, exp=10_000_000,
+                     stones=10_000_000, ext={"xueqi": 10_000_000, "potential": 500.0,
+                                             "shouyuan": 900_000, "hp": 100.0})
+    ok61, msg61, _ = wd60.attempt(d61b, {}, time.time(), _Lucky60())
+    assert not ok61 and "斩道" in msg61, msg61            # 权柄 4 < 10
+
+    d61 = PlayerDoc(uid="u61", name="悟道人", realm_index=12, physique_index=4, exp=10_000_000,
+                    stones=10_000_000, ext={"xueqi": 10_000_000, "potential": 500.0,
+                                            "shouyuan": 900_000, "hp": 100.0})
+    node61 = wd60.current_node(wd60.state_of(d61))
+    assert node61 and node61["name"] == "王者道则", node61
+    pot61, sy61 = float(d61.ext["potential"]), int(d61.ext["shouyuan"])
+    ok61, msg61, _ = wd60.attempt(d61, {}, time.time(), _Lucky60())
+    assert ok61 and "道则进度" in msg61, msg61
+    c61 = wd60.costs_of(d61, 0)
+    assert float(d61.ext["potential"]) == pot61 - c61["potential"], "潜力消耗"
+    assert int(d61.ext["shouyuan"]) == sy61 - c61["shouyuan"], "寿元燃烧"
+    assert int(d61.ext["xueqi"]) == 10_000_000 - c61["xueqi"], "血气消耗"
+
+    # 失败：恒败 rng 有损失；先显式吃茶（减半），再验证 attempt 自动补扣
+    d61.ext["potential"] = 500.0
+    exp_b61 = d61.exp
+    ok61, msg61, _ = wd60.attempt(d61, {}, time.time(), _Doom60())
+    assert ok61 and "失败" in msg61, msg61                # 悟道失败仍返回 ok=True（有结果）
+    assert d61.exp < exp_b61, "失败有损失"
+    ok61, msg61, _ = wd60.tea(d61, {"悟道古茶": 2})
+    assert ok61, msg61
+    d61.ext["potential"] = 500.0
+    ok61, msg61, _ = wd60.attempt(d61, {}, time.time(), _Doom60())
+    assert ok61 and "减半" in msg61, msg61                # 显式吃茶生效
+    d61.ext["potential"] = 500.0
+    _st61 = wd60.state_of(d61)          # 前面已用满当日次数，单测重置计数验证自动补扣
+    _st61["count"] = 0
+    wd60.save(d61, _st61)
+    ok61, msg61, delta61 = wd60.attempt(d61, {"悟道古茶": 2}, time.time(), _Doom60())
+    assert ok61 and delta61.get("悟道古茶") == -1, "古茶 buff 用尽后自动补扣"
+
+    # 每日上限：连吃 3 次（恒过）→ 第 4 次拒；有丹则续
+    d62 = PlayerDoc(uid="u62", name="悟道人二", realm_index=12, physique_index=4, exp=10_000_000,
+                    stones=10_000_000, ext={"xueqi": 10_000_000, "potential": 900.0,
+                                            "shouyuan": 900_000, "hp": 100.0})
+    for _ in range(3):
+        ok62, msg62, _ = wd60.attempt(d62, {}, time.time(), _Lucky60())
+        assert ok62, msg62
+    ok62, msg62, _ = wd60.attempt(d62, {}, time.time(), _Lucky60())
+    assert not ok62 and "大衍悟道丹" in msg62, msg62
+    d62.exp += wd60.costs_of(d62, 0)["exp"]
+    d62.ext["xueqi"] = 10_000_000
+    ok62, msg62, delta62 = wd60.attempt(d62, {"大衍悟道丹": 1}, time.time(), _Lucky60())
+    assert ok62 and delta62.get("大衍悟道丹") == -1, (msg62, delta62)
+    assert "真实寿元" in wd60.panel(d61) and "当前节点" in wd60.panel(d61)
+    assert "王者道则" in wd60.panel(d62)
+
+    # main.py 接线 + help 分组 + 手册分组
+    src60 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    names60 = ["CMD_DL_ZHANDAO", "CMD_DL_SHENGREN", "CMD_DL_SHENGRENWANG", "CMD_DL_DASHENG",
+               "CMD_DL_ZHUNDI", "CMD_DL_DISPERSE", "CMD_DL_PANEL", "CMD_DL_RULES",
+               "CMD_WD_ATTEMPT", "CMD_WD_TEA", "CMD_WD_PATH"]
+    miss60 = [c for c in names60 if f"@filter.command({c}" not in src60]
+    assert miss60 == [], f"漏注册：{miss60}"
+    assert "dl_mod.run(" in src60 and "wd_mod.attempt(" in src60
+    assert "daolu as dl_mod, wudao as wd_mod" in src60
+    help60 = _json60.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
+    assert any(g["group"] == "帝路 · 五档雷劫与悟道" for g in help60)
+    assert "帝路·悟道" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
+    print("W9-F2 wudao ok")
 
     await db.close()
     print("ALL M12 CHECKS PASSED")

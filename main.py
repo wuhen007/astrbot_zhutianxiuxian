@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -744,6 +744,19 @@ CMD_DZ_CHARGE_EXTREME = "#冲关极境"
 CMD_DZ_GUARD = "#护法"
 CMD_DZ_UNGUARD = "#解除护法"
 CMD_DZ_HEART = "#天心印记"
+# W9-F1：帝路五档雷劫（斩道→圣人→圣人王→大圣→准帝，衔接 #证道成帝）
+CMD_DL_ZHANDAO = "#渡斩道雷劫"
+CMD_DL_SHENGREN = "#渡圣人雷劫"
+CMD_DL_SHENGRENWANG = "#渡圣人王雷劫"
+CMD_DL_DASHENG = "#渡大圣雷劫"
+CMD_DL_ZHUNDI = "#渡准帝雷劫"
+CMD_DL_DISPERSE = "#打散雷劫"
+CMD_DL_PANEL = "#帝路"
+CMD_DL_RULES = "#帝路规则"
+# W9-F2：悟道与道途（八重己道节点，燃烧寿元参悟）
+CMD_WD_ATTEMPT = "#悟道"
+CMD_WD_TEA = "#悟道古茶"
+CMD_WD_PATH = "#我的道途"
 # W8-B1b：至尊线（至尊骨 / 斩骨涅槃 / 舍骨入血 / 试炼 / 仙骨 / 重瞳 / 瞳骨合一）
 CMD_SP_INHERIT = "#至尊传承"
 CMD_SP_PANEL = "#至尊之路"
@@ -19420,6 +19433,130 @@ class ZhutianPlugin(Star):
         inv = await self.db.get_inventory(doc.uid)
         result = dz_mod.charge(doc, inv, time.time(), random.Random(), extreme=True)
         async for r in self._dz_finish(event, doc, result, "极境冲关"):
+            yield r
+
+    # ------------------------------------------------ W9-F1/F2：帝路雷劫与悟道
+
+    async def _dl_finish(self, event, doc: PlayerDoc, result, title: str):
+        """帝路通用落库：玩家档 + 物品增减（成功出面板，失败出纯文本）。"""
+        ok, msg, delta = result
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            for name, qty in (delta or {}).items():
+                if qty > 0:
+                    await self.db.add_items(doc.uid, {name: qty})
+                elif qty < 0:
+                    await self.db.remove_item(doc.uid, name, -qty)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        async for r in self._smart(event, msg, title):
+            yield r
+
+    async def _do_dl_trib(self, event, tier_name: str, disperse: bool = False):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        era_state = await self._era_state()
+        now = time.time()
+        rng = random.Random(f"{doc.uid}:daolu:{tier_name}:{int(now)}")
+        if disperse:
+            result = dl_mod.disperse(doc, tier_name, era_state, now, rng)
+            title = "打散雷劫"
+        else:
+            result = dl_mod.run(doc, tier_name, era_state, now, rng)
+            title = f"{tier_name}雷劫"
+        async for r in self._dl_finish(event, doc, result, title):
+            yield r
+
+    @filter.command(CMD_DL_ZHANDAO, "帝路雷劫：斩道（权柄≥10，潜力1点）")
+    async def handle_dl_zhandao(self, event: AstrMessageEvent):
+        async for r in self._do_dl_trib(event, "斩道"):
+            yield r
+
+    @filter.command(CMD_DL_SHENGREN, "帝路雷劫：圣人（权柄≥12，潜力2点）")
+    async def handle_dl_shengren(self, event: AstrMessageEvent):
+        async for r in self._do_dl_trib(event, "圣人"):
+            yield r
+
+    @filter.command(CMD_DL_SHENGRENWANG, "帝路雷劫：圣人王（权柄≥14，潜力3点）")
+    async def handle_dl_shengrenwang(self, event: AstrMessageEvent):
+        async for r in self._do_dl_trib(event, "圣人王"):
+            yield r
+
+    @filter.command(CMD_DL_DASHENG, "帝路雷劫：大圣（权柄≥16，潜力4点）")
+    async def handle_dl_dasheng(self, event: AstrMessageEvent):
+        async for r in self._do_dl_trib(event, "大圣"):
+            yield r
+
+    @filter.command(CMD_DL_ZHUNDI, "帝路雷劫：准帝（权柄≥18，潜力5点）")
+    async def handle_dl_zhundi(self, event: AstrMessageEvent):
+        async for r in self._do_dl_trib(event, "准帝"):
+            yield r
+
+    @filter.command(CMD_DL_DISPERSE, "打散雷劫：权柄≥16保底速通（消耗×2、帝威翻倍）")
+    async def handle_dl_disperse(self, event: AstrMessageEvent, arg: str = ""):
+        tier = dl_mod.find_tier(arg or "")
+        if tier is None:
+            yield event.plain_result("用法：#打散雷劫 斩道/圣人/圣人王/大圣/准帝")
+            return
+        async for r in self._do_dl_trib(event, str(tier["name"]), disperse=True):
+            yield r
+
+    @filter.command(CMD_DL_PANEL, "帝路面板：已渡档位与下一档")
+    async def handle_dl_panel(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, dl_mod.panel(doc), "帝路"):
+            yield r
+
+    @filter.command(CMD_DL_RULES, "帝路五档雷劫规则")
+    async def handle_dl_rules(self, event: AstrMessageEvent):
+        yield event.plain_result(dl_mod.rules_text())
+
+    @filter.command(CMD_WD_ATTEMPT, "悟道：参悟当前己道节点（燃烧寿元）")
+    async def handle_wd_attempt(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        result = wd_mod.attempt(doc, inv, time.time(),
+                                random.Random(f"{doc.uid}:wudao:{int(time.time())}"))
+        async for r in self._dl_finish(event, doc, result, "悟道"):
+            yield r
+
+    @filter.command(CMD_WD_TEA, "悟道古茶：下次悟道损失减半、顿悟+10%")
+    async def handle_wd_tea(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        result = wd_mod.tea(doc, inv)
+        async for r in self._dl_finish(event, doc, result, "悟道古茶"):
+            yield r
+
+    @filter.command(CMD_WD_PATH, "我的道途：己道节点进度与寿元")
+    async def handle_wd_path(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, wd_mod.panel(doc), "我的道途"):
             yield r
 
     @filter.command(CMD_DZ_GUARD, "护法")
