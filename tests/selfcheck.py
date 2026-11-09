@@ -8742,6 +8742,28 @@ async def main():
     assert "位面大事件" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
     print("W17-F1 plane_events ok")
 
+    # ========================================================= W18-F1：金银坊
+    from core import games_mini as gm130
+
+    d130 = PlayerDoc(uid="u130", name="赌客", stones=50_000,
+                     ext={"xueqi": 100, "potential": 0, "shouyuan": 100, "hp": 1})
+    ok130, msg130 = gm130.bet(d130, "买定离手", None, time.time(), _random.Random(1))
+    assert not ok130 and "用法" in msg130, msg130
+    ok130, msg130 = gm130.bet(d130, "大", 99_999_999, time.time(), _random.Random(1))
+    assert not ok130 and "本钱不够" in msg130, msg130        # 上限裁到 100 万但身上只有 5 万
+    ok130, msg130 = gm130.bet(d130, "大", None, time.time(), _random.Random(2))
+    assert ok130 and "媚娘掷出" in msg130, msg130
+    assert d130.stones != 50_000, "输赢已结算"
+    ok130, msg130 = gm130.bet(d130, "大", None, time.time(), _random.Random(2))
+    assert not ok130 and "分钟" in msg130, msg130            # 3 分钟 CD
+
+    src130 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    assert '@filter.command(CMD_GMF' in src130 and "gm_mod.bet(" in src130
+    help130b = _json60.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
+    assert any(g["group"] == "金银坊 · 猜大小" for g in help130b)
+    assert "金银坊" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
+    print("W18-F1 games_mini ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

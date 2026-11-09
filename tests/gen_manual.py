@@ -63,6 +63,7 @@ def main() -> int:
                    "handle_ls_sell", "handle_ls_my", "handle_ls_trend",
                    "handle_ls_tip", "handle_ls_chat", "handle_ls_loan",
                    "handle_ls_repay", "handle_ls_rank")),
+        ("金银坊", ("handle_gmf",)),
         ("位面大事件", ("handle_pe_pass", "handle_pe_reinforce", "handle_pe_blood",
                     "handle_pe_war", "handle_pe_side", "handle_pe_act",
                     "handle_pe_fund", "handle_pe_rank", "handle_pe_shop",
