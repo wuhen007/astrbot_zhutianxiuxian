@@ -7903,6 +7903,165 @@ async def main():
     assert "天地榜 · 积分赛与天地堂" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
     print("W8-F8 tiandibang ok")
 
+    # ---------------- 60. W8-F9 位面大事件 / 异域叩击帝关 ----------------
+    from core import realm_event as rev60
+    import json as _json60
+
+    now60 = 1_800_000_000.0
+    pd60 = store.table("位面坐标") or {}
+    wy60 = 12_000
+
+    class _R60:
+        """确定性随机源：random() 固定，randrange 恒取 0。"""
+        def __init__(self, v):
+            self.v = v
+        def random(self):
+            return self.v
+        def randrange(self, n):
+            return 0
+
+    cal60 = {}
+    ev60, fresh60 = rev60.event_state(cal60, wy60)
+    assert fresh60 and ev60["last_world_year"] == wy60 - rev60.EVENT_COOLDOWN_YEARS
+    _ev60b, fresh60b = rev60.event_state(cal60, 0)
+    assert not fresh60b, "世界年 0 起算不得反复判为新建（F8 同款坑）"
+    assert len(rev60.EVENT_NAMES) == 8
+    assert all(rev60.weighted_types(i) for i in range(5))
+    assert rev60.type_by_name("天地异变") == "worldChange"
+    assert rev60.type_by_name("无此异象") is None
+
+    # ① 惰性触发：冷却 / 概率 / 活跃上限 / 类型去重 / 超管强制
+    r60 = _random.Random("rev60")
+    assert not rev60.maybe_spawn(ev60, wy60 + 100, 0, now60, r60, pd60)[1], "冷却未到不得触发"
+    msg60, ch60 = rev60.maybe_spawn(ev60, wy60, 0, now60, r60, pd60,
+                                    force=True, preferred="worldChange")
+    assert ch60 and ev60["active"][0]["type"] == "worldChange"
+    assert "「#参与位面大事件」" in msg60
+    e60 = ev60["active"][0]
+    assert e60["expires_at"] - e60["started_at"] == rev60.EVENT_DURATION
+    assert ev60["last_world_year"] == wy60 and ev60["stats"]["worldChange"] == 1
+    assert len(ev60["history"]) == 1 and e60["plane"] and e60["location"]
+    msg60, ch60 = rev60.maybe_spawn(ev60, wy60 + 2000, 3, now60, _R60(0.0), pd60)
+    assert ch60 and len(ev60["active"]) == 2
+    assert len({x["type"] for x in ev60["active"]}) == 2, "同类型不得重复出现"
+    assert not rev60.maybe_spawn(ev60, wy60 + 4000, 4, now60, _R60(0.99), pd60)[1], "掷骰失败"
+    rev60.maybe_spawn(ev60, wy60 + 3000, 0, now60, r60, pd60, force=True)
+    assert len(ev60["active"]) == 3
+    assert not rev60.maybe_spawn(ev60, wy60 + 6000, 2, now60, _R60(0.0), pd60)[1], "活跃上限 3"
+    print("F9 spawn/cooldown ok")
+
+    # ② 参与：精确坐标 / 重复 / 奖励 / 历史同步 / 过期
+    p60 = PlayerDoc(uid="u60", name="甲", realm_index=10, physique_index=4)
+    p60.ext["plane"] = {"current": e60["plane"],
+                        "coords": {e60["plane"]: {"x": e60["x"], "y": e60["y"]}}}
+    assert rev60.reward_of(p60) == (10 + 4 + 5 * 2 + 2) * 5000
+    assert rev60.reward_of(PlayerDoc(uid="zero")) == rev60.REWARD_MIN
+    ok60, msg60, gain60 = rev60.join(ev60, "u60", "甲", p60, now60)
+    assert ok60 and gain60 == rev60.reward_of(p60)
+    assert not rev60.join(ev60, "u60", "甲", p60, now60)[0], "每人每事件一次"
+    assert "u60" in ev60["history"][0]["participants"], "参与名单要同步进历史"
+    bad60 = PlayerDoc(uid="u60b", name="乙")
+    bad60.ext["plane"] = {"current": "凡间", "coords": {"凡间": {"x": -1, "y": -1}}}
+    ok60, msg60, _ = rev60.join(ev60, "u60b", "乙", bad60, now60)
+    assert not ok60 and "精确坐标" in msg60
+    assert rev60.prune(ev60, now60 + rev60.EVENT_DURATION + 1) and ev60["active"] == []
+    assert not rev60.join(ev60, "u60c", "丙", p60, now60 + rev60.EVENT_DURATION + 1)[0]
+    assert "「#参与位面大事件」" in rev60.rules_text()
+    assert any("统计" in x for x in rev60.board_lines(ev60, now60, wy60))
+    assert len(rev60.history_lines(ev60, 20)) >= 2
+    print("F9 join/board ok")
+
+    # ③ 帝关状态机：首年落库 / 触发 / 告急 / 超期城破
+    ps60, fresh_p60 = rev60.pass_state(cal60)
+    assert fresh_p60 and ps60["status"] == "dormant"
+    _ps60b, fresh_p60b = rev60.pass_state(cal60)
+    assert not fresh_p60b
+    m60, ops60, ch60 = rev60.maybe_tick(ps60, 5000, now60, _R60(0.99), ["u60"], True)
+    assert ch60 and ps60["last_checked_year"] == 5000 and ps60["status"] == "dormant"
+    assert not rev60.maybe_tick(ps60, 5000, now60, _R60(0.0), ["u60"], True)[2], "同年不得重掷"
+    m60, ops60, ch60 = rev60.maybe_tick(ps60, 6000, now60, _R60(0.0), ["u60"], True)
+    assert ch60 and ps60["status"] == "active" and ps60["wave"] == 1
+    a60 = ps60["active"]
+    assert a60["kill_target"] == 100 and a60["morale"] == 100
+    assert a60["deadline_world_year"] == 6000 + rev60.WAVE_YEARS
+    assert "「#驰援帝关」" in m60
+    m60, ops60, ch60 = rev60.maybe_tick(ps60, 7000, now60, _R60(0.0), ["u60"], True)
+    assert ch60 and a60["reminded_years"] == [1000] and "帝关烽火" in m60
+    assert not rev60.maybe_tick(ps60, 7000, now60, _R60(0.0), ["u60"], True)[2], "告急不得重复"
+    m60, ops60, ch60 = rev60.maybe_tick(ps60, 9000, now60, _R60(0.0), ["u60"], True)
+    assert ch60 and ps60["status"] == "ended" and ps60["outcome"] == "breached"
+    assert ops60[0]["destroy_planes"] == list(rev60.TARGET_PLANES)
+    print("F9 imperial pass tick ok")
+
+    # ④ 出战 / 波次完成 / 帝血闭环 / 决战 / 城破
+    ps60, _ = rev60.pass_state({})
+    rev60.start_wave(ps60, 1, 1000, ["u1", "u2"], now60)
+    assert rev60.sortie_cd_left(ps60, "u1", now60) == 0
+    rev60.apply_sortie(ps60, "u1", "甲", 20, False, now60)
+    assert rev60.sortie_cd_left(ps60, "u1", now60) > 0
+    rev60.apply_sortie(ps60, "u1", "甲", 20, False, now60)
+    rev60.apply_sortie(ps60, "u2", "乙", 30, True, now60)
+    assert ps60["active"]["total_kills"] == 70 and ps60["active"]["morale"] == 30
+    assert rev60.support_of(ps60["active"]) == (2, 2)
+    assert not rev60.is_wave_complete(ps60["active"]), "斩敌未满 100"
+    rev60.apply_sortie(ps60, "u1", "甲", 50, False, now60 + 601)
+    assert rev60.is_wave_complete(ps60["active"])
+    m60, ops60 = rev60.complete_wave(ps60, 1200, _R60(0.99))
+    assert ps60["status"] == "resting" and ps60["next_wave_year"] == 1200 + rev60.REST_YEARS
+    assert not ps60["prisoners"] and "帝关大捷" in m60
+    m60, ops60, ch60 = rev60.maybe_tick(ps60, 6200, now60, _R60(0.0), ["u1", "u2"], True)
+    assert ch60 and ps60["wave"] == 2 and ps60["status"] == "active"
+    rev60.start_wave(ps60, 3, 7000, ["u1"], now60)
+    rev60.apply_sortie(ps60, "u1", "甲", 100, False, now60)
+    m60, ops60 = rev60.complete_wave(ps60, 7100, _R60(0.99))
+    assert ps60["active"]["phase"] == "kingBattle"
+    assert ops60 and ops60[0]["grant"] == ("u1", {rev60.BLOOD_ITEM: 1}), "帝血须有产出点"
+    assert "「#融合帝血」" in m60
+    assert not rev60.fuse(ps60, "ghost", "鬼", True, 7200)[0], "未参战不得融合"
+    ok60, msg60, ops60 = rev60.fuse(ps60, "u1", "甲", True, 7200)
+    assert ok60 and ps60["status"] == "ended" and ps60["outcome"] == "defended"
+    assert ops60[0]["stones"] == ("u1", rev60.CHAMPION_STONES)
+    ps60c, _ = rev60.pass_state({})
+    rev60.start_wave(ps60c, 3, 8000, ["u9"], now60)
+    rev60.apply_sortie(ps60c, "u9", "丙", 100, False, now60)
+    rev60.complete_wave(ps60c, 8100, _R60(0.99))
+    ok60, msg60, ops60 = rev60.fuse(ps60c, "u9", "丙", False, 8200)
+    assert ok60 and ps60c["outcome"] == "breached" and ops60[0]["destroy_planes"]
+    print("F9 sortie/king battle ok")
+
+    # ⑤ 面板 / 文案 / DB 往返 / main.py 接线 / help 分组
+    ps_panel60, _ = rev60.pass_state({})
+    rev60.start_wave(ps_panel60, 1, 1000, ["u1"], now60)
+    assert any("异域叩击帝关" in x for x in rev60.panel_lines(ps_panel60, 7200))
+    assert any("帝关战史" in x for x in rev60.panel_lines(ps60, 7200))
+    assert any("帝关威名榜" in x for x in rev60.prestige_lines(ps60, 20))
+    assert "「#驰援帝关」" in rev60.pass_rules_text()
+    assert "「#诸天大事件」" in rev60.help_text()
+    assert rev60.clear_events(ev60) and ev60["active"] == []
+    rev60.commit(cal60, ev60, ps60)
+    await db.save_calamity(cal60)
+    back60 = await db.get_calamity()
+    bev60, fe60 = rev60.event_state(back60, wy60)
+    bps60, fp60 = rev60.pass_state(back60)
+    assert not fe60 and not fp60 and bps60["outcome"] == "defended"
+    assert len(bev60["history"]) == len(ev60["history"])
+    src60 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    names60 = ["CMD_REV_BOARD", "CMD_REV_HISTORY", "CMD_REV_JOIN", "CMD_REV_SPAWN",
+               "CMD_REV_CLEAR", "CMD_IP_BOARD", "CMD_IP_SORTIE", "CMD_IP_FUSE",
+               "CMD_IP_RANK", "CMD_IP_FORCE"]
+    miss60 = [c for c in names60 if f"@filter.command({c}" not in src60]
+    assert miss60 == [], f"漏注册：{miss60}"
+    assert "realm_event as rev_mod" in src60 and "async def _rev_open" in src60
+    assert "rev_mod.maybe_spawn(" in src60 and "rev_mod.maybe_tick(" in src60
+    assert "async def _rev_flush" in src60 and "async def _rev_ops" in src60
+    assert "alias={CMD_IP_BOARD_ALIAS}" in src60 and "alias={CMD_IP_SORTIE_ALIAS}" in src60
+    help60 = _json60.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
+    assert any(g["group"] == "位面大事件 · 诸天异象" for g in help60)
+    assert any(g["group"] == "异域叩击帝关 · 全服防守" for g in help60)
+    gm60 = open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
+    assert "位面大事件 · 诸天异象" in gm60 and "handle_ip_fuse" in gm60
+    print("W8-F9 realm_event ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

@@ -197,6 +197,10 @@ def main() -> int:
         ("天地榜 · 积分赛与天地堂", ("handle_tdb_join", "handle_tdb_pk",
                           "handle_tdb_board", "handle_tdb_sync", "handle_tdb_shop",
                           "handle_tdb_buy", "handle_tdb_reset", "handle_tdb_settle")),
+        ("位面大事件 · 诸天异象", ("handle_rev_board", "handle_rev_history",
+                          "handle_rev_join", "handle_rev_spawn", "handle_rev_clear")),
+        ("异域叩击帝关 · 全服防守", ("handle_ip_board", "handle_ip_sortie",
+                          "handle_ip_fuse", "handle_ip_rank", "handle_ip_force")),
         ("帮助", ("handle_help",)),
     ]
     grouped = {}

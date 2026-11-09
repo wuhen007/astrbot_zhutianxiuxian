@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -460,6 +460,20 @@ CMD_TDB_SHOP = "#天地堂"
 CMD_TDB_BUY = "#积分兑换"
 CMD_TDB_RESET = "#清空积分"
 CMD_TDB_SETTLE = "#结算天地榜奖励"
+
+# W8-F9：位面大事件 / 异域叩击帝关
+CMD_REV_BOARD = "#诸天大事件"        # 原版 #大事件 / #位面大事件记录（本移植 #位面大事件 已被纪元大事记占用）
+CMD_REV_HISTORY = "#大事件记录"
+CMD_REV_JOIN = "#参与位面大事件"
+CMD_REV_SPAWN = "#引发位面大事件"
+CMD_REV_CLEAR = "#清除位面大事件"
+CMD_IP_BOARD = "#帝关战况"
+CMD_IP_BOARD_ALIAS = "#异域叩关"
+CMD_IP_SORTIE = "#驰援帝关"
+CMD_IP_SORTIE_ALIAS = "#迎战异域"
+CMD_IP_FUSE = "#融合帝血"
+CMD_IP_RANK = "#帝关威名榜"
+CMD_IP_FORCE = "#强制异域叩关"
 
 
 
@@ -2246,6 +2260,30 @@ class ZhutianPlugin(Star):
                             "db 恒 v17；cron 周一结算 → 指令入口惰性 tick；原版「#比试」「#天地榜」"
                             "与本移植已有指令撞名 → 改名「#天地榜比试」「#天地榜积分」；"
                             "原版 zd_battle 全量战斗 → 复用 battle.spar（无战损）"),
+            ]},
+            {"title": "位面大事件 · 诸天异象", "lines": [
+                (CMD_REV_BOARD, "当前事件 / 最近 10 条记录 / 累计统计（惰性触发与世界年冷却）"),
+                (CMD_REV_HISTORY, "最近 20 条大事件记录（类型、位面坐标、参与人数）"),
+                (CMD_REV_JOIN, "抵达事件精确坐标后参与：修为与等额血气，每人每事件一次"),
+                (f"{CMD_REV_SPAWN} [类型名]", "超管：绕过 2000 年冷却与 0.35 概率强制引动异象"),
+                (f"{CMD_REV_CLEAR} 确认", "超管：清空当前活跃事件（历史保留）"),
+                ("规则", rev_mod.rules_text()),
+                ("⚠️ 折算", "RealmEvents.js 是无 rule 的服务类，原版由 EraChangeTask cron 触发 → "
+                            "本移植挂 calamity_state[\"realm_event\"]、指令入口惰性 tick，db 恒 v17；"
+                            "圣地大战/秦门兵字秘/万化天魔传承/至宝择主之争无底座 → 8 类通用事件；"
+                            "TravelTask.js 实为穿梭延时结算 cron，本移植「#穿梭」「#抵达」已覆盖"),
+            ]},
+            {"title": "异域叩击帝关 · 全服防守", "lines": [
+                (CMD_IP_BOARD, "战况：士气 / 斩敌 / 应援 / 防守期限 + 威名榜前 5（别名「#异域叩关」）"),
+                (CMD_IP_SORTIE, "出战（10 分钟 CD，须身处遮天位面或九天十地；别名「#迎战异域」）"),
+                (CMD_IP_FUSE, "第三波帝血决战：需参战且持有「帝血」，独战安澜/俞陀"),
+                (CMD_IP_RANK, "帝关威名榜前 20（威名 = 累计斩敌数）"),
+                (CMD_IP_FORCE, "超管：直接点燃帝关烽火 / 推进下一波"),
+                ("规则", rev_mod.pass_rules_text()),
+                ("⚠️ 折算", "原版整档 JSON + 5 分钟 cron → calamity_state[\"imperial_pass\"] + 惰性 tick；"
+                            "秘境/仙古门槛 → 境界 26（九天十地门槛）；12~32 名天骄 → 1 场聚合 battle.spar；"
+                            "「帝血」全库无产出点 → 第三波决战时给威名第一的参战者发 1 枚；"
+                            "城破写 destroyed_planes 封闭界门，囚禁 999999 分钟与公告群推送未搬"),
             ]},
         ]
 
@@ -9837,6 +9875,302 @@ class ZhutianPlugin(Star):
             yield event.plain_result(msg)
             return
         yield event.plain_result((await self._tdb_award(cal, s, msg, ops)).rstrip())
+
+    # ---- W8-F9 位面大事件 / 异域叩击帝关（calamity_state，db 仍 v17） ----
+
+    async def _rev_eligible(self) -> tuple[list[str], bool]:
+        """帝关守城名单：达门槛且身处遮天位面/九天十地的修士（原版 requiredDefenders）。"""
+        eligible: list[str] = []
+        threshold = False
+        for raw in await self.db.all_players():
+            if int(raw.get("realm_index") or 0) < rev_mod.PASS_REALM_GATE:
+                continue
+            threshold = True
+            pst = (raw.get("ext") or {}).get("plane") or {}
+            if pst.get("current") in rev_mod.TARGET_PLANES:
+                eligible.append(str(raw.get("uid") or ""))
+        return eligible, threshold
+
+    async def _rev_ops(self, cal: dict, m1: str, m2: str, ops: list[dict]) -> str:
+        """处理惰性 tick 产生的副作用（发帝血 / 封闭界门），返回要前置播报的文案。"""
+        lines = [x for x in (m1, m2) if x]
+        for op in ops or []:
+            if "grant" in op:
+                uid, things = op["grant"]
+                await self.db.add_items(uid, things)
+                lines.append(f"【帝血现世】{'、'.join(things)} 已交予威名第一的参战者，"
+                             f"请发「#融合帝血」。")
+            if "destroy_planes" in op:
+                rows = cal.setdefault("destroyed_planes", {})
+                for name in op["destroy_planes"]:
+                    rows[name] = {"source": "异域叩击帝关", "at": time.time()}
+                lines.append("界门封闭：" + "、".join(op["destroy_planes"]) + "。")
+        return ("\n\n".join(lines) + "\n\n") if lines else ""
+
+    async def _rev_flush(self, cal: dict, ev: dict, ps: dict,
+                         player: PlayerDoc | None = None,
+                         items: tuple[str, dict] | None = None) -> None:
+        """两条全服档 + 玩家档 + 物品在同一事务里落库。"""
+        rev_mod.commit(cal, ev, ps)
+        async with self.db.transaction():
+            await self.db.save_calamity(cal)
+            if player is not None:
+                await self.db.save_player(player.model_dump())
+            if items:
+                await self.db.add_items(items[0], items[1])
+
+    async def _rev_open(self, event: AstrMessageEvent):
+        """取玩家 + 两条全服档 + 惰性触发 / 帝关 tick。返回 7 元组。"""
+        import random as _random
+        doc, err = await self._require_player(event)
+        if err:
+            return None, None, None, None, 0, "", err
+        now = time.time()
+        era_st = await self._era_state()
+        wy = rev_mod.world_year_of(era_st)
+        ei = int(era_mod.state_of(wy).get("index") or 0)
+        cal = await self.db.get_calamity()
+        ev, fresh_e = rev_mod.event_state(cal, wy)
+        ps, fresh_p = rev_mod.pass_state(cal)
+        pruned = rev_mod.prune(ev, now)
+        # 只有 dormant（判定门槛/开战）与 resting（开新波）需要全服守城名单；
+        # active/ended 用已存名单，避免每条指令都全表扫玩家。
+        if ps.get("status") in ("dormant", "resting"):
+            eligible, threshold = await self._rev_eligible()
+        else:
+            a0 = ps.get("active") or {}
+            eligible = [str(x) for x in (a0.get("eligible") or [])]
+            threshold = bool(eligible)
+        # 原版是 5 分钟 cron 全服只掷一次骰；这里用 5 分钟窗口种子，
+        # 保证同一窗口内所有玩家看到同一结果，避免每人 roll 一次造成事件风暴。
+        rng = _random.Random(f"rev:{wy}:{int(now // 300)}")
+        m1, changed1 = rev_mod.maybe_spawn(ev, wy, ei, now, rng, self._plane_data())
+        m2, ops2, changed2 = rev_mod.maybe_tick(ps, wy, now, rng, eligible, threshold)
+        prefix = await self._rev_ops(cal, m1, m2, ops2)
+        rev_mod.commit(cal, ev, ps)
+        if fresh_e or fresh_p or pruned or changed1 or changed2:
+            await self.db.save_calamity(cal)
+        return doc, ev, ps, cal, wy, prefix, None
+
+    @filter.command(CMD_REV_BOARD, "诸天大事件")
+    async def handle_rev_board(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        _doc, ev, _ps, _cal, wy, prefix, err = await self._rev_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        era_st = era_mod.state_of(wy)
+        text = prefix + "\n".join(rev_mod.board_lines(
+            ev, time.time(), wy, str(era_st.get("name") or "")))
+        async for r in self._smart(event, text, "位面大事件"):
+            yield r
+
+    @filter.command(CMD_REV_HISTORY, "大事件记录")
+    async def handle_rev_history(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        _doc, ev, _ps, _cal, _wy, prefix, err = await self._rev_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, prefix + "\n".join(
+                rev_mod.history_lines(ev, 20)), "大事件记录"):
+            yield r
+
+    @filter.command(CMD_REV_JOIN, "参与位面大事件")
+    async def handle_rev_join(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, ev, ps, cal, _wy, prefix, err = await self._rev_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, reward = rev_mod.join(
+            ev, doc.uid, doc.name or doc.uid[:8] + "…", doc, time.time())
+        if ok:
+            doc.exp += reward
+            doc.ext["xueqi"] = int(doc.ext.get("xueqi", 0) or 0) + reward
+            await self._rev_flush(cal, ev, ps, player=doc)
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_REV_SPAWN, "引发位面大事件")
+    async def handle_rev_spawn(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result("此令唯超级管理员可执。")
+            return
+        import random as _random
+        _doc, ev, ps, cal, wy, prefix, err = await self._rev_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        tail = self._adm_tail(event).strip()
+        kind = rev_mod.type_by_name(tail) if tail else None
+        if tail and not kind:
+            yield event.plain_result(prefix + "未知事件类型。可发「#诸天大事件」查看 8 类异象名称，"
+                                            "或直接发「#引发位面大事件」随机引动。")
+            return
+        ei = int(era_mod.state_of(wy).get("index") or 0)
+        rng = _random.Random(f"revforce:{wy}:{time.time()}")
+        msg, changed = rev_mod.maybe_spawn(
+            ev, wy, ei, time.time(), rng, self._plane_data(), force=True, preferred=kind)
+        if changed:
+            await self._rev_flush(cal, ev, ps)
+        yield event.plain_result(prefix + (msg or "异象未起，诸天暂时无响应。"))
+
+    @filter.command(CMD_REV_CLEAR, "清除位面大事件")
+    async def handle_rev_clear(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result("此令唯超级管理员可执。")
+            return
+        if self._adm_tail(event).strip() != "确认":
+            yield event.plain_result("确认请发送「#清除位面大事件 确认」。")
+            return
+        _doc, ev, ps, cal, _wy, prefix, err = await self._rev_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        msg = rev_mod.clear_events(ev)
+        await self._rev_flush(cal, ev, ps)
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_IP_BOARD, alias={CMD_IP_BOARD_ALIAS})
+    async def handle_ip_board(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        _doc, _ev, ps, _cal, wy, prefix, err = await self._rev_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, prefix + "\n".join(
+                rev_mod.panel_lines(ps, wy)), "帝关战况"):
+            yield r
+
+    @filter.command(CMD_IP_RANK, "帝关威名榜")
+    async def handle_ip_rank(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        _doc, _ev, ps, _cal, _wy, prefix, err = await self._rev_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, prefix + "\n".join(
+                rev_mod.prestige_lines(ps, 20)), "帝关威名榜"):
+            yield r
+
+    @filter.command(CMD_IP_SORTIE, alias={CMD_IP_SORTIE_ALIAS})
+    async def handle_ip_sortie(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        import random as _random
+        doc, ev, ps, cal, wy, prefix, err = await self._rev_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        a = ps.get("active")
+        if ps.get("status") != "active" or not isinstance(a, dict) or a.get("phase") != "army":
+            yield event.plain_result(prefix + "此刻没有可以迎战的异域大军。")
+            return
+        pst = (doc.ext.get("plane") or {}) if isinstance(doc.ext, dict) else {}
+        if str(pst.get("current") or plane.DEFAULT_PLANE) not in rev_mod.TARGET_PLANES:
+            yield event.plain_result(prefix + "异域叩击的是遮天位面与九天十地，"
+                                            "你必须先身处其中一方才能驰援帝关。")
+            return
+        now = time.time()
+        cd = rev_mod.sortie_cd_left(ps, doc.uid, now)
+        if cd:
+            yield event.plain_result(prefix + f"你刚从帝关战场退下，至少还需调息 {cd // 60 + 1} 分钟。")
+            return
+        wave = int(a.get("wave") or 1)
+        name = doc.name or doc.uid[:8] + "…"
+        rng = _random.Random(f"ip:{doc.uid}:{int(now)}")
+        lo, hi = rev_mod.WAVE_ENEMY_RANGES.get(wave, (26, 32))
+        count = rng.randint(lo, hi)
+        st = self._stats(doc)
+        ratio = rev_mod.WAVE_RATIO.get(wave, 1.5)
+        foe = battle.Unit(f"异域天骄·{count} 骑", max(1, int(st.atk * ratio)),
+                          max(1, int(st.defense * ratio)), max(1, int(st.hp * ratio)), 0.25)
+        me = battle.Unit(name, st.atk, st.defense, st.hp, st.bao)
+        winner, log = battle.spar(me, foe, rng)
+        kills = rev_mod.WAVE_KILLS.get(wave, 30) if winner == 0 else 0
+        defeated = winner != 0
+        rev_mod.apply_sortie(ps, doc.uid, name, kills, defeated, now)
+        got, need = rev_mod.support_of(a)
+        if winner == 0:
+            gain = 200_000 * wave
+            doc.exp += gain
+            doc.ext["xueqi"] = int(doc.ext.get("xueqi", 0) or 0) + gain
+            tail = f"你浴血杀回城头，身后异域天骄尽伏（修为/血气各 +{gain:,}）。"
+        else:
+            doc.exp = max(0, doc.exp - 50_000 * wave)
+            tail = "异域天骄踏着你的兵刃冷笑：“九天无人，不过如此。”（修为受损）"
+        summary = (f"【帝关血战 · 第 {wave} 波】\n{name} 独对 {count} 名同境异域天骄，本次斩敌 {kills} 名。\n"
+                   f"{tail}\n异域士气：{a.get('morale')}/{rev_mod.KILL_TARGET}｜"
+                   f"全军斩敌：{a.get('total_kills')}/{rev_mod.KILL_TARGET}｜帝关应援：{got}/{need}")
+        if log:
+            summary += "\n" + "\n".join(log[-2:])
+        post = ""
+        if rev_mod.is_wave_complete(a):
+            m3, ops3 = rev_mod.complete_wave(ps, wy, rng)
+            post = await self._rev_ops(cal, "", m3, ops3)
+        await self._rev_flush(cal, ev, ps, player=doc)
+        yield event.plain_result(prefix + summary + ("\n\n" + post.rstrip() if post else ""))
+
+    @filter.command(CMD_IP_FUSE, "融合帝血")
+    async def handle_ip_fuse(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        import random as _random
+        doc, ev, ps, cal, wy, prefix, err = await self._rev_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        a = ps.get("active")
+        if ps.get("status") != "active" or not isinstance(a, dict) or a.get("phase") != "kingBattle":
+            yield event.plain_result(prefix + "孟天正事件尚未触发，帝血此刻没有回应。")
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        if int(inv.get(rev_mod.BLOOD_ITEM, 0) or 0) < 1:
+            yield event.plain_result(prefix + "你的纳戒中没有「帝血」。第三波决战时，"
+                                            "帝血会交予威名第一的参战者。")
+            return
+        name = doc.name or doc.uid[:8] + "…"
+        st = self._stats(doc)
+        rng = _random.Random(f"king:{doc.uid}:{int(time.time())}")
+        kings = battle.Unit("不朽之王·安澜/俞陀", max(1, int(st.atk * 1.8)),
+                            max(1, int(st.defense * 1.4)), max(1, int(st.hp * 2.0)), 0.35)
+        me = battle.Unit(name + "·帝血融合", st.atk, st.defense, st.hp, st.bao)
+        winner, _log = battle.spar(me, kings, rng)
+        ok, msg, ops = rev_mod.fuse(ps, doc.uid, name, winner == 0, wy)
+        post = ""
+        if ok:
+            await self.db.remove_item(doc.uid, rev_mod.BLOOD_ITEM, 1)
+            if winner == 0:
+                doc.stones += rev_mod.CHAMPION_STONES
+                msg += f"\n守城功成，获赐灵石 {rev_mod.CHAMPION_STONES:,}。"
+            post = await self._rev_ops(cal, "", "", [o for o in ops if "stones" not in o])
+            await self._rev_flush(cal, ev, ps, player=doc)
+        yield event.plain_result(prefix + msg + ("\n\n" + post.rstrip() if post else ""))
+
+    @filter.command(CMD_IP_FORCE, "强制异域叩关")
+    async def handle_ip_force(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result("此令唯超级管理员可执（原版 isMaster / Master 名单）。")
+            return
+        _doc, ev, ps, cal, wy, prefix, err = await self._rev_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        eligible, _threshold = await self._rev_eligible()
+        msg = rev_mod.force(ps, wy, time.time(), eligible)
+        await self._rev_flush(cal, ev, ps)
+        yield event.plain_result(prefix + msg)
 
     # ---- B6：剧情 NPC（狠人大帝/苏灵）+ 凝聚精血 ----
 
