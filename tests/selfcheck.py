@@ -8461,6 +8461,58 @@ async def main():
     assert "体质进阶" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
     print("W12-F1/F2 physique ok")
 
+    # ========================================================= W13-F1：专属套装挑战
+    from core import exclusive_set as ex95
+
+    d95 = PlayerDoc(uid="u95", name="套装人", realm_index=25,
+                    ext={"xueqi": 100, "potential": 0, "shouyuan": 100, "hp": 1,
+                         "linggen": {"name": "无相·万化天魔体", "type": "魔头", "eff": 1.0,
+                                     "atk": 100.0, "def": 100.0, "hp": 100.0}})
+    ok95, msg95, _ = ex95.challenge(d95, "终焉神魔路", "", time.time(), _Lucky60())
+    assert not ok95 and "终焉神魔体" in msg95, msg95            # 血线不符
+    ok95, msg95, _ = ex95.challenge(d95, "万化天魔路", "", time.time(), _Lucky60())
+    assert ok95 and "万相天魔刃" in msg95 and "铸成" in msg95, msg95
+    ok95, msg95, _ = ex95.challenge(d95, "万化天魔路", "", time.time(), _Lucky60())
+    assert not ok95 and "无相蜕生" in msg95, msg95              # 需模式参数
+    ok95, msg95, _ = ex95.challenge(d95, "万化天魔路", "归无相", time.time(), _Lucky60())
+    assert ok95 and "无相魔神袍" in msg95, msg95
+    ok95, msg95, _ = ex95.challenge(d95, "万化天魔路", "", time.time(), _Lucky60())
+    assert ok95 and "万灵魔幡" in msg95 and "套装共鸣" in msg95, msg95
+    st95 = ex95.state_of(d95)
+    assert st95["wanhua"] == 3 and st95["wins"] == 3, st95
+
+    d95.ext["linggen"]["name"] = "终焉神魔体"
+    ok95, msg95, _ = ex95.challenge(d95, "终焉神魔路", "", time.time(), _Lucky60())
+    assert ok95 and "诸神黄昏" in msg95, msg95
+    ok95, msg95, _ = ex95.challenge(d95, "终焉神魔路", "", time.time(), _Lucky60())
+    assert not ok95 and "吞噬魔血" in msg95, msg95              # 需模式参数
+    ok95, msg95, _ = ex95.challenge(d95, "终焉神魔路", "吞噬魔血", time.time(), _Lucky60())
+    assert ok95 and "神魔葬天衣" in msg95, msg95
+    assert ex95.state_of(d95)["corrupt"] == 9, "吞噬魔血侵蚀 +9 层"
+    ok95, msg95, _ = ex95.challenge(d95, "终焉神魔路", "", time.time(), _Lucky60())
+    assert ok95 and "万劫归墟轮" in msg95 and "套装共鸣" in msg95, msg95
+
+    # 失败路径：连败蓄力，不发奖励
+    d96 = PlayerDoc(uid="u96", name="套装人二", realm_index=25,
+                    ext={"xueqi": 100, "potential": 0, "shouyuan": 100, "hp": 1,
+                         "linggen": {"name": "无相·万化天魔体", "type": "魔头", "eff": 1.0,
+                                     "atk": 100.0, "def": 100.0, "hp": 100.0}})
+    ok95, msg95, _ = ex95.challenge(d96, "万化天魔路", "", time.time(), _Doom60())
+    assert ok95 and "0/9 关" in msg95 and "连败 1" in msg95, msg95
+    assert "万相天魔刃" not in str(ex95.state_of(d96)), "失败不发奖励"
+
+    src95 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    names95 = ["CMD_EX_PANEL", "CMD_EX_WANHUA", "CMD_EX_WXDD", "CMD_EX_WXTS",
+               "CMD_EX_WLFP", "CMD_EX_ZHONGYAN", "CMD_EX_HHSG", "CMD_EX_TGMT",
+               "CMD_EX_ZSGX"]
+    miss95 = [c for c in names95 if f"@filter.command({c}" not in src95]
+    assert miss95 == [], f"漏注册：{miss95}"
+    assert "ex_mod.challenge(" in src95
+    help95b = _json60.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
+    assert any(g["group"] == "专属套装 · 万化与终焉" for g in help95b)
+    assert "专属套装" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
+    print("W13-F1 exclusive_set ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

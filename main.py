@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -785,6 +785,16 @@ CMD_PHY_LS = "#消耗光阴石"
 CMD_PHY_LW = "#消耗光阴水"
 CMD_PHY_DEMON = "#消耗邪神道果"
 CMD_PHY_PANEL = "#体质进阶"
+# W13-F1：专属套装挑战（万化天魔路 / 终焉神魔路）
+CMD_EX_PANEL = "#专属套装"
+CMD_EX_WANHUA = "#万化天魔路"
+CMD_EX_WXDD = "#万相夺道"
+CMD_EX_WXTS = "#无相蜕生"
+CMD_EX_WLFP = "#万灵幡祭"
+CMD_EX_ZHONGYAN = "#终焉神魔路"
+CMD_EX_HHSG = "#黄昏神国"
+CMD_EX_TGMT = "#太古魔土"
+CMD_EX_ZSGX = "#诸世归墟"
 # W8-B1b：至尊线（至尊骨 / 斩骨涅槃 / 舍骨入血 / 试炼 / 仙骨 / 重瞳 / 瞳骨合一）
 CMD_SP_INHERIT = "#至尊传承"
 CMD_SP_PANEL = "#至尊之路"
@@ -19971,6 +19981,91 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         yield event.plain_result(ph_mod.panel(doc))
+
+    # ------------------------------------------------ W13-F1：专属套装挑战
+
+    async def _ex_run(self, event, line_name: str, stage_arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        result = ex_mod.challenge(doc, line_name, stage_arg, time.time(),
+                                  random.Random(f"{doc.uid}:excl:{line_name}:{int(time.time())}"))
+        ok, msg, delta = result
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            for name, qty in (delta or {}).items():
+                if qty > 0:
+                    await self.db.add_items(doc.uid, {name: qty})
+                elif qty < 0:
+                    await self.db.remove_item(doc.uid, name, -qty)
+        if ok and "铸成" in msg:
+            async for r in self._smart(event, msg, line_name):
+                yield r
+        else:
+            yield event.plain_result(msg)
+
+    @filter.command(CMD_EX_PANEL, "专属套装挑战面板")
+    async def handle_ex_panel(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result(ex_mod.panel(doc))
+
+    @filter.command(CMD_EX_WANHUA, "万化天魔路总览")
+    async def handle_ex_wanhua(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result(ex_mod.panel(doc))
+
+    @filter.command(CMD_EX_WXDD, "万相夺道：9魔相铸万相天魔刃")
+    async def handle_ex_wxdd(self, event: AstrMessageEvent):
+        async for r in self._ex_run(event, "万化天魔路", ""):
+            yield r
+
+    @filter.command(CMD_EX_WXTS, "无相蜕生：化万相/归无相，7蜕铸无相魔神袍")
+    async def handle_ex_wxts(self, event: AstrMessageEvent, arg: str = ""):
+        async for r in self._ex_run(event, "万化天魔路", arg or ""):
+            yield r
+
+    @filter.command(CMD_EX_WLFP, "万灵幡祭：3关铸万灵魔幡")
+    async def handle_ex_wlfp(self, event: AstrMessageEvent):
+        async for r in self._ex_run(event, "万化天魔路", ""):
+            yield r
+
+    @filter.command(CMD_EX_ZHONGYAN, "终焉神魔路总览")
+    async def handle_ex_zhongyan(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result(ex_mod.panel(doc))
+
+    @filter.command(CMD_EX_HHSG, "黄昏神国：13旧神铸诸神黄昏")
+    async def handle_ex_hhsg(self, event: AstrMessageEvent):
+        async for r in self._ex_run(event, "终焉神魔路", ""):
+            yield r
+
+    @filter.command(CMD_EX_TGMT, "太古魔土：吞噬魔血/保持本心，9关铸神魔葬天衣")
+    async def handle_ex_tgmt(self, event: AstrMessageEvent, arg: str = ""):
+        async for r in self._ex_run(event, "终焉神魔路", arg or ""):
+            yield r
+
+    @filter.command(CMD_EX_ZSGX, "诸世归墟：6个时间线自我铸万劫归墟轮")
+    async def handle_ex_zsgx(self, event: AstrMessageEvent):
+        async for r in self._ex_run(event, "终焉神魔路", ""):
+            yield r
 
     @filter.command(CMD_DZ_GUARD, "护法")
     async def handle_dz_guard(self, event: AstrMessageEvent, arg: str = ""):
