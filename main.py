@@ -757,6 +757,14 @@ CMD_DL_RULES = "#帝路规则"
 CMD_WD_ATTEMPT = "#悟道"
 CMD_WD_TEA = "#悟道古茶"
 CMD_WD_PATH = "#我的道途"
+# W10-F1/F2：己道推演 / 合道 / 红尘仙九世（#祭道 依赖 W11 自身之道）
+CMD_SD_DEDUCE = "#推演己道"
+CMD_SD_HEDAO = "#合道"
+CMD_SD_REALMS = "#设立体系境界"
+CMD_RD_DIVINE = "#推演红尘仙"
+CMD_RD_VOW = "#立下世愿"
+CMD_RD_LIVES = "#逆活九世"
+CMD_RD_PANEL = "#我的红尘仙路"
 # W8-B1b：至尊线（至尊骨 / 斩骨涅槃 / 舍骨入血 / 试炼 / 仙骨 / 重瞳 / 瞳骨合一）
 CMD_SP_INHERIT = "#至尊传承"
 CMD_SP_PANEL = "#至尊之路"
@@ -19557,6 +19565,120 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         async for r in self._smart(event, wd_mod.panel(doc), "我的道途"):
+            yield r
+
+    # ------------------------------------------------ W10-F1/F2：己道与红尘仙
+
+    @filter.command(CMD_SD_DEDUCE, "推演己道：20层（10极巅/15神胎/20战尸骸）")
+    async def handle_sd_deduce(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        result = sd_mod.deduce(doc, time.time(),
+                               random.Random(f"{doc.uid}:selfdao:{int(time.time())}"))
+        async for r in self._dl_finish(event, doc, result, "推演己道"):
+            yield r
+
+    @filter.command(CMD_SD_HEDAO, "合道：开创1~5字自创体系（红尘仙道圆满）")
+    async def handle_sd_hedao(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, delta = sd_mod.hedao(doc, arg, time.time())
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            for name, qty in (delta or {}).items():
+                if qty > 0:
+                    await self.db.add_items(doc.uid, {name: qty})
+                elif qty < 0:
+                    await self.db.remove_item(doc.uid, name, -qty)
+        if ok:
+            async for r in self._smart(event, msg, "合道"):
+                yield r
+        else:
+            yield event.plain_result(msg)
+
+    @filter.command(CMD_SD_REALMS, "设立体系境界：为自创体系命名六大境界")
+    async def handle_sd_realms(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = sd_mod.set_realms(doc, arg)
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+        if ok:
+            async for r in self._smart(event, msg, "设立体系境界"):
+                yield r
+        else:
+            yield event.plain_result(msg)
+
+    @filter.command(CMD_RD_DIVINE, "推演红尘仙：解锁九世仙路（50万灵石）")
+    async def handle_rd_divine(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = sd_mod.divine(doc, time.time())
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+        if ok:
+            async for r in self._smart(event, msg, "红尘仙"):
+                yield r
+        else:
+            yield event.plain_result(msg)
+
+    @filter.command(CMD_RD_VOW, "立下世愿：化凡/争渡/逆天")
+    async def handle_rd_vow(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = sd_mod.vow(doc, arg)
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_RD_LIVES, "逆活九世：一世一结算，九世归一成红尘仙")
+    async def handle_rd_lives(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        era_state = await self._era_state()
+        ok, msg = sd_mod.live(doc, era_state, time.time(),
+                              random.Random(f"{doc.uid}:hongchen:{int(time.time())}"))
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+        if ok:
+            async for r in self._smart(event, msg, "逆活九世"):
+                yield r
+        else:
+            yield event.plain_result(msg)
+
+    @filter.command(CMD_RD_PANEL, "我的红尘仙路：推演/体系/九世进度")
+    async def handle_rd_panel(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, sd_mod.panel(doc, time.time()), "红尘仙路"):
             yield r
 
     @filter.command(CMD_DZ_GUARD, "护法")

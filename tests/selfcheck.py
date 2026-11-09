@@ -8197,6 +8197,105 @@ async def main():
     assert "帝路·悟道" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
     print("W9-F2 wudao ok")
 
+    # ========================================================= W10-F1/F2：己道推演 + 红尘仙
+    from core import selfdao as sd70, yuanshen as ys70
+
+    class _Lucky70(_Lucky60):
+        pass
+
+    class _Doom70(_Doom60):
+        pass
+
+    era70s = era60.state_of(0)
+    d70 = PlayerDoc(uid="u70", name="证帝人", realm_index=25, exp=500_000_000,
+                    stones=1_000_000, ext={"xueqi": 500_000_000, "potential": 10_000.0,
+                                           "shouyuan": 5_000_000, "hp": 100.0,
+                                           "era_points": 500})
+    _yst70 = ys70.ensure(d70)
+    _yst70["heart"] = {"cur": 5000, "max": 5000, "last": 0.0}
+    ys70.save(d70, _yst70)
+
+    d70b = PlayerDoc(uid="u70b", name="凡人", realm_index=3,
+                     ext={"xueqi": 100, "potential": 0, "shouyuan": 100, "hp": 1})
+    ok70, msg70, _ = sd70.deduce(d70b, time.time(), _Doom70())
+    assert not ok70 and "证道成帝" in msg70, msg70
+
+    for i in range(1, 21):
+        _h70 = ys70.ensure(d70)                     # 心神上限 30~100，逐层补满再推演
+        _h70["heart"]["cur"] = 9999
+        ys70.save(d70, _h70)
+        ok70, msg70, _ = sd70.deduce(d70, time.time(), _Lucky70())
+        assert ok70 and f"第 {i}/20 层" in msg70, (i, msg70)
+        if i == 10:
+            assert "极巅" in msg70, msg70
+        if i == 15:
+            assert "神胎" in msg70, msg70
+        if i == 20:
+            assert "半步仙帝" in msg70, msg70
+        st70 = sd70.state_of(d70)
+        st70["last_life_at"] = 0.0
+        sd70.save(d70, st70)
+    assert sd70.deduction_bonus(d70)["damage_reduction"] == 0.10
+    assert sd70.deduction_bonus(d70)["extra_rebirth"] == 1.0
+    ok70, msg70, _ = sd70.deduce(d70, time.time(), _Lucky70())
+    assert not ok70 and "圆满" in msg70, msg70
+
+    # 合道 + 体系境界
+    _wst70 = wd60.state_of(d70)
+    _wst70["completed"] = ["红尘仙道"]
+    wd60.save(d70, _wst70)
+    ok70, msg70, _ = sd70.hedao(d70, "岁月剑河", time.time())
+    assert ok70 and "岁月剑河" in msg70, msg70
+    ok70, msg70 = sd70.set_realms(d70, "孕道/凝道/化道/合道/归一道/我道永恒")
+    assert ok70 and "我道永恒" in msg70, msg70
+    ok70, msg70 = sd70.set_realms(d70, "再改/不了")
+    assert not ok70 and "已命名" in msg70, msg70
+
+    # 红尘仙：解锁 → 立愿 → 九世
+    ok70, msg70 = sd70.divine(d70, time.time())
+    assert ok70 and "立下世愿" in msg70, msg70
+    ok70, msg70 = sd70.vow(d70, "争渡")
+    assert ok70 and "争渡" in msg70, msg70
+    for n in range(1, 10):
+        st70 = sd70.state_of(d70)
+        st70["last_life_at"] = 0.0
+        sd70.save(d70, st70)
+        _y70 = ys70.ensure(d70)                     # 每世消耗元神值，测试中补满
+        _y70["cur"] = 999_999
+        ys70.save(d70, _y70)
+        ok70, msg70, _ = sd70.live(d70, era70s, time.time(), _Lucky70())
+        assert ok70, (n, msg70)
+    st70 = sd70.state_of(d70)
+    assert st70["hongchen"] and st70["life"] == 9, st70
+    assert len(wd60.state_of(d70)["completed"]) == 8, "九世归一后八重己道圆满"
+    assert "红尘仙" in sd70.panel(d70, time.time())
+
+    # 失败路径：劫灰 / 身灭道消
+    d71 = PlayerDoc(uid="u71", name="证帝人二", realm_index=25, exp=500_000_000,
+                    ext={"xueqi": 500_000_000, "potential": 10_000.0, "shouyuan": 5_000_000,
+                         "hp": 100.0, "era_points": 500})
+    _yst71 = ys70.ensure(d71)
+    _yst71["heart"] = {"cur": 5000, "max": 5000, "last": 0.0}
+    ys70.save(d71, _yst71)
+    ok71, msg71, _ = sd70.deduce(d71, time.time(), _Doom70())
+    assert ok71 and "身灭道消" in msg71, msg71
+    st71 = sd70.state_of(d71)
+    assert st71["layers"] == 0 and st71["ash"] == 1, st71
+    assert st71["death_until"] > time.time(), "320 分钟冷却"
+    assert dz60.peek(d71) == 1.0, "推演失败道伤 +1"
+
+    # main.py 接线 + help 分组 + 手册分组
+    src70 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    names70 = ["CMD_SD_DEDUCE", "CMD_SD_HEDAO", "CMD_SD_REALMS", "CMD_RD_DIVINE",
+               "CMD_RD_VOW", "CMD_RD_LIVES", "CMD_RD_PANEL"]
+    miss70 = [c for c in names70 if f"@filter.command({c}" not in src70]
+    assert miss70 == [], f"漏注册：{miss70}"
+    assert "sd_mod.deduce(" in src70 and "sd_mod.live(" in src70
+    help70b = _json60.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
+    assert any(g["group"] == "帝路 · 己道与红尘仙" for g in help70b)
+    assert "帝路·红尘仙" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
+    print("W10-F1/F2 selfdao ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 
