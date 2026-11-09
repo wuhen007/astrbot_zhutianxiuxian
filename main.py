@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_story as rs_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -809,6 +809,24 @@ CMD_OCC_EVILS = "#查看恶人"
 CMD_OCC_SLAY = "#消灭恶人"
 CMD_OCC_VILLAGES = "#村庄列表"
 CMD_OCC_RAID = "#劫掠村庄"
+# W16-F1：活动系统（星海之缘 / 周年庆）
+CMD_AC_XH = "#星海之缘签到"
+CMD_AC_GACHA = "#召唤爱莉希雅"
+CMD_AC_GACHA10 = "#疯狂召唤爱莉希雅"
+CMD_AC_ZHENWO = "#真我觉醒"
+CMD_AC_ZN = "#周年签到"
+CMD_AC_PANEL = "#活动面板"
+# W16-F2：无尽轮回·剧情组
+CMD_RS_START = "#开启无尽轮回"
+CMD_RS_CHOOSE = "#轮回选择"
+CMD_RS_QUIT = "#退出无尽轮回"
+CMD_RS_ENH = "#轮回强化"
+CMD_RS_EXCH = "#轮回兑换"
+CMD_RS_TASK = "#轮回任务"
+CMD_RS_SQUAD = "#轮回小队"
+CMD_RS_ATTR = "#轮回属性"
+CMD_RS_MON = "#轮回怪物"
+CMD_RS_FILE = "#轮回档案"
 # W8-B1b：至尊线（至尊骨 / 斩骨涅槃 / 舍骨入血 / 试炼 / 仙骨 / 重瞳 / 瞳骨合一）
 CMD_SP_INHERIT = "#至尊传承"
 CMD_SP_PANEL = "#至尊之路"
@@ -20285,6 +20303,205 @@ class ZhutianPlugin(Star):
                 if qty < 0:
                     await self.db.remove_item(doc.uid, name, -qty)
         yield event.plain_result(result[1])
+
+    # ------------------------------------------------ W16-F1/F2：活动与无尽轮回
+
+    async def _ac_finish(self, event, doc: PlayerDoc, result, title: str):
+        ok, msg, delta = result
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            for name, qty in (delta or {}).items():
+                if qty > 0:
+                    await self.db.add_items(doc.uid, {name: qty})
+                elif qty < 0:
+                    await self.db.remove_item(doc.uid, name, -qty)
+        if ok:
+            async for r in self._smart(event, msg, title):
+                yield r
+        else:
+            yield event.plain_result(msg)
+
+    @filter.command(CMD_AC_XH, "星海之缘签到（成仙后，连签7天里程碑）")
+    async def handle_ac_xh(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._ac_finish(event, doc, ac_mod.xinghai_sign(doc, time.time()), "星海之缘"):
+            yield r
+
+    @filter.command(CMD_AC_GACHA, "召唤爱莉希雅（消耗1次召唤）")
+    async def handle_ac_gacha(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._ac_finish(event, doc, ac_mod.gacha(
+                doc, 1, time.time(), random.Random(f"{doc.uid}:gacha:{int(time.time())}")), "召唤"):
+            yield r
+
+    @filter.command(CMD_AC_GACHA10, "疯狂召唤爱莉希雅（消耗10次）")
+    async def handle_ac_gacha10(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._ac_finish(event, doc, ac_mod.gacha(
+                doc, 10, time.time(), random.Random(f"{doc.uid}:gacha10:{int(time.time())}")), "疯狂召唤"):
+            yield r
+
+    @filter.command(CMD_AC_ZHENWO, "真我觉醒：乐土之章×3")
+    async def handle_ac_zhenwo(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = ac_mod.awaken_zhenwo(doc)
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_AC_ZN, "周年签到")
+    async def handle_ac_zn(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._ac_finish(event, doc, ac_mod.anniversary_sign(
+                doc, time.time(), random.Random(f"{doc.uid}:zn:{int(time.time())}")), "周年庆"):
+            yield r
+
+    @filter.command(CMD_AC_PANEL, "活动面板")
+    async def handle_ac_panel(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result(ac_mod.panel(doc))
+
+    @filter.command(CMD_RS_START, "开启无尽轮回：老兵/学生/医生/黑客")
+    async def handle_rs_start(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = rs_mod.start(doc, arg)
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_RS_CHOOSE, "轮回选择 1~3")
+    async def handle_rs_choose(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        try:
+            pick = int((arg or "0").strip())
+        except ValueError:
+            pick = 0
+        ok, msg = rs_mod.choose(doc, pick, time.time(),
+                                random.Random(f"{doc.uid}:rs:{int(time.time())}"))
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_RS_QUIT, "退出无尽轮回：结算评价")
+    async def handle_rs_quit(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = rs_mod.settle(doc)
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+        if ok:
+            async for r in self._smart(event, msg, "无尽轮回"):
+                yield r
+        else:
+            yield event.plain_result(msg)
+
+    @filter.command(CMD_RS_ENH, "轮回强化：体术/心智/源能（600点）")
+    async def handle_rs_enh(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = rs_mod.enhance(doc, arg)
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_RS_EXCH, "轮回兑换 名称")
+    async def handle_rs_exch(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = rs_mod.exchange(doc, arg)
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_RS_TASK, "轮回任务（今日悬赏）")
+    async def handle_rs_task(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result(rs_mod.task_text(doc, random.Random(f"{doc.uid}:rstask:{time.strftime('%Y%m%d')}")))
+
+    @filter.command(CMD_RS_SQUAD, "轮回小队（NPC 队友）")
+    async def handle_rs_squad(self, event: AstrMessageEvent):
+        yield event.plain_result(rs_mod.squad_text())
+
+    @filter.command(CMD_RS_ATTR, "轮回属性")
+    async def handle_rs_attr(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result(rs_mod.panel(doc))
+
+    @filter.command(CMD_RS_MON, "轮回怪物图鉴")
+    async def handle_rs_mon(self, event: AstrMessageEvent):
+        yield event.plain_result(rs_mod.monster_text())
+
+    @filter.command(CMD_RS_FILE, "轮回档案（最高评价）")
+    async def handle_rs_file(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result(rs_mod.panel(doc))
 
     @filter.command(CMD_DZ_GUARD, "护法")
     async def handle_dz_guard(self, event: AstrMessageEvent, arg: str = ""):

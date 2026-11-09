@@ -8619,6 +8619,67 @@ async def main():
     assert "职业补全" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
     print("W15-F1 occupation_extra ok")
 
+    # ========================================================= W16-F1/F2：活动 + 无尽轮回剧情
+    from core import activity as ac110, reinc_story as rs110
+
+    d110 = PlayerDoc(uid="u110", name="仙人", realm_index=41, exp=0, stones=0,
+                     ext={"xueqi": 0, "potential": 0, "shouyuan": 100, "hp": 100.0})
+    ok110, msg110, _ = ac110.xinghai_sign(d110, time.time())
+    assert ok110 and "星海之缘" in msg110, msg110
+    ok110, msg110, _ = ac110.xinghai_sign(d110, time.time())
+    assert not ok110 and "已" in msg110, msg110              # 重复签到
+    d110.ext["activity"]["draws"] = 10
+    ok110, msg110, d110d = ac110.gacha(d110, 10, time.time(), _Lucky60())
+    assert ok110 and d110d, msg110
+    assert ac110.state_of(d110)["draws"] == 0
+    d110.ext["activity"]["chapters"] = 3
+    ok110, msg110 = ac110.awaken_zhenwo(d110)
+    assert ok110 and "真我觉醒" in msg110, msg110
+    ok110, msg110, _ = ac110.anniversary_sign(d110, time.time(), _Lucky60())
+    assert ok110 and "周年签到" in msg110, msg110
+    assert "活动" in ac110.panel(d110)
+
+    d111 = PlayerDoc(uid="u111", name="轮回客", realm_index=20,
+                     ext={"xueqi": 100, "potential": 0, "shouyuan": 100, "hp": 100.0})
+    ok110, msg110 = rs110.start(d111, "黑客")
+    assert ok110 and "黑客" in msg110, msg110
+    _rs111 = rs110.state_of(d111)                     # 预置满强化，保证检定全过
+    _rs111["attrs"] = {"体术": 9, "心智": 9, "源能": 9}
+    rs110.save(d111, _rs111)
+    ok110, msg110 = rs110.choose(d111, 1, time.time(), _Lucky60())
+    assert ok110 and "末班车进站" in msg110, msg110
+    ok110, msg110 = rs110.choose(d111, 9, time.time(), _Lucky60())
+    assert not ok110 and "1~3" in msg110, msg110
+    for _ in range(4):                                       # 走完剩余四幕（Lucky 全成）
+        ok110, msg110 = rs110.choose(d111, 1, time.time(), _Lucky60())
+        assert ok110, msg110
+    assert rs110.state_of(d111)["scene"] == 5
+    ok110, msg110 = rs110.settle(d111)
+    assert ok110 and "结算" in msg110, msg110
+    pts111 = rs110.state_of(d111)["points"]
+    assert pts111 >= 120 and rs110.grade_of(pts111) == "B·同行者", pts111
+    ok110, msg110 = rs110.settle(d111)
+    assert not ok110, "不在轮回中不可重复结算"
+    ok110, msg110 = rs110.enhance(d111, "源能")
+    assert ok110, msg110
+    ok110, msg110 = rs110.exchange(d111, "基因稳定剂·C")
+    assert ok110 and "+20" in msg110, msg110
+    assert "无尽轮回" in rs110.panel(d111) and "任务" in rs110.task_text(d111)
+    assert "陈默" in rs110.squad_text() and "雾枭" in rs110.monster_text()
+
+    src110 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    names110 = ["CMD_AC_XH", "CMD_AC_GACHA", "CMD_AC_GACHA10", "CMD_AC_ZHENWO",
+                "CMD_AC_ZN", "CMD_AC_PANEL", "CMD_RS_START", "CMD_RS_CHOOSE",
+                "CMD_RS_QUIT", "CMD_RS_ENH", "CMD_RS_EXCH", "CMD_RS_TASK",
+                "CMD_RS_SQUAD", "CMD_RS_ATTR", "CMD_RS_MON", "CMD_RS_FILE"]
+    miss110 = [c for c in names110 if f"@filter.command({c}" not in src110]
+    assert miss110 == [], f"漏注册：{miss110}"
+    assert "ac_mod.gacha(" in src110 and "rs_mod.choose(" in src110
+    help110b = _json60.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
+    assert any(g["group"] == "活动与无尽轮回" for g in help110b)
+    assert "活动·轮回" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
+    print("W16-F1/F2 activity+reinc_story ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 
