@@ -189,6 +189,11 @@ def main() -> int:
         ("人傀 · 外来道果", ("handle_pup_craft", "handle_pup_my", "handle_pup_summon",
                        "handle_pup_repair", "handle_pup_destroy", "handle_pup_refine",
                        "handle_pup_melt", "handle_pup_retreat")),
+        ("宗门深化 · 洞天与运营", ("handle_sec_bless_list", "handle_sec_settle",
+                          "handle_sec_vein", "handle_sec_build", "handle_sec_array",
+                          "handle_sec_array_fix", "handle_sec_upkeep", "handle_sec_gate",
+                          "handle_sec_recruit", "handle_sec_roster", "handle_sec_train",
+                          "handle_sec_assign", "handle_sec_operate", "handle_sec_contrib")),
         ("帮助", ("handle_help",)),
     ]
     grouped = {}

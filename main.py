@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -435,6 +435,22 @@ CMD_PUP_DESTROY = "#毁去人傀"
 CMD_PUP_REFINE = "#炼化道果"
 CMD_PUP_MELT = "#熔去外来道果"
 CMD_PUP_RETREAT = "#闭关化杂"
+
+# W8-F7 宗门深化：洞天福地 / 灵脉 / 护宗大阵 / 弟子运营
+CMD_SEC_BLESS_LIST = "#洞天福地列表"
+CMD_SEC_SETTLE = "#入驻洞天"
+CMD_SEC_VEIN = "#开采灵脉"
+CMD_SEC_BUILD = "#建设宗门"
+CMD_SEC_ARRAY = "#查看护宗大阵"
+CMD_SEC_ARRAY_FIX = "#维护护宗大阵"
+CMD_SEC_UPKEEP = "#宗门维护"
+CMD_SEC_GATE = "#设置门槛"
+CMD_SEC_RECRUIT = "#宗门弟子招募"
+CMD_SEC_ROSTER = "#宗门弟子名册"
+CMD_SEC_TRAIN = "#培养宗门弟子"
+CMD_SEC_ASSIGN = "#任命宗门弟子"
+CMD_SEC_OPERATE = "#宗门运营"
+CMD_SEC_CONTRIB = "#我的贡献"
 
 
 
@@ -2187,6 +2203,25 @@ class ZhutianPlugin(Star):
                 ("⚠️ 折算", "原版人傀是下一场战斗的额外战体 → 本移植战斗引擎无伙伴位，改 6h 三维加成；"
                             "原版耐久无扣减点 → 每次驱使扣 20；原版夺果需「自身之道」→ 改境界门槛；"
                             "原版闭关占全局 action 锁 → 本移植只做本模块互斥"),
+            ]},
+            {"title": "宗门深化 · 洞天与运营", "lines": [
+                (CMD_SEC_BLESS_LIST, "15 处洞天福地（2~5 阶）与归属，宗主可占地/抢夺"),
+                (f"{CMD_SEC_SETTLE} 洞天名", "无主直接入驻；有主按成员战力 + 建设度×100 + 大阵血量比拼"),
+                (CMD_SEC_VEIN, "每日一次：1200 × 洞天阶 × 境界数，玩家与宗门灵石池双份入账"),
+                (CMD_SEC_BUILD, "宗主：扣建设度×1 万灵石，建设度 +境界÷7+1"),
+                (CMD_SEC_ARRAY, "驻地/建设度/大阵血量/维护/门槛/弟子/仓库总面板（附规则）"),
+                (f"{CMD_SEC_ARRAY_FIX} 数量", "宗主：池扣 X 灵石 → 大阵 +5X 血量（宗门挑战守方战力）"),
+                (CMD_SEC_UPKEEP, "宗主：7 日一次，扣 宗门等级×5 万灵石"),
+                (f"{CMD_SEC_GATE} 境数", "宗主：设最低加入境界，0 取消（「#加入宗门」消费）"),
+                (CMD_SEC_RECRUIT, "宗主：招弟子，容量 3×等级，费 1 万+5 千×等级，灵根取 139 条表"),
+                (f"{CMD_SEC_ROSTER} / {CMD_SEC_TRAIN} 序号", "弟子名册 / 培养（1 万×(培养+1)，上限 5）"),
+                (f"{CMD_SEC_ASSIGN} 序号 专长", "任「采药/炼丹/炼器/阵法/护山/外务」，任职才参与运营"),
+                (CMD_SEC_OPERATE, "惰性每日结算（最多补 7 日）：维护 (1000×等级+任职×500)，产出入仓库"),
+                (CMD_SEC_CONTRIB, "个人贡献度（沿用「#宗门商店」的 sect_contrib）+ 当日灵脉状态"),
+                ("⚠️ 折算", "原版宗门整档 JSON → 本移植挂 calamity_state[\"sect_deep\"]，"
+                            "灵石池复用 sects.fund，db 恒 v17；原版仙宗 power 分野（倍率 2 / 池 ×10 / 门槛钳 41）"
+                            "无底座已去除；原版副宗主/长老职位不存在 → 管理令一律限宗主；"
+                            "cron 每日运营改惰性 tick；藏宝阁神兽 3 条未搬"),
             ]},
         ]
 
@@ -9293,6 +9328,277 @@ class ZhutianPlugin(Star):
             await self.db.save_player(self._evil_save(doc, s).model_dump())
         yield event.plain_result(prefix + msg)
 
+    # ---- W8-F7 宗门深化（calamity_state["sect_deep"] + 复用 sects.fund，db 仍 v17） ----
+
+    def _sec_rows(self) -> list[dict]:
+        return self.content.table("item/洞天福地") or []
+
+    async def _sec_open(self, event: AstrMessageEvent, master_only: bool = False):
+        """取玩家 + 宗门档 + 惰性运营结算。返回 (doc, row, s, cal, prefix, err)。"""
+        doc, err = await self._require_player(event)
+        if err:
+            return None, None, None, None, "", err
+        name = doc.ext.get("sect")
+        if not name:
+            return None, None, None, None, "", "道友尚无宗门，可发「#宗门列表」寻一山门。"
+        row = await self.db.get_sect(name)
+        if not row:
+            return None, None, None, None, "", "宗门数据异常，可发「#退出宗门」后重新投师。"
+        if master_only and row["master_uid"] != doc.uid:
+            return None, None, None, None, "", "此令唯宗主可执（本移植未开放副宗主/长老职位）。"
+        cal = await self.db.get_calamity()
+        s = sec_mod.state_of(cal, name)
+        _ok, msg, delta = sec_mod.operate(s, row["fund"], row["level"], time.time())
+        prefix = ""
+        if delta:
+            row["fund"] = max(0, int(row["fund"]) + delta)
+            prefix = msg + "\n"
+        elif msg and "尚未" not in msg and "已起算" not in msg:
+            prefix = msg + "\n"
+        await self.db.save_calamity(cal)
+        if delta:
+            await self.db.update_sect(name, row["level"], row["fund"])
+        return doc, row, s, cal, prefix, None
+
+    async def _sec_flush(self, name: str, row: dict, s: dict, cal: dict,
+                         fund_delta: int = 0, player: PlayerDoc | None = None) -> None:
+        """宗门深化档 + 灵石池 + 玩家档在同一事务里落库。"""
+        sec_mod.commit(cal, name, s)
+        if fund_delta:
+            row["fund"] = max(0, int(row["fund"]) + fund_delta)
+        async with self.db.transaction():
+            await self.db.save_calamity(cal)
+            if fund_delta:
+                await self.db.update_sect(name, row["level"], row["fund"])
+            if player is not None:
+                await self.db.save_player(player.model_dump())
+
+    @filter.command(CMD_SEC_BLESS_LIST, "洞天福地列表")
+    async def handle_sec_bless_list(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        cal = await self.db.get_calamity()
+        async for r in self._smart(event, "\n".join(sec_mod.bless_lines(self._sec_rows(), cal)),
+                                   "洞天福地"):
+            yield r
+
+    @filter.command(CMD_SEC_SETTLE, "入驻洞天")
+    async def handle_sec_settle(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, row, s, cal, prefix, err = await self._sec_open(event, master_only=True)
+        if err:
+            yield event.plain_result(err)
+            return
+        place = self._adm_tail(event).strip()
+        if not place:
+            yield event.plain_result(prefix + "格式：「#入驻洞天 名称」。可发「#洞天福地列表」查看。")
+            return
+        brow = sec_mod.find_bless(self._sec_rows(), place)
+        if not brow:
+            yield event.plain_result(prefix + f"查无洞天「{place}」，可发「#洞天福地列表」查看。")
+            return
+        name = doc.ext["sect"]
+        now = time.time()
+        my_power, _ = await self._sect_power(name)
+        holder = sec_mod.holder_of(cal, brow["name"], name)
+        holder_power = 0
+        if holder:
+            holder_power, _ = await self._sect_power(holder)
+        import random as _random
+        rng = _random.Random(f"sec:{name}:{brow['name']}:{int(now)}")
+        ok, msg = sec_mod.settle(cal, brow, name, my_power, s, holder_power, now, rng)
+        await self._sec_flush(name, row, s, cal)
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_SEC_VEIN, "开采灵脉")
+    async def handle_sec_vein(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, row, s, cal, prefix, err = await self._sec_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        name = doc.ext["sect"]
+        ok, msg, gain, pool_add = sec_mod.vein(doc, s, self._sec_rows(), row["fund"],
+                                               row["level"], time.time())
+        if ok:
+            doc.stones += gain
+            await self._sec_flush(name, row, s, cal, fund_delta=pool_add, player=doc)
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_SEC_BUILD, "建设宗门")
+    async def handle_sec_build(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, row, s, cal, prefix, err = await self._sec_open(event, master_only=True)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, cost, _add = sec_mod.build(s, row["fund"], doc.realm_index)
+        if ok:
+            await self._sec_flush(doc.ext["sect"], row, s, cal, fund_delta=-cost)
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_SEC_ARRAY, "查看护宗大阵")
+    async def handle_sec_array(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        _doc, row, s, _cal, prefix, err = await self._sec_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        members = await self._sect_members(_doc.ext["sect"])
+        text = (prefix + "\n".join(sec_mod.panel_lines(s, row["fund"], row["level"],
+                                                       len(members), time.time()))
+                + "\n" + sec_mod.rules_text() + "\n" + sec_mod.help_text())
+        async for r in self._smart(event, text, "宗门驻地 · 护宗大阵"):
+            yield r
+
+    @filter.command(CMD_SEC_ARRAY_FIX, "维护护宗大阵")
+    async def handle_sec_array_fix(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, row, s, cal, prefix, err = await self._sec_open(event, master_only=True)
+        if err:
+            yield event.plain_result(err)
+            return
+        amount = self._adm_num(event)
+        ok, msg, cost, _hp = sec_mod.array_fix(s, row["fund"], amount)
+        if ok:
+            await self._sec_flush(doc.ext["sect"], row, s, cal, fund_delta=-cost)
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_SEC_UPKEEP, "宗门维护")
+    async def handle_sec_upkeep(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, row, s, cal, prefix, err = await self._sec_open(event, master_only=True)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, cost = sec_mod.upkeep(s, row["fund"], row["level"], time.time())
+        if ok:
+            await self._sec_flush(doc.ext["sect"], row, s, cal, fund_delta=-cost)
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_SEC_GATE, "设置门槛")
+    async def handle_sec_gate(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, row, s, cal, prefix, err = await self._sec_open(event, master_only=True)
+        if err:
+            yield event.plain_result(err)
+            return
+        gate = self._adm_num(event)
+        ok, msg = sec_mod.set_gate(s, gate, len(self._realm_names()))
+        if ok:
+            await self._sec_flush(doc.ext["sect"], row, s, cal)
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_SEC_RECRUIT, "宗门弟子招募")
+    async def handle_sec_recruit(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, row, s, cal, prefix, err = await self._sec_open(event, master_only=True)
+        if err:
+            yield event.plain_result(err)
+            return
+        import random as _random
+        rng = _random.Random(f"disciple:{doc.ext['sect']}:{s['disciple_seq']}:{int(time.time())}")
+        roots = self.content.table("item/灵根列表") or []
+        ok, msg, cost, _d = sec_mod.recruit(s, row["fund"], row["level"], roots,
+                                            time.time(), rng)
+        if ok:
+            await self._sec_flush(doc.ext["sect"], row, s, cal, fund_delta=-cost)
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_SEC_ROSTER, "宗门弟子名册")
+    async def handle_sec_roster(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        _doc, row, s, _cal, prefix, err = await self._sec_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        text = ("\n".join([prefix.rstrip()] + sec_mod.disciple_lines(s, row["level"]))
+                + "\n" + sec_mod.help_text())
+        async for r in self._smart(event, text, "宗门弟子名册"):
+            yield r
+
+    @filter.command(CMD_SEC_TRAIN, "培养宗门弟子")
+    async def handle_sec_train(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, row, s, cal, prefix, err = await self._sec_open(event, master_only=True)
+        if err:
+            yield event.plain_result(err)
+            return
+        did = self._adm_num(event)
+        ok, msg, cost = sec_mod.train(s, row["fund"], did)
+        if ok:
+            await self._sec_flush(doc.ext["sect"], row, s, cal, fund_delta=-cost)
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_SEC_ASSIGN, "任命宗门弟子")
+    async def handle_sec_assign(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, row, s, cal, prefix, err = await self._sec_open(event, master_only=True)
+        if err:
+            yield event.plain_result(err)
+            return
+        parts = self._adm_tail(event).split()
+        if len(parts) < 2:
+            yield event.plain_result(prefix + "格式：「#任命宗门弟子 序号 专长」，"
+                                            "专长取「采药」「炼丹」「炼器」「阵法」「护山」「外务」。")
+            return
+        try:
+            did = int(parts[0])
+        except ValueError:
+            yield event.plain_result(prefix + "序号须为数字，可发「#宗门弟子名册」查看。")
+            return
+        ok, msg = sec_mod.assign(s, did, parts[1])
+        if ok:
+            await self._sec_flush(doc.ext["sect"], row, s, cal)
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_SEC_OPERATE, "宗门运营")
+    async def handle_sec_operate(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        _doc, row, s, _cal, prefix, err = await self._sec_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        lines = ["--- 宗门运营 ---",
+                 f"灵石池 {int(row['fund']):,}/{sec_mod.pool_cap(row['level']):,}"
+                 f"｜连续运营 {s['ops_streak']} 日｜声望 {s['reputation']}",
+                 f"仓库：药材 {s['store']['药材']}｜丹药 {s['store']['丹药']}｜法器 {s['store']['法器']}"]
+        lines += [f"· {x}" for x in (s["ops_log"] or ["暂无结算回执，满 24 小时后自动结算。"])[-10:]]
+        lines.append("任职弟子才会产出；可发「#任命宗门弟子 序号 专长」安排职司。")
+        async for r in self._smart(event, (prefix + "\n".join(lines)), "宗门运营"):
+            yield r
+
+    @filter.command(CMD_SEC_CONTRIB, "我的贡献")
+    async def handle_sec_contrib(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, row, s, _cal, prefix, err = await self._sec_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        p = sec_mod.personal_of(doc)
+        vein_txt = "今日已开采" if p["vein_day"] == sec_mod.day_key(time.time()) else "今日未开采"
+        lines = [
+            f"--- 我在【{doc.ext['sect']}】 ---",
+            f"贡献度 {int(doc.ext.get('sect_contrib') or 0):,}（「#宗门商店」兑换）",
+            f"灵脉：{vein_txt}｜宗门等级 {row['level']}｜灵石池 {int(row['fund']):,}",
+            f"宗门声望 {s['reputation']}｜弟子 {len(s['disciples'])} 人｜大阵 {s['array_hp']:,}",
+        ]
+        async for r in self._smart(event, prefix + "\n".join(lines), "我的贡献"):
+            yield r
+
     # ---- B6：剧情 NPC（狠人大帝/苏灵）+ 凝聚精血 ----
 
     def _npc_save(self, doc: PlayerDoc, n: dict) -> PlayerDoc:
@@ -15556,6 +15862,13 @@ class ZhutianPlugin(Star):
         if not target:
             yield event.plain_result(f"查无此宗：「{name}」。可发「{CMD_SECT_LIST}」查看。")
             return
+        # W8-F7 宗主设下的加入门槛（原版「#设置门槛」的消费者）
+        _cal = await self.db.get_calamity()
+        _gate = sec_mod.gate_of((_cal.get("sect_deep") or {}).get(name) or {})
+        if _gate and doc.realm_index + 1 < _gate:
+            yield event.plain_result(
+                f"【{name}】设下门槛：需第 {_gate} 境，道友尚在第 {doc.realm_index + 1} 境。")
+            return
         members = await self._sect_members(name)
         limit = sect.member_limit(target["level"])
         if len(members) >= limit:
@@ -17284,8 +17597,12 @@ class ZhutianPlugin(Star):
         foe_power, foe_members = await self._sect_power(foe_sect)
         import random as _random
         rng = _random.Random(f"war:{my_sect}:{foe_sect}:{now}")
-        my_roll = my_power * (0.9 + 0.2 * rng.random())
-        foe_roll = foe_power * (0.9 + 0.2 * rng.random())
+        # W8-F7 护宗大阵 / 建设度接入宗门战（原版大阵血量的消费者）
+        _cal = await self.db.get_calamity()
+        my_atk_bonus, _my_def_bonus = sec_mod.war_bonus(sec_mod.state_of(_cal, my_sect))
+        _foe_atk_bonus, foe_def_bonus = sec_mod.war_bonus(sec_mod.state_of(_cal, foe_sect))
+        my_roll = (my_power + my_atk_bonus) * (0.9 + 0.2 * rng.random())
+        foe_roll = (foe_power + foe_def_bonus) * (0.9 + 0.2 * rng.random())
         won = my_roll >= foe_roll
         d1 = doc.model_copy(deep=True)
         d1.ext["sectwar_ts"] = now
@@ -17299,8 +17616,8 @@ class ZhutianPlugin(Star):
         )
         yield event.plain_result(
             f"=== 宗门挑战 ===\n"
-            f"【{my_sect}】战力 {my_power}（{len(my_members)} 人）掷骰 {int(my_roll)}\n"
-            f"【{foe_sect}】战力 {foe_power}（{len(foe_members)} 人）掷骰 {int(foe_roll)}\n"
+            f"【{my_sect}】战力 {my_power}+{my_atk_bonus}（建设/大阵，{len(my_members)} 人）掷骰 {int(my_roll)}\n"
+            f"【{foe_sect}】战力 {foe_power}+{foe_def_bonus}（护宗大阵，{len(foe_members)} 人）掷骰 {int(foe_roll)}\n"
             f"{verdict}，对方 {'+1' if won else '+3'}。\n"
             f"当前积分：{my_sect} {my_sect_doc['score'] + (3 if won else 1)}"
             f" vs {foe_sect} {foe_sect_doc['score'] + (1 if won else 3)}"

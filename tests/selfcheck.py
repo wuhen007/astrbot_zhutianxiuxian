@@ -7687,8 +7687,116 @@ async def main():
     assert "pup_mod.battle_bonus(" in src57 and "await self._pup_open(event)" in src57
     assert "pup_mod.craft(" in src57 and "确认请发送「#毁去人傀 确认」" in src57
     help57 = _json57.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
-    assert len(help57) == 39 and help57[-1]["group"] == "人傀 · 外来道果"
+    assert len(help57) >= 39 and any(g["group"] == "人傀 · 外来道果" for g in help57)
     print("W8-F6 puppet ok")
+
+    # ---------------- 58. W8-F7 宗门深化 ----------------
+    import json as _json58
+    from core import sect_deep as sd58
+
+    t58 = 1_800_000_000.0
+    rows58 = store.table("item/洞天福地") or []
+    assert len(rows58) == 15 and rows58[0]["name"] == "昆仑山" and rows58[0]["level"] == 5
+    assert sd58.find_bless(rows58, "天山")["level"] == 3
+    assert sd58.find_bless(rows58, "无此地") is None
+    assert sd58.pool_cap(1) == 2_000_000 and sd58.pool_cap(9) == 30_000_000
+    assert sd58.day_key(t58) == time.strftime("%Y-%m-%d", time.gmtime(t58 + 8 * 3600))
+    assert sd58.ARRAY_HP_INIT == 114514 and sd58.ARRAY_HP_PER_STONE == 5
+    print("F7 data/consts ok")
+
+    # ② 宗门档 + 无主入驻 + 有主抢夺（攻弱败 / 攻强易主）
+    cal58 = {}
+    s58 = sd58.state_of(cal58, "青云宗")
+    assert s58["array_hp"] == 114514 and s58["build"] == 0 and s58["place"] == ""
+    brow58 = sd58.find_bless(rows58, "昆仑山")
+    ok58, msg58 = sd58.settle(cal58, brow58, "青云宗", 1000, s58, 0, t58,
+                              _random.Random("sec58a"))
+    assert ok58 and s58["place"] == "昆仑山" and s58["build"] == 0, msg58
+    assert not sd58.settle(cal58, brow58, "青云宗", 1000, s58, 0, t58,
+                           _random.Random("sec58a"))[0], "同地不得重复入驻"
+    h58 = sd58.state_of(cal58, "血煞宗")
+    h58["build"], h58["array_hp"] = 20, 10
+    ok58, msg58 = sd58.settle(cal58, brow58, "血煞宗", 10, h58, 1_000_000, t58,
+                              _random.Random("sec58b"))
+    assert not ok58 and "挡回" in msg58, "守方战力占优不得易主"
+    s58["build"], s58["array_hp"] = 3, 900_000
+    ok58, msg58 = sd58.settle(cal58, brow58, "血煞宗", 10_000_000, h58, 1, t58,
+                              _random.Random("sec58c"))
+    assert ok58 and h58["place"] == "昆仑山" and h58["build"] == 3, msg58
+    assert s58["place"] == "" and s58["build"] == 0 and s58["array_hp"] == 0
+    assert len(sd58.bless_lines(rows58, cal58)) == 17
+    print("F7 settle ok")
+
+    # ③ 灵脉 / 建设 / 大阵 / 维护 / 门槛
+    b58 = sd58.state_of(cal58, "测试宗")
+    b58["place"] = "天山"
+    d58 = PlayerDoc(uid="sec58", name="道友", realm_index=9, stones=0,
+                    ext={"sect": "测试宗", "sect_contrib": 0})
+    ok58, msg58, gain58, pool58 = sd58.vein(d58, b58, rows58, 0, 1, t58)
+    assert ok58 and gain58 == 1200 * 3 * 10, gain58
+    assert pool58 == min(gain58, sd58.pool_cap(1))
+    assert d58.ext["sect_contrib"] == gain58 and d58.ext["sect_deep"]["vein_day"] == sd58.day_key(t58)
+    assert not sd58.vein(d58, b58, rows58, 0, 1, t58)[0], "每日一次"
+    ok58, msg58, cost58, add58 = sd58.build(b58, 1_000_000, 9)
+    assert ok58 and cost58 == 0 and add58 == 2 and b58["build"] == 2
+    ok58, msg58, cost58, hp58 = sd58.array_fix(b58, 1_000_000, 1000)
+    assert ok58 and cost58 == 1000 and hp58 == 5000 and b58["array_hp"] == 114514 + 5000
+    assert not sd58.array_fix(b58, 100, 1000)[0], "池不足拒绝"
+    assert not sd58.array_fix(b58, 1_000_000, 0)[0], "非正数拒绝"
+    ok58, msg58, cost58 = sd58.upkeep(b58, 1_000_000, 3, t58)
+    assert ok58 and cost58 == 150_000
+    assert not sd58.upkeep(b58, 1_000_000, 3, t58 + 3600)[0], "7 日 CD"
+    ok58, msg58 = sd58.set_gate(b58, 12, 50)
+    assert ok58 and sd58.gate_of(b58) == 12
+    assert not sd58.set_gate(b58, 999, 50)[0]
+    print("F7 vein/build/array/upkeep/gate ok")
+
+    # ④ 弟子招募 / 任命 / 培养 / 惰性运营
+    roots58 = store.table("item/灵根列表") or []
+    assert len(roots58) == 139
+    ok58, msg58, cost58, dsc58 = sd58.recruit(b58, 1_000_000, 3, roots58, t58,
+                                             _random.Random("disc58"))
+    assert ok58 and dsc58["id"] == 1 and cost58 == 25_000
+    assert dsc58["specialty"] in sd58.SPECIALTIES and 60 <= dsc58["loyalty"] <= 90
+    assert not sd58.assign(b58, 1, "杂役")[0], "未知专长拒绝"
+    ok58, msg58 = sd58.assign(b58, 1, "外务")
+    assert ok58 and b58["disciples"][0]["status"] == "任职"
+    ok58, msg58, cost58 = sd58.train(b58, 1_000_000, 1)
+    assert ok58 and cost58 == 10_000 and b58["disciples"][0]["train"] == 1
+    assert any("#1" in x for x in sd58.disciple_lines(b58, 3))
+    ok58, msg58, delta58 = sd58.operate(b58, 1_000_000, 3, t58)
+    assert ok58 and delta58 == 0 and b58["ops_at"] == t58, "首日起算不产出"
+    ok58, msg58, delta58 = sd58.operate(b58, 1_000_000, 3, t58 + 3 * 86400 + 1)
+    assert ok58 and delta58 > 0 and b58["ops_streak"] == 3, msg58
+    assert not sd58.operate(b58, 100, 3, t58 + 4 * 86400)[0], "池不足断运营"
+    assert b58["ops_streak"] == 0
+    print("F7 disciples/operate ok")
+
+    # ⑤ 面板 / 文案 / DB 往返 / main.py 接线 / help 分组
+    lines58 = sd58.panel_lines(b58, 1_000_000, 3, 5, t58)
+    assert any("护宗大阵" in x for x in lines58) and any("弟子" in x for x in lines58)
+    assert "「#开采灵脉」" in sd58.help_text() and "洞天" in sd58.rules_text()
+    atk58, dfn58 = sd58.war_bonus(b58)
+    assert dfn58 > atk58 > 0, "守方大阵计入全额、攻方计半额"
+    d58b = PlayerDoc(uid="db58", name="藏", ext={"sect": "测试宗",
+                                                 "sect_deep": {"vein_day": "2026-11-09"}})
+    await db.save_player(d58b.model_dump())
+    row58b = await db.get_player("db58")
+    assert sd58.personal_of(PlayerDoc(**row58b))["vein_day"] == "2026-11-09"
+    src58 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    names58 = ["CMD_SEC_BLESS_LIST", "CMD_SEC_SETTLE", "CMD_SEC_VEIN", "CMD_SEC_BUILD",
+               "CMD_SEC_ARRAY", "CMD_SEC_ARRAY_FIX", "CMD_SEC_UPKEEP", "CMD_SEC_GATE",
+               "CMD_SEC_RECRUIT", "CMD_SEC_ROSTER", "CMD_SEC_TRAIN", "CMD_SEC_ASSIGN",
+               "CMD_SEC_OPERATE", "CMD_SEC_CONTRIB"]
+    miss58 = [c for c in names58 if f"@filter.command({c}" not in src58]
+    assert miss58 == [], f"漏注册：{miss58}"
+    assert "sec_mod.war_bonus(" in src58 and "sec_mod.gate_of(" in src58
+    assert "await self._sec_open(event" in src58 and "sec_mod.settle(" in src58
+    assert "async def _sec_flush" in src58 and "sect_deep as sec_mod" in src58
+    help58 = _json58.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
+    assert len(help58) == 40 and help58[-1]["group"] == "宗门深化 · 洞天与运营"
+    assert "宗门深化 · 洞天与运营" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
+    print("W8-F7 sect_deep ok")
 
     await db.close()
     print("ALL M12 CHECKS PASSED")
