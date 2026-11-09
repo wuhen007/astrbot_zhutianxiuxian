@@ -8680,6 +8680,68 @@ async def main():
     assert "活动·轮回" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
     print("W16-F1/F2 activity+reinc_story ok")
 
+    # ========================================================= W17-F1：位面大事件
+    from core import plane_events as pe120
+
+    d120 = PlayerDoc(uid="u120", name="援军", realm_index=25,
+                     ext={"xueqi": 100, "potential": 0, "shouyuan": 100, "hp": 100.0})
+    cal120: dict = {}
+    st120 = pe120.pass_state(cal120, time.time())
+    ok120, msg120, _ = pe120.reinforce(d120, st120, time.time(), _Lucky60())
+    assert ok120 and "告急" in msg120, msg120                  # 首援触发帝关
+    ok120, msg120, _ = pe120.reinforce(d120, st120, time.time(), _Lucky60())
+    assert ok120 and "斩异域天骄" in msg120, msg120
+    st120["kills"] = pe120.KILL_TARGET                        # 补满士气
+    ok120, msg120, _ = pe120.reinforce(d120, st120, time.time(), _Lucky60())
+    assert "大捷" in msg120 and "融合帝血" in msg120, msg120
+    assert st120["active"] is False and st120["blood_open_until"] > time.time()
+    ok120, msg120 = pe120.fuse_blood(d120, st120, time.time())
+    assert ok120 and "+20%" in msg120, msg120
+    assert abs(dz60.state_of(d120)["power_bonus"] - 0.2) < 1e-9, "帝威 +20%"
+    ok120, msg120 = pe120.fuse_blood(d120, st120, time.time())
+    assert not ok120 and "已融合" in msg120, msg120
+
+    # 圣地大战
+    ok120, msg120 = pe120.war_side(d120, cal120, "攻", time.time())
+    assert ok120 and "攻" in msg120, msg120
+    ok120, msg120 = pe120.war_act(d120, cal120, time.time(), _Lucky60())
+    assert ok120 and "战功 +12" in msg120, msg120
+    d120.ext["sect_war"]["merits"] = 5000
+    ok120, msg120, d120d = pe120.war_fund(d120, cal120, 50, {"源石": 100})
+    assert ok120 and d120d.get("源石") == -50, msg120
+    assert "个人战功 +100" in msg120, msg120
+    shop120 = pe120.war_shop(None, {"圣地战功商店": [{"name": "柳神法拓本", "price": 3000, "desc": "疗伤"}]})
+    assert "柳神法拓本" in shop120
+    ok120, msg120, d120d = pe120.war_exchange(d120, cal120, "柳神法拓本",
+                                              {"圣地战功商店": [{"name": "柳神法拓本", "price": 3000, "desc": ""}]})
+    assert ok120 and d120d.get("柳神法拓本") == 1, msg120
+
+    # 游商
+    text120 = pe120.merchant_text()
+    assert "白须仙翁" in text120 and "黑衣神秘人" in text120 and "绝美仙子" in text120
+    d120.stones = 10_000_000
+    ok120, msg120, d120d = pe120.buy(d120, pe120.IMPERIAL_GOODS, 1, {"源石": 5_000_000}, "源石")
+    assert ok120 and d120d.get("源石") == -1_200_000, msg120
+    ok120, msg120, d120d = pe120.buy(d120, pe120.BLACK_GOODS, 2, {"源石": 5_000_000}, "源石")
+    assert ok120 and d120d.get("叩仙丹") == 1, msg120
+    ok120, msg120 = pe120.ask_sign(d120, "问道签")
+    assert ok120 and "问道签" in msg120, msg120
+    ok120, msg120 = pe120.ask_sign(d120, "偏签")
+    assert not ok120 and "用法" in msg120, msg120
+
+    src120 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    names120 = ["CMD_PE_PASS", "CMD_PE_REINFORCE", "CMD_PE_BLOOD", "CMD_PE_WAR",
+                "CMD_PE_SIDE", "CMD_PE_ACT", "CMD_PE_FUND", "CMD_PE_RANK",
+                "CMD_PE_SHOP", "CMD_PE_BUY", "CMD_PE_XW_BUY", "CMD_PE_HEIM",
+                "CMD_PE_HEIM_BUY", "CMD_PE_XIANZI"]
+    miss120 = [c for c in names120 if f"@filter.command({c}" not in src120]
+    assert miss120 == [], f"漏注册：{miss120}"
+    assert "pe_mod.reinforce(" in src120 and "pe_mod.war_exchange(" in src120
+    help120b = _json60.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
+    assert any(g["group"] == "位面大事件 · 帝关圣战游商" for g in help120b)
+    assert "位面大事件" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
+    print("W17-F1 plane_events ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

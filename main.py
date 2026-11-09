@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_story as rs_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_story as rs_mod, plane_events as pe_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -827,6 +827,21 @@ CMD_RS_SQUAD = "#轮回小队"
 CMD_RS_ATTR = "#轮回属性"
 CMD_RS_MON = "#轮回怪物"
 CMD_RS_FILE = "#轮回档案"
+# W17-F1：位面大事件（帝关 / 圣地大战 / 游商）
+CMD_PE_PASS = "#帝关战况"
+CMD_PE_REINFORCE = "#驰援帝关"
+CMD_PE_BLOOD = "#融合帝血"
+CMD_PE_WAR = "#圣战详情"
+CMD_PE_SIDE = "#圣战站队"
+CMD_PE_ACT = "#战场行动"
+CMD_PE_FUND = "#投入战资"
+CMD_PE_RANK = "#查看战场榜"
+CMD_PE_SHOP = "#战功商店"
+CMD_PE_BUY = "#战功兑换"
+CMD_PE_XIANZI = "#求取"
+CMD_PE_XW_BUY = "#购买仙翁商品"
+CMD_PE_HEIM = "#黑衣神秘人"
+CMD_PE_HEIM_BUY = "#购买黑市商品"
 # W8-B1b：至尊线（至尊骨 / 斩骨涅槃 / 舍骨入血 / 试炼 / 仙骨 / 重瞳 / 瞳骨合一）
 CMD_SP_INHERIT = "#至尊传承"
 CMD_SP_PANEL = "#至尊之路"
@@ -20502,6 +20517,196 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         yield event.plain_result(rs_mod.panel(doc))
+
+    # ------------------------------------------------ W17-F1：位面大事件
+
+    async def _pe_save(self, doc: PlayerDoc, delta: dict | None = None,
+                       calamity: dict | None = None):
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            for name, qty in (delta or {}).items():
+                if qty > 0:
+                    await self.db.add_items(doc.uid, {name: qty})
+                elif qty < 0:
+                    await self.db.remove_item(doc.uid, name, -qty)
+            if calamity is not None:
+                await self.db.save_calamity(calamity)
+
+    @filter.command(CMD_PE_PASS, "帝关战况")
+    async def handle_pe_pass(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        st = pe_mod.pass_state(await self.db.get_calamity(), time.time())
+        yield event.plain_result(pe_mod.pass_text(st, time.time()))
+
+    @filter.command(CMD_PE_REINFORCE, "驰援帝关：迎战同境异域天骄")
+    async def handle_pe_reinforce(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        cal = await self.db.get_calamity()
+        st = pe_mod.pass_state(cal, time.time())
+        ok, msg, fame = pe_mod.reinforce(doc, st, time.time(),
+                                         random.Random(f"{doc.uid}:pass:{int(time.time())}"))
+        cal["imperial_pass"] = st
+        await self._pe_save(doc, {}, cal)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_PE_BLOOD, "融合帝血：平定后1小时窗口，帝威+20%")
+    async def handle_pe_blood(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        cal = await self.db.get_calamity()
+        st = pe_mod.pass_state(cal, time.time())
+        ok, msg = pe_mod.fuse_blood(doc, st, time.time())
+        cal["imperial_pass"] = st
+        await self._pe_save(doc, {}, cal)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_PE_WAR, "圣战详情")
+    async def handle_pe_war(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result(pe_mod.war_text(doc, await self.db.get_calamity()))
+
+    @filter.command(CMD_PE_SIDE, "圣战站队：攻|守|观")
+    async def handle_pe_side(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        cal = await self.db.get_calamity()
+        ok, msg = pe_mod.war_side(doc, cal, arg, time.time())
+        await self._pe_save(doc, {}, cal)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_PE_ACT, "战场行动：检定积累战功")
+    async def handle_pe_act(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        cal = await self.db.get_calamity()
+        ok, msg = pe_mod.war_act(doc, cal, time.time(),
+                                 random.Random(f"{doc.uid}:war:{int(time.time())}"))
+        await self._pe_save(doc, {}, cal)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_PE_FUND, "投入战资：源石数→战功")
+    async def handle_pe_fund(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        try:
+            qty = int("".join(ch for ch in (arg or "") if ch.isdigit()) or 0)
+        except ValueError:
+            qty = 0
+        inv = await self.db.get_inventory(doc.uid)
+        cal = await self.db.get_calamity()
+        ok, msg, delta = pe_mod.war_fund(doc, cal, qty, inv)
+        await self._pe_save(doc, delta, cal)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_PE_RANK, "查看战场榜：个人战功与全服军资")
+    async def handle_pe_rank(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result(pe_mod.war_text(doc, await self.db.get_calamity()))
+
+    @filter.command(CMD_PE_SHOP, "战功商店")
+    async def handle_pe_shop(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        yield event.plain_result(pe_mod.war_shop(None, self.content.table("圣地战功商店", [])))
+
+    @filter.command(CMD_PE_BUY, "战功兑换 名称")
+    async def handle_pe_buy(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, delta = pe_mod.war_exchange(doc, await self.db.get_calamity(),
+                                             arg, self.content.table("圣地战功商店", []))
+        await self._pe_save(doc, delta)
+        yield event.plain_result(msg)
+
+    @filter.command("#白须仙翁", "游商：唯一百分比装备与黑市（总览）")
+    async def handle_pe_merchants(self, event: AstrMessageEvent):
+        yield event.plain_result(pe_mod.merchant_text())
+
+    @filter.command(CMD_PE_XW_BUY, "购买仙翁商品 编号（源石计价）")
+    async def handle_pe_xw_buy(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        try:
+            idx = int((arg or "0").strip())
+        except ValueError:
+            idx = 0
+        inv = await self.db.get_inventory(doc.uid)
+        ok, msg, delta = pe_mod.buy(doc, pe_mod.IMPERIAL_GOODS, idx, inv, "源石")
+        await self._pe_save(doc, delta)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_PE_HEIM, "黑衣神秘人（神药与禁物总览）")
+    async def handle_pe_heim(self, event: AstrMessageEvent):
+        yield event.plain_result(pe_mod.merchant_text())
+
+    @filter.command(CMD_PE_HEIM_BUY, "购买黑市商品 编号（源石计价）")
+    async def handle_pe_heim_buy(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        try:
+            idx = int((arg or "0").strip())
+        except ValueError:
+            idx = 0
+        inv = await self.db.get_inventory(doc.uid)
+        ok, msg, delta = pe_mod.buy(doc, pe_mod.BLACK_GOODS, idx, inv, "源石")
+        await self._pe_save(doc, delta)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_PE_XIANZI, "求取问道签|历练签|寻缘签（50万灵石）")
+    async def handle_pe_xianzi(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = pe_mod.ask_sign(doc, arg)
+        await self._pe_save(doc)
+        yield event.plain_result(msg)
 
     @filter.command(CMD_DZ_GUARD, "护法")
     async def handle_dz_guard(self, event: AstrMessageEvent, arg: str = ""):
