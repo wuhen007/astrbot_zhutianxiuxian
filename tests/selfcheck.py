@@ -8513,6 +8513,58 @@ async def main():
     assert "专属套装" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
     print("W13-F1 exclusive_set ok")
 
+    # ========================================================= W14-F1：诸天镜补充玩法
+    from core import zhutian_extra as zx100
+
+    d100 = PlayerDoc(uid="u100", name="投影人", realm_index=15, exp=50_000_000,
+                     ext={"xueqi": 50_000_000, "potential": 0, "shouyuan": 100,
+                          "hp": 100.0,
+                          "linggen": {"name": "金灵根", "type": "天灵根", "eff": 1.0,
+                                      "atk": 10.0, "def": 10.0, "hp": 10.0},
+                          "zhutian": {"bound": True, "tier": 3, "energy": 9,
+                                      "hopes": 1200, "imprints": ["魔法少女小圆"],
+                                      "current": "鹿目圆", "avatars": {}}})
+    ok100, msg100 = zx100.magic_girl_advance(d100)
+    assert ok100 and "愿望化身" in msg100, msg100
+    ok100, msg100 = zx100.magic_girl_advance(d100)
+    assert ok100 and "希望之光" in msg100, msg100
+    d100.ext["zhutian"]["hopes"] = 0
+    ok100, msg100 = zx100.magic_girl_advance(d100)
+    assert not ok100 and "希望碎片" in msg100, msg100
+
+    ok100, msg100, d100d = zx100.purify(d100, {"悲叹之种": 1})
+    assert ok100 and d100d.get("悲叹之种") == -1, msg100
+    assert zx100._st(d100)["dust"] == zx100.DUST_INIT - 3
+    ok100, msg100 = zx100.reset_timeline(d100)
+    assert not ok100 and "净化" in msg100, msg100            # 污浊 17 > 5
+    d100.ext["zhutian_extra"]["dust"] = 5
+    ok100, msg100 = zx100.reset_timeline(d100)
+    assert ok100 and "时间线" in msg100, msg100
+    assert zx100._st(d100)["timeline"] == 1
+
+    d100b = PlayerDoc(uid="u100b", name="凡投", realm_index=3, exp=100,
+                      ext={"xueqi": 100, "hp": 1})
+    ok100, msg100 = zx100.consume_mirror(d100b, time.time(), _Lucky60())
+    assert not ok100 and "仙阶" in msg100, msg100
+    ok100, msg100 = zx100.consume_mirror(d100, time.time(), _Lucky60())
+    assert ok100 and "主角" in msg100 or "灵根" in msg100, msg100
+    assert d100.ext["linggen"]["id"] == 7010015, "主角灵根写入"
+    assert d100.exp == 50_000_000 - zx100.MIRROR_COST
+
+    ok100, msg100 = zx100.one_thought_gate(d100)
+    assert not ok100 and "岁云五阶" in msg100, msg100
+
+    src100 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    names100 = ["CMD_MG_ADV", "CMD_MG_PURIFY", "CMD_MG_RESET", "CMD_ZX_MIRROR",
+                "CMD_ZX_THOUGHT", "CMD_ZX_PANEL"]
+    miss100 = [c for c in names100 if f"@filter.command({c}" not in src100]
+    assert miss100 == [], f"漏注册：{miss100}"
+    assert "zx_mod.magic_girl_advance(" in src100 and "zx_mod.consume_mirror(" in src100
+    help100b = _json60.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
+    assert any(g["group"] == "诸天镜 · 主角灵根与魔法少女" for g in help100b)
+    assert "诸天镜·补充" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
+    print("W14-F1 zhutian_extra ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

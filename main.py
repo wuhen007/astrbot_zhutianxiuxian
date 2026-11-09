@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -795,6 +795,13 @@ CMD_EX_ZHONGYAN = "#终焉神魔路"
 CMD_EX_HHSG = "#黄昏神国"
 CMD_EX_TGMT = "#太古魔土"
 CMD_EX_ZSGX = "#诸世归墟"
+# W14-F1：诸天镜补充（魔法少女进阶/净化/时间线/主角灵根/诸天一念）
+CMD_MG_ADV = "#魔法少女进阶"
+CMD_MG_PURIFY = "#净化灵魂宝石"
+CMD_MG_RESET = "#重置见泷原时间线"
+CMD_ZX_MIRROR = "#消耗诸天镜"
+CMD_ZX_THOUGHT = "#诸天一念"
+CMD_ZX_PANEL = "#诸天镜玩法"
 # W8-B1b：至尊线（至尊骨 / 斩骨涅槃 / 舍骨入血 / 试炼 / 仙骨 / 重瞳 / 瞳骨合一）
 CMD_SP_INHERIT = "#至尊传承"
 CMD_SP_PANEL = "#至尊之路"
@@ -20066,6 +20073,123 @@ class ZhutianPlugin(Star):
     async def handle_ex_zsgx(self, event: AstrMessageEvent):
         async for r in self._ex_run(event, "终焉神魔路", ""):
             yield r
+
+    # ------------------------------------------------ W14-F1：诸天镜补充玩法
+
+    @filter.command(CMD_MG_ADV, "魔法少女进阶：鹿目圆四阶（希望碎片）")
+    async def handle_mg_adv(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = zx_mod.magic_girl_advance(doc)
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+        if ok:
+            async for r in self._smart(event, msg, "魔法少女进阶"):
+                yield r
+        else:
+            yield event.plain_result(msg)
+
+    @filter.command(CMD_MG_PURIFY, "净化灵魂宝石：悲叹之种→希望+3/污浊-3")
+    async def handle_mg_purify(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        ok, msg, delta = zx_mod.purify(doc, inv)
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            for name, qty in (delta or {}).items():
+                if qty < 0:
+                    await self.db.remove_item(doc.uid, name, -qty)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_MG_RESET, "重置见泷原时间线：污浊≤5+镜能2")
+    async def handle_mg_reset(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = zx_mod.reset_timeline(doc)
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_ZX_MIRROR, "消耗诸天镜：投影诸天获取位面主角灵根")
+    async def handle_zx_mirror(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = zx_mod.consume_mirror(doc, time.time(),
+                                        random.Random(f"{doc.uid}:mirror:{int(time.time())}"))
+        self._phy_sync(doc)
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+        if ok:
+            async for r in self._smart(event, msg, "诸天镜"):
+                yield r
+        else:
+            yield event.plain_result(msg)
+
+    @filter.command(CMD_ZX_THOUGHT, "诸天一念：岁云五阶跨位面赠送 物品名*数量 @道友")
+    async def handle_zx_thought(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok_g, why = zx_mod.one_thought_gate(doc)
+        if not ok_g:
+            yield event.plain_result(why)
+            return
+        target_id = self._at_target(event)
+        if not target_id:
+            yield event.plain_result("用法：#诸天一念 物品名*数量 @道友（岁云五阶专属）")
+            return
+        parts = (arg or "").strip().split("*")
+        item = parts[0].strip()
+        qty = int(parts[1]) if len(parts) > 1 and parts[1].strip().isdigit() else 1
+        if not item or qty <= 0:
+            yield event.plain_result("用法：#诸天一念 物品名*数量 @道友")
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        if int(inv.get(item, 0) or 0) < qty:
+            yield event.plain_result(f"你并没有【{item}】×{qty}。")
+            return
+        raw = await self.db.get_player(target_id)
+        if raw is None:
+            yield event.plain_result("对方尚未踏入仙途。")
+            return
+        foe = PlayerDoc(**raw)
+        async with self.db.transaction():
+            await self.db.remove_item(doc.uid, item, qty)
+            await self.db.add_items(foe.uid, {item: qty})
+            await self.db.save_player(foe.model_dump())
+        yield event.plain_result(
+            f"【诸天一念】一念跨越位面与维度——【{item}】×{qty} 已至 "
+            f"{foe.name or foe.uid} 手中。（真实库存与绑定规则照常）")
+
+    @filter.command(CMD_ZX_PANEL, "诸天镜补充玩法面板")
+    async def handle_zx_panel(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result(zx_mod.panel(doc))
 
     @filter.command(CMD_DZ_GUARD, "护法")
     async def handle_dz_guard(self, event: AstrMessageEvent, arg: str = ""):

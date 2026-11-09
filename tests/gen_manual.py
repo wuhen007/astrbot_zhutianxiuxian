@@ -63,6 +63,8 @@ def main() -> int:
                    "handle_ls_sell", "handle_ls_my", "handle_ls_trend",
                    "handle_ls_tip", "handle_ls_chat", "handle_ls_loan",
                    "handle_ls_repay", "handle_ls_rank")),
+        ("诸天镜·补充", ("handle_mg_adv", "handle_mg_purify", "handle_mg_reset",
+                     "handle_zx_mirror", "handle_zx_thought", "handle_zx_panel")),
         ("专属套装", ("handle_ex_panel", "handle_ex_wanhua", "handle_ex_wxdd",
                    "handle_ex_wxts", "handle_ex_wlfp", "handle_ex_zhongyan",
                    "handle_ex_hhsg", "handle_ex_tgmt", "handle_ex_zsgx")),
