@@ -8565,6 +8565,60 @@ async def main():
     assert "诸天镜·补充" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
     print("W14-F1 zhutian_extra ok")
 
+    # ========================================================= W15-F1：职业补全
+    from core import occupation_extra as oe105
+
+    d105 = PlayerDoc(uid="u105", name="侠客", realm_index=20, stones=0,
+                     ext={"xueqi": 100, "potential": 0, "shouyuan": 100, "hp": 100.0,
+                          "occupation": "侠客"})
+    cal105 = {}
+    ok105, msg105 = oe105.place_field(d105, cal105, "遮天位面", time.time())
+    assert not ok105 and "源地师" in msg105, msg105          # 非源师
+    text105, pool105 = oe105.villains_text(d105, "20261110", 3)
+    assert "恶人榜" in text105 and len(pool105) == 3, text105
+    name105 = pool105[0]["name"]
+    ok105, msg105, _ = oe105.slay(d105, {"侠客令": 0}, name105, "20261110", 3,
+                                  time.time(), _Lucky60())
+    assert not ok105 and "侠客令" in msg105, msg105
+    ok105, msg105, _ = oe105.slay(d105, {"侠客令": 1}, name105, "20261110", 3,
+                                  time.time(), _Lucky60())
+    assert ok105 and "讨恶成功" in msg105, msg105
+    assert d105.stones > 0, "赏金入库"
+    ok105, msg105, _ = oe105.slay(d105, {"侠客令": 1}, "不存在", "20261110", 3,
+                                  time.time(), _Lucky60())
+    assert not ok105 and "并无此人" in msg105, msg105
+
+    d106 = PlayerDoc(uid="u106", name="魔修", realm_index=20,
+                     ext={"xueqi": 100, "potential": 0, "shouyuan": 100, "hp": 100.0,
+                          "occupation": "唤魔者", "modao": 0.0})
+    text105, pool105v = oe105.villages_text(d106, "20261110", 3)
+    vname105 = pool105v[0]["name"]
+    ok105, msg105, _ = oe105.raid(d106, {"唤魔令": 1}, vname105, "20261110", 3,
+                                  time.time(), _Lucky60())
+    assert ok105 and "劫掠成功" in msg105, msg105
+    assert d106.stones > 0 and d106.ext["modao"] == 8.0, "魔道 +8"
+
+    d107 = PlayerDoc(uid="u107", name="源师", realm_index=20,
+                     ext={"xueqi": 100, "potential": 0, "shouyuan": 100, "hp": 100.0,
+                          "occupation": "源天师"})
+    ok105, msg105 = oe105.place_field(d107, cal105, "遮天位面", time.time())
+    assert ok105 and "源石场" in msg105, msg105
+    assert cal105["source_field"]["plane"] == "遮天位面"
+    ok105, msg105 = oe105.place_field(d107, cal105, "遮天位面", time.time())
+    assert not ok105 and "已有" in msg105, msg105            # 同位面不可叠加
+    assert "源石场" in oe105.field_text(cal105, time.time())
+
+    src105 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    names105c = ["CMD_OCC_FIELD", "CMD_OCC_FIELD_VIEW", "CMD_OCC_EVILS",
+                 "CMD_OCC_SLAY", "CMD_OCC_VILLAGES", "CMD_OCC_RAID"]
+    miss105c = [c for c in names105c if f"@filter.command({c}" not in src105]
+    assert miss105c == [], f"漏注册：{miss105c}"
+    assert "oe_mod.slay(" in src105 and "oe_mod.place_field(" in src105
+    help105c = _json60.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
+    assert any(g["group"] == "职业补全 · 源石场与讨恶劫村" for g in help105c)
+    assert "职业补全" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
+    print("W15-F1 occupation_extra ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

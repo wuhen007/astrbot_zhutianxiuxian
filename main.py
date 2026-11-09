@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -802,6 +802,13 @@ CMD_MG_RESET = "#重置见泷原时间线"
 CMD_ZX_MIRROR = "#消耗诸天镜"
 CMD_ZX_THOUGHT = "#诸天一念"
 CMD_ZX_PANEL = "#诸天镜玩法"
+# W15-F1：职业补全（源石场 / 侠客讨恶 / 唤魔者劫村）
+CMD_OCC_FIELD = "#布置源石场"
+CMD_OCC_FIELD_VIEW = "#查看源石场"
+CMD_OCC_EVILS = "#查看恶人"
+CMD_OCC_SLAY = "#消灭恶人"
+CMD_OCC_VILLAGES = "#村庄列表"
+CMD_OCC_RAID = "#劫掠村庄"
 # W8-B1b：至尊线（至尊骨 / 斩骨涅槃 / 舍骨入血 / 试炼 / 仙骨 / 重瞳 / 瞳骨合一）
 CMD_SP_INHERIT = "#至尊传承"
 CMD_SP_PANEL = "#至尊之路"
@@ -20190,6 +20197,94 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         yield event.plain_result(zx_mod.panel(doc))
+
+    # ------------------------------------------------ W15-F1：职业补全
+
+    @filter.command(CMD_OCC_FIELD, "布置源石场 位面名（源地师/源天师，源石×10，24h）")
+    async def handle_occ_field(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        if int(inv.get(oe_mod.FIELD_COST_ITEM, 0) or 0) < oe_mod.FIELD_COST_QTY:
+            yield event.plain_result(f"布置源石场需【{oe_mod.FIELD_COST_ITEM}】×{oe_mod.FIELD_COST_QTY}。")
+            return
+        state = await self.db.get_calamity()
+        ok, msg = oe_mod.place_field(doc, state, arg, time.time())
+        if ok:
+            async with self.db.transaction():
+                await self.db.remove_item(doc.uid, oe_mod.FIELD_COST_ITEM, oe_mod.FIELD_COST_QTY)
+                await self.db.save_calamity(state)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_OCC_FIELD_VIEW, "查看源石场")
+    async def handle_occ_field_view(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        yield event.plain_result(oe_mod.field_text(await self.db.get_calamity(), time.time()))
+
+    @filter.command(CMD_OCC_EVILS, "查看恶人（侠客）")
+    async def handle_occ_evils(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        text, _ = oe_mod.villains_text(doc, time.strftime("%Y%m%d"), int(time.time()) // 3600 % 24)
+        yield event.plain_result(text)
+
+    @filter.command(CMD_OCC_SLAY, "消灭恶人 名字（侠客，侠客令×1）")
+    async def handle_occ_slay(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        result = oe_mod.slay(doc, inv, arg, time.strftime("%Y%m%d"),
+                             int(time.time()) // 3600 % 24, time.time(),
+                             random.Random(f"{doc.uid}:slay:{int(time.time())}"))
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            for name, qty in (result[2] or {}).items():
+                if qty < 0:
+                    await self.db.remove_item(doc.uid, name, -qty)
+        yield event.plain_result(result[1])
+
+    @filter.command(CMD_OCC_VILLAGES, "村庄列表（唤魔者）")
+    async def handle_occ_villages(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        text, _ = oe_mod.villages_text(doc, time.strftime("%Y%m%d"), int(time.time()) // 3600 % 24)
+        yield event.plain_result(text)
+
+    @filter.command(CMD_OCC_RAID, "劫掠村庄 名字（唤魔者，唤魔令×1）")
+    async def handle_occ_raid(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        result = oe_mod.raid(doc, inv, arg, time.strftime("%Y%m%d"),
+                             int(time.time()) // 3600 % 24, time.time(),
+                             random.Random(f"{doc.uid}:raid:{int(time.time())}"))
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            for name, qty in (result[2] or {}).items():
+                if qty < 0:
+                    await self.db.remove_item(doc.uid, name, -qty)
+        yield event.plain_result(result[1])
 
     @filter.command(CMD_DZ_GUARD, "护法")
     async def handle_dz_guard(self, event: AstrMessageEvent, arg: str = ""):
