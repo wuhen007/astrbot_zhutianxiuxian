@@ -8296,6 +8296,87 @@ async def main():
     assert "帝路·红尘仙" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
     print("W10-F1/F2 selfdao ok")
 
+    # ========================================================= W11-F1/F2：自身之道 + 祭道 + 唯一道
+    from core import ownway as ow80
+
+    d80 = PlayerDoc(uid="u80", name="帝路人", realm_index=25, exp=10_000_000_000,
+                    stones=1_000_000, ext={"xueqi": 10_000_000_000, "potential": 1_000_000.0,
+                                           "shouyuan": 50_000_000, "hp": 100.0})
+    ok80, msg80 = ow80.create(d80, "剑意", "杀伐剑道")
+    assert not ok80 and "攻伐" in msg80, msg80                 # 类型不合法
+    d80.state = "闭关"
+    ok80, msg80 = ow80.create(d80, "攻伐", "杀伐剑道")
+    assert not ok80 and "行动" in msg80, msg80                 # 需空闲
+    d80.state = "空闲"
+    ok80, msg80 = ow80.create(d80, "攻伐", "杀伐剑道")
+    assert ok80 and "大道初开" in msg80, msg80
+    assert ow80.state_of(d80)["seg"] == 0
+
+    ok80, msg80 = ow80.cultivate(d80, 10, time.time())
+    assert ok80 and "第 10 段" in msg80, msg80
+    ok80, msg80 = ow80.cultivate(d80, 5, time.time())
+    assert not ok80 and "突破" in msg80, msg80                 # 段满需突破
+    ok80, msg80 = ow80.breakthrough(d80, time.time())
+    assert ok80 and "10 → 11" in msg80 and "道基实道" in msg80, msg80
+    bounds80 = {10, 50, 120, 200, 280, 350, 430, 499}
+    guard80 = 0
+    while ow80.state_of(d80)["seg"] < 500 and guard80 < 60:
+        guard80 += 1
+        seg80 = ow80.state_of(d80)["seg"]
+        if seg80 in bounds80:
+            ok80, msg80 = ow80.breakthrough(d80, time.time())
+        else:
+            ok80, msg80 = ow80.cultivate(d80, 50, time.time())
+        assert ok80, (seg80, msg80)
+    assert ow80.state_of(d80)["seg"] == 500, "己道 500 段"
+    assert "祭尽诸我" in ow80.panel(d80)
+
+    ok80, msg80, _ = ow80.emperor_sutra(d80, "岁月剑经", time.time())
+    assert ok80 and "岁月剑经" in msg80, msg80
+    assert "岁月剑经" in list(d80.ext.get("gongfa") or []), "帝经录入功法谱"
+    ok80, msg80, _ = ow80.emperor_sutra(d80, "再著一本", time.time())
+    assert not ok80 and "一人一部" in msg80, msg80
+
+    _dz80 = dz60.state_of(d80)
+    _dz80["reached"] = True                                    # 祭道前置：路尽级仙帝
+    dz60.save(d80, _dz80)
+    _sd80 = sd70.state_of(d80)
+    _sd80["layers"] = 20
+    sd70.save(d80, _sd80)
+    _wd80 = wd60.state_of(d80)
+    _wd80["completed"] = ["红尘仙道"]
+    wd60.save(d80, _wd80)
+    reg80 = {"emperors": [{"uid": f"e{i}"} for i in range(5)], "guards": {}}
+    ok80, msg80, _ = ow80.sacrifice(d80, reg80, time.time(), _Lucky60())
+    assert not ok80 and "10 位" in msg80, msg80                # 全服证道者不足
+    reg80 = {"emperors": [{"uid": f"e{i}"} for i in range(10)], "guards": {}}
+    ok80, msg80, _ = ow80.sacrifice(d80, reg80, time.time(), _Lucky60())
+    assert ok80 and "祭 道" in msg80, msg80
+    assert ow80.state_of(d80)["jidao"] is True
+    assert abs(dz60.state_of(d80)["power_bonus"] - 3.0) < 1e-9, "祭道帝威拉满"
+
+    ok80, msg80, _, reg80b = ow80.unique_dao(d80, reg80, time.time())
+    assert not ok80 and "大道至宝" in msg80, msg80             # 未认主
+    d80.ext["daotreasure"] = {"owned": "岁月道果"}
+    d80.exp = 10_000_000_000
+    d80.ext["xueqi"] = 10_000_000_000
+    ok80, msg80, _, reg80b = ow80.unique_dao(d80, reg80, time.time())
+    assert ok80 and "唯 一 道 之 上" in msg80, msg80
+    assert reg80b.get("unique_holder") == "u80", "全服唯一登记"
+    ok80, msg80, _, _ = ow80.unique_dao(d80, reg80b, time.time())
+    assert not ok80 and "唯一" in msg80, msg80
+
+    src80 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    names80 = ["CMD_OW_CREATE", "CMD_OW_CULTIVATE", "CMD_OW_BREAK", "CMD_OW_SUTRA",
+               "CMD_OW_JIDAO", "CMD_OW_UNIQUE", "CMD_OW_PANEL"]
+    miss80 = [c for c in names80 if f"@filter.command({c}" not in src80]
+    assert miss80 == [], f"漏注册：{miss80}"
+    assert "ow_mod.sacrifice(" in src80 and "ow_mod.unique_dao(" in src80
+    help80b = _json60.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
+    assert any(g["group"] == "帝路 · 自身之道与终局" for g in help80b)
+    assert "帝路·终局" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
+    print("W11-F1/F2 ownway ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

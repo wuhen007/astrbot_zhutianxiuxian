@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -765,6 +765,14 @@ CMD_RD_DIVINE = "#推演红尘仙"
 CMD_RD_VOW = "#立下世愿"
 CMD_RD_LIVES = "#逆活九世"
 CMD_RD_PANEL = "#我的红尘仙路"
+# W11-F1/F2：自身之道 / 创造帝经 / 祭道 / 唯一道之上
+CMD_OW_CREATE = "#创造自身之道"
+CMD_OW_CULTIVATE = "#修炼自身之道"
+CMD_OW_BREAK = "#突破自身之道"
+CMD_OW_SUTRA = "#创造帝经"
+CMD_OW_JIDAO = "#祭道"
+CMD_OW_UNIQUE = "#唯一道之上"
+CMD_OW_PANEL = "#自身之道"
 # W8-B1b：至尊线（至尊骨 / 斩骨涅槃 / 舍骨入血 / 试炼 / 仙骨 / 重瞳 / 瞳骨合一）
 CMD_SP_INHERIT = "#至尊传承"
 CMD_SP_PANEL = "#至尊之路"
@@ -19680,6 +19688,120 @@ class ZhutianPlugin(Star):
             return
         async for r in self._smart(event, sd_mod.panel(doc, time.time()), "红尘仙路"):
             yield r
+
+    # ------------------------------------------------ W11-F1/F2：自身之道与终局
+
+    @filter.command(CMD_OW_CREATE, "创造自身之道：类型+名称（圣人王折算）")
+    async def handle_ow_create(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        parts = (arg or "").strip().split()
+        typ = parts[0] if parts else ""
+        name = parts[1] if len(parts) > 1 else ""
+        ok, msg = ow_mod.create(doc, typ, name, time.time())
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+        if ok:
+            async for r in self._smart(event, msg, "大道初开"):
+                yield r
+        else:
+            yield event.plain_result(msg)
+
+    @filter.command(CMD_OW_CULTIVATE, "修炼自身之道*次数（每次150k×段位乘数）")
+    async def handle_ow_cultivate(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        try:
+            times = max(1, int(str(arg or "1").strip().lstrip("*") or 1))
+        except ValueError:
+            times = 1
+        ok, msg = ow_mod.cultivate(doc, times, time.time())
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+        if ok:
+            yield event.plain_result(msg)
+        else:
+            yield event.plain_result(msg)
+
+    @filter.command(CMD_OW_BREAK, "突破自身之道：段满破入下一段")
+    async def handle_ow_break(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = ow_mod.breakthrough(doc, time.time())
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_OW_SUTRA, "创造帝经：大帝著经，一人一部")
+    async def handle_ow_sutra(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, delta = ow_mod.emperor_sutra(doc, arg, time.time())
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            for name, qty in (delta or {}).items():
+                if qty > 0:
+                    await self.db.add_items(doc.uid, {name: qty})
+                elif qty < 0:
+                    await self.db.remove_item(doc.uid, name, -qty)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_OW_JIDAO, "祭道：路尽仙帝+己道400段+全服十帝（岁云必成）")
+    async def handle_ow_jidao(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        reg = await self._dz_registry()
+        result = ow_mod.sacrifice(doc, reg, time.time(),
+                                  random.Random(f"{doc.uid}:jidao:{int(time.time())}"))
+        async for r in self._dz_finish(event, doc, result, "祭道"):
+            yield r
+
+    @filter.command(CMD_OW_UNIQUE, "唯一道之上：七项前置检查，诸天唯一")
+    async def handle_ow_unique(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        reg = await self._dz_registry()
+        ok, msg, delta, new_reg = ow_mod.unique_dao(doc, reg, time.time())
+        await self._dz_apply(doc, delta, reg=new_reg)
+        if ok:
+            async for r in self._smart(event, msg, "唯一道之上"):
+                yield r
+        else:
+            yield event.plain_result(msg)
+
+    @filter.command(CMD_OW_PANEL, "自身之道：段位/帝经/祭道/唯一道进度")
+    async def handle_ow_panel(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result(ow_mod.panel(doc))
 
     @filter.command(CMD_DZ_GUARD, "护法")
     async def handle_dz_guard(self, event: AstrMessageEvent, arg: str = ""):
