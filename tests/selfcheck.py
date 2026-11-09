@@ -8377,6 +8377,90 @@ async def main():
     assert "帝路·终局" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
     print("W11-F1/F2 ownway ok")
 
+    # ========================================================= W12-F1/F2：体质进阶
+    from core import physique as ph90
+
+    d90 = PlayerDoc(uid="u90", name="体质人", realm_index=25, exp=100_000_000,
+                    ext={"xueqi": 100_000_000, "potential": 5_000.0, "shouyuan": 9_000_000,
+                         "hp": 100.0,
+                         "linggen": {"name": "太阳之体", "type": "太阳", "eff": 1.0,
+                                     "atk": 100.0, "def": 100.0, "hp": 100.0}})
+    ok90, msg90, _ = ph90.awaken_sun(d90, {}, time.time())
+    assert not ok90 and "太阳真经" in msg90, msg90            # 缺功法
+    d90.ext["gongfa"] = ["太阳真经"]
+    ok90, msg90, _ = ph90.awaken_sun(d90, {}, time.time())
+    assert not ok90 and "扶桑神枝" in msg90, msg90            # 缺道具
+    ok90, msg90, d90d = ph90.awaken_sun(d90, {"扶桑神枝": 1}, time.time())
+    assert ok90 and "太阳神体" in msg90, msg90
+    assert d90d.get("扶桑神枝") == -1
+    lg90 = d90.ext["linggen"]
+    assert lg90["name"] == "太阳神体" and abs(lg90["atk"] - 200.0) < 1e-6, lg90
+    d90.ext["gongfa"] = ["太阳真经", "太阳真经·仙台卷", "大日涅槃诀"]
+    ok90, msg90, _ = ph90.awaken_sun(d90, {}, time.time())
+    assert ok90 and "太阳圣皇体" in msg90, msg90
+    assert abs(d90.ext["linggen"]["atk"] - 700.0) < 1e-6, "阶段二 ×3.5"
+
+    d90.ext["linggen"].update({"name": "神王体", "type": "神王", "atk": 100.0,
+                               "def": 100.0, "hp": 100.0})
+    ok90, msg90, _ = ph90.awaken_king(d90, {}, time.time())
+    assert ok90 and "神王体·小成" in msg90, msg90
+    ok90, msg90, _ = ph90.awaken_king(d90, {}, time.time())
+    assert not ok90 and "斗字秘" in msg90, msg90
+    d90.ext["gongfa"].append("斗字秘")
+    ok90, msg90, _ = ph90.awaken_king(d90, {}, time.time())
+    assert ok90 and "神王体·大成" in msg90, msg90
+
+    # 九转轮回
+    d91 = PlayerDoc(uid="u91", name="轮回人", realm_index=41, exp=100_000_000,
+                    ext={"xueqi": 100_000_000, "potential": 5_000.0, "shouyuan": 9_000_000,
+                         "hp": 100.0,
+                         "linggen": {"name": "九转轮回体", "type": "转生", "eff": 1.0,
+                                     "atk": 100.0, "def": 100.0, "hp": 100.0}})
+    ok90, msg90, _ = ph90.reincarnate(d91, time.time(), _Lucky60())
+    assert not ok90 and "轮回点" in msg90, msg90
+    ok90, msg90, d90d = ph90.offer_stone(d91, {"奇怪的石头": 3})
+    assert ok90 and d90d.get("奇怪的石头") == -1
+    ok90, msg90, _ = ph90.reincarnate(d91, time.time(), _Doom60())
+    assert ok90 and "崩碎" in msg90, msg90                   # 失败：寿元-500 道伤+1
+    assert dz60.peek(d91) == 1.0
+    ok90, _, d90d = ph90.offer_stone(d91, {"奇怪的石头": 3})
+    for n in range(1, 10):
+        ok90, msg90, _ = ph90.reincarnate(d91, time.time(), _Lucky60())
+        assert ok90 and f"第 {n} 转" in msg90, (n, msg90)
+        if n < 9:
+            ph90.offer_stone(d91, {"奇怪的石头": 3})
+    assert ph90.state_of(d91)["samsara"] == 9
+    assert d91.ext["linggen"]["name"] == "九转轮回体·9转"
+    ok90, msg90, _ = ph90.consume_samsara_fruit(d91, {"轮回道果": 1})
+    assert ok90 and "命运神道体" in msg90, msg90
+    ok90, msg90, d90d = ph90.consume_light(d91, "光阴火", {"光阴火": 2})
+    assert ok90 and d90d.get("光阴火") == -1, msg90
+    assert abs(d91.ext["linggen"]["atk"] - 9100.0) < 1e-6, "光阴 +9000"
+
+    # 极道天魔
+    d92 = PlayerDoc(uid="u92", name="魔修", realm_index=25,
+                    ext={"xueqi": 100, "potential": 0, "shouyuan": 100, "hp": 1,
+                         "linggen": {"name": "天魔体", "type": "魔头", "eff": 1.0,
+                                     "atk": 100.0, "def": 100.0, "hp": 100.0}})
+    ok90, msg90, _ = ph90.demon_god(d92, {"邪神道果": 1})
+    assert not ok90 and "九重魔功" in msg90, msg90
+    d92.ext["evil"] = {"magic": 9}
+    ok90, msg90, _ = ph90.demon_god(d92, {"邪神道果": 1})
+    assert ok90 and d92.ext["linggen"]["name"] == "极道天魔", msg90
+    assert "体质进阶" in ph90.panel(d92) and "轮回点" in ph90.panel(d91)
+
+    src90 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    names90 = ["CMD_PHY_SUN", "CMD_PHY_MOON", "CMD_PHY_KING", "CMD_PHY_OFFER",
+               "CMD_PHY_REBORN", "CMD_PHY_FRUIT", "CMD_PHY_LF", "CMD_PHY_LS",
+               "CMD_PHY_LW", "CMD_PHY_DEMON", "CMD_PHY_PANEL"]
+    miss90 = [c for c in names90 if f"@filter.command({c}" not in src90]
+    assert miss90 == [], f"漏注册：{miss90}"
+    assert "ph_mod.awaken_sun(" in src90 and "ph_mod.demon_god(" in src90
+    help90b = _json60.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
+    assert any(g["group"] == "体质进阶 · 太阳太阴神王与轮回" for g in help90b)
+    assert "体质进阶" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
+    print("W12-F1/F2 physique ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

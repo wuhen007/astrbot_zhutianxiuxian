@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -773,6 +773,18 @@ CMD_OW_SUTRA = "#创造帝经"
 CMD_OW_JIDAO = "#祭道"
 CMD_OW_UNIQUE = "#唯一道之上"
 CMD_OW_PANEL = "#自身之道"
+# W12-F1/F2：体质进阶（太阳/太阴/神王两阶段 + 九转轮回 + 命运神道 + 极道天魔）
+CMD_PHY_SUN = "#太阳体觉醒"
+CMD_PHY_MOON = "#太阴体觉醒"
+CMD_PHY_KING = "#神王体觉醒"
+CMD_PHY_OFFER = "#供奉奇怪的石头"
+CMD_PHY_REBORN = "#轮回"
+CMD_PHY_FRUIT = "#消耗轮回道果"
+CMD_PHY_LF = "#消耗光阴火"
+CMD_PHY_LS = "#消耗光阴石"
+CMD_PHY_LW = "#消耗光阴水"
+CMD_PHY_DEMON = "#消耗邪神道果"
+CMD_PHY_PANEL = "#体质进阶"
 # W8-B1b：至尊线（至尊骨 / 斩骨涅槃 / 舍骨入血 / 试炼 / 仙骨 / 重瞳 / 瞳骨合一）
 CMD_SP_INHERIT = "#至尊传承"
 CMD_SP_PANEL = "#至尊之路"
@@ -19802,6 +19814,163 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         yield event.plain_result(ow_mod.panel(doc))
+
+    # ------------------------------------------------ W12-F1/F2：体质进阶
+
+    def _phy_sync(self, doc: PlayerDoc) -> None:
+        """觉醒/光阴改写灵根快照后，按内容表重算 base 属性。"""
+        try:
+            rows = self.content.table("talent/talent", [])
+            if rows:
+                linggen.sync_stats(doc, rows)
+        except Exception:
+            pass
+
+    async def _phy_finish(self, event, doc: PlayerDoc, result, title: str):
+        ok, msg, delta = result
+        self._phy_sync(doc)
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            for name, qty in (delta or {}).items():
+                if qty > 0:
+                    await self.db.add_items(doc.uid, {name: qty})
+                elif qty < 0:
+                    await self.db.remove_item(doc.uid, name, -qty)
+        if ok:
+            async for r in self._smart(event, msg, title):
+                yield r
+        else:
+            yield event.plain_result(msg)
+
+    @filter.command(CMD_PHY_SUN, "太阳体觉醒：太阳神体→太阳圣皇体")
+    async def handle_phy_sun(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        async for r in self._phy_finish(event, doc, ph_mod.awaken_sun(doc, inv, time.time()), "太阳体觉醒"):
+            yield r
+
+    @filter.command(CMD_PHY_MOON, "太阴体觉醒：太阴神体→太阴圣皇体")
+    async def handle_phy_moon(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        async for r in self._phy_finish(event, doc, ph_mod.awaken_moon(doc, inv, time.time()), "太阴体觉醒"):
+            yield r
+
+    @filter.command(CMD_PHY_KING, "神王体觉醒：小成→大成")
+    async def handle_phy_king(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        async for r in self._phy_finish(event, doc, ph_mod.awaken_king(doc, inv, time.time()), "神王体觉醒"):
+            yield r
+
+    @filter.command(CMD_PHY_OFFER, "供奉奇怪的石头：轮回点+1")
+    async def handle_phy_offer(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        async for r in self._phy_finish(event, doc, ph_mod.offer_stone(doc, inv), "供奉"):
+            yield r
+
+    @filter.command(CMD_PHY_REBORN, "轮回：九转轮回体逐转（成仙后）")
+    async def handle_phy_reborn(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._phy_finish(event, doc, ph_mod.reincarnate(
+                doc, time.time(), random.Random(f"{doc.uid}:samsara:{int(time.time())}")), "轮回"):
+            yield r
+
+    @filter.command(CMD_PHY_FRUIT, "消耗轮回道果：九转→命运神道体")
+    async def handle_phy_fruit(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        async for r in self._phy_finish(event, doc, ph_mod.consume_samsara_fruit(doc, inv), "命运神道体"):
+            yield r
+
+    @filter.command(CMD_PHY_LF, "消耗光阴火：三维+9000（命运/极道可用）")
+    async def handle_phy_lf(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        async for r in self._phy_finish(event, doc, ph_mod.consume_light(doc, "光阴火", inv), "光阴火"):
+            yield r
+
+    @filter.command(CMD_PHY_LS, "消耗光阴石：三维+9000（命运/极道可用）")
+    async def handle_phy_ls(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        async for r in self._phy_finish(event, doc, ph_mod.consume_light(doc, "光阴石", inv), "光阴石"):
+            yield r
+
+    @filter.command(CMD_PHY_LW, "消耗光阴水：三维+9000（命运/极道可用）")
+    async def handle_phy_lw(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        async for r in self._phy_finish(event, doc, ph_mod.consume_light(doc, "光阴水", inv), "光阴水"):
+            yield r
+
+    @filter.command(CMD_PHY_DEMON, "消耗邪神道果：九重魔功→极道天魔")
+    async def handle_phy_demon(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        async for r in self._phy_finish(event, doc, ph_mod.demon_god(doc, inv), "极道天魔"):
+            yield r
+
+    @filter.command(CMD_PHY_PANEL, "体质进阶面板")
+    async def handle_phy_panel(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result(ph_mod.panel(doc))
 
     @filter.command(CMD_DZ_GUARD, "护法")
     async def handle_dz_guard(self, event: AstrMessageEvent, arg: str = ""):
