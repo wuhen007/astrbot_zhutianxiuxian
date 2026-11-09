@@ -194,6 +194,9 @@ def main() -> int:
                           "handle_sec_array_fix", "handle_sec_upkeep", "handle_sec_gate",
                           "handle_sec_recruit", "handle_sec_roster", "handle_sec_train",
                           "handle_sec_assign", "handle_sec_operate", "handle_sec_contrib")),
+        ("天地榜 · 积分赛与天地堂", ("handle_tdb_join", "handle_tdb_pk",
+                          "handle_tdb_board", "handle_tdb_sync", "handle_tdb_shop",
+                          "handle_tdb_buy", "handle_tdb_reset", "handle_tdb_settle")),
         ("帮助", ("handle_help",)),
     ]
     grouped = {}

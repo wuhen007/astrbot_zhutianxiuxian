@@ -7794,9 +7794,114 @@ async def main():
     assert "await self._sec_open(event" in src58 and "sec_mod.settle(" in src58
     assert "async def _sec_flush" in src58 and "sect_deep as sec_mod" in src58
     help58 = _json58.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
-    assert len(help58) == 40 and help58[-1]["group"] == "宗门深化 · 洞天与运营"
+    assert any(g["group"] == "宗门深化 · 洞天与运营" for g in help58)
     assert "宗门深化 · 洞天与运营" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
     print("W8-F7 sect_deep ok")
+
+    # ---------------- 59. W8-F8 天地榜 ----------------
+    from core import tiandibang as tdb59
+    import json as _json59
+    import datetime as _dt59
+
+    tz59 = _dt59.timezone(_dt59.timedelta(hours=8))
+    sun59 = _dt59.datetime(2026, 11, 8, 12, 0, tzinfo=tz59).timestamp()   # 周日
+    mon59 = _dt59.datetime(2026, 11, 9, 12, 0, tzinfo=tz59).timestamp()   # 周一
+    assert tdb59.week_key(sun59) == "2026-11-02" and tdb59.week_key(mon59) == "2026-11-09"
+    assert tdb59.settlement_key(mon59) == "2026-11-02"
+    assert tdb59.is_sunday(sun59) and not tdb59.is_sunday(mon59)
+    assert tdb59.day_key(sun59) == "2026-11-08"
+
+    # ① 报名 / 属性快照 / 每日次数 / 对手与倍率
+    cal59 = {}
+    s59 = tdb59.state_of(cal59, sun59)
+    assert s59["opened_week"] == "2026-11-02" and s59["entries"] == []
+    st_strong59 = {"atk": 4000, "defense": 2000, "hp": 20000, "bao": 0.12}
+    st_weak59 = {"atk": 1000, "defense": 800, "hp": 9000, "bao": 0.05}
+    ok59, msg59 = tdb59.join(s59, "u59a", "甲", 10, st_strong59, sun59)
+    assert ok59 and not tdb59.join(s59, "u59a", "甲", 10, st_strong59, sun59)[0], "不得重复报名"
+    tdb59.join(s59, "u59b", "乙", 12, st_weak59, sun59)
+    assert len(s59["entries"]) == 2
+    ok59, msg59, e59 = tdb59.sync(s59, "u59b", "乙", 20,
+                                  {"atk": 1500, "defense": 900, "hp": 9500, "bao": 0.07})
+    assert ok59 and e59["atk"] == 1500 and e59["realm"] == 20
+    assert not tdb59.sync(s59, "ghost59", "鬼", 1, st_weak59)[0]
+    i59 = tdb59.find(s59, "u59b")
+    assert tdb59.refresh_daily(s59, i59, sun59) and s59["entries"][i59]["chances"] == 3
+    assert not tdb59.refresh_daily(s59, i59, sun59), "同日不重复补次数"
+    assert tdb59.refresh_daily(s59, tdb59.find(s59, "u59a"), sun59)
+    kind59, foe59, boost59 = tdb59.opponent(s59, i59)
+    assert kind59 == "player" and foe59 == 0 and boost59 == 2.0, (kind59, foe59, boost59)
+    kind59b, foe59b, _ = tdb59.opponent(s59, tdb59.find(s59, "u59a"))
+    assert kind59b == "beast" and foe59b == -1, "榜首打灵修兽"
+    mir59 = tdb59.mirror(s59["entries"][0], _random.Random("mir59"))
+    assert 0.8 * 4000 <= mir59["atk"] <= 1.2 * 4000
+    assert tdb59.boost_unit(s59["entries"][i59], 2.0)["atk"] == 3000
+    print("F8 join/sync/opponent ok")
+
+    # ② 胜负积分 / 灵石倍率 / 次数与摘榜令
+    ok59, msg59, stone59 = tdb59.duel(s59, "u59b", "win", "player", "甲", sun59)
+    assert ok59 and stone59 == 2000 * 4, stone59
+    ok59, msg59, stone59 = tdb59.duel(s59, "u59b", "lose", "beast", "灵修兽", sun59)
+    assert ok59 and stone59 == (2000 + 800) * 6, stone59
+    ok59, msg59, stone59 = tdb59.duel(s59, "u59b", "draw", "beast", "灵修兽", sun59)
+    assert ok59 and stone59 == 0
+    assert not tdb59.duel(s59, "u59b", "win", "player", "甲", sun59)[0], "次数用光须拒绝"
+    assert tdb59.need_ticket(s59["entries"][tdb59.find(s59, "u59b")])
+    ok59, msg59 = tdb59.use_ticket(s59, "u59b", sun59)
+    assert ok59 and s59["entries"][tdb59.find(s59, "u59b")]["chances"] == 1
+    assert not tdb59.use_ticket(s59, "u59b", sun59)[0]
+    print("F8 duel/ticket ok")
+
+    # ③ 天地堂：周日限定 / 报名 / 积分 / 商品名 / 批量
+    rows59 = store.table("item/商店/天地堂") or []
+    assert len(rows59) == 13
+    assert tdb59.find_shop(rows59, "摘榜令")["price"] == 5100
+    assert tdb59.find_shop(rows59, "无此物") is None
+    assert not tdb59.buy(s59, "u59b", "摘榜令", rows59, mon59)[0], "非周日拒绝"
+    assert not tdb59.buy(s59, "ghost59", "摘榜令", rows59, sun59)[0], "未报名拒绝"
+    assert not tdb59.buy(s59, "u59b", "空气", rows59, sun59)[0], "未知商品拒绝"
+    assert not tdb59.buy(s59, "u59b", "摘榜令*2", rows59, sun59)[0], "积分不足拒绝"
+    s59["entries"][tdb59.find(s59, "u59b")]["score"] = 6000
+    ok59, msg59, item59, qty59, cost59 = tdb59.buy(s59, "u59b", "寻物纸*2", rows59, sun59)
+    assert ok59 and item59 == "寻物纸" and qty59 == 2 and cost59 == 20
+    assert s59["entries"][tdb59.find(s59, "u59b")]["score"] == 5980
+    print("F8 shop ok")
+
+    # ④ 惰性周结算 / 幂等 / 清空积分
+    s59["entries"][tdb59.find(s59, "u59a")]["score"] = 1000
+    msg59, ops59, changed59 = tdb59.maybe_settle(s59, sun59)
+    assert not changed59 and ops59 == [], "启用当周不补发上一周"
+    msg59, ops59, changed59 = tdb59.maybe_settle(s59, mon59)
+    assert changed59 and len(ops59) == 2, (msg59, ops59)
+    assert ops59[0]["stones"] == 17_500_000 and ops59[0]["box"] == 5
+    assert ops59[1]["stones"] == 13_000_000 and ops59[1]["box"] == 3
+    assert all(e["score"] == 0 and e["chances"] == 3 for e in s59["entries"])
+    assert s59["weeks"]["2026-11-02"]["status"] == "completed"
+    msg59, ops59, changed59 = tdb59.maybe_settle(s59, mon59)
+    assert not changed59 and "已结算" in msg59, "同周不得重复发放"
+    assert "积分已重置" in tdb59.reset(s59)
+    print("F8 settle ok")
+
+    # ⑤ 面板 / 文案 / DB 往返 / main.py 接线 / help 分组
+    assert any("每日免费 3 次" in x for x in tdb59.board_lines(s59, "u59b", mon59))
+    assert any("天地堂" in x for x in tdb59.shop_lines(rows59, 100, sun59))
+    assert any("攻击" in x for x in tdb59.panel_lines(s59["entries"][0]))
+    assert "「#天地榜比试」" in tdb59.rules_text() and "「#报名比赛」" in tdb59.help_text()
+    tdb59.commit(cal59, s59)
+    await db.save_calamity(cal59)
+    back59 = tdb59.state_of(await db.get_calamity(), mon59)
+    assert len(back59["entries"]) == 2 and back59["weeks"]["2026-11-02"]["status"] == "completed"
+    src59 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    names59 = ["CMD_TDB_JOIN", "CMD_TDB_PK", "CMD_TDB_BOARD", "CMD_TDB_SYNC",
+               "CMD_TDB_SHOP", "CMD_TDB_BUY", "CMD_TDB_RESET", "CMD_TDB_SETTLE"]
+    miss59 = [c for c in names59 if f"@filter.command({c}" not in src59]
+    assert miss59 == [], f"漏注册：{miss59}"
+    assert "tdb_mod.maybe_settle(" in src59 and "async def _tdb_award" in src59
+    assert "tiandibang as tdb_mod" in src59 and "tdb_mod.duel(" in src59
+    help59 = _json59.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
+    assert any(g["group"] == "天地榜 · 积分赛与天地堂" for g in help59)
+    assert "天地榜 · 积分赛与天地堂" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
+    print("W8-F8 tiandibang ok")
 
     await db.close()
     print("ALL M12 CHECKS PASSED")

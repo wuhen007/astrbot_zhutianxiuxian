@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -451,6 +451,15 @@ CMD_SEC_TRAIN = "#培养宗门弟子"
 CMD_SEC_ASSIGN = "#任命宗门弟子"
 CMD_SEC_OPERATE = "#宗门运营"
 CMD_SEC_CONTRIB = "#我的贡献"
+# W8-F8 天地榜（原版 #比试 / #天地榜 与本移植已有指令撞名，故改名）
+CMD_TDB_JOIN = "#报名比赛"
+CMD_TDB_PK = "#天地榜比试"
+CMD_TDB_BOARD = "#天地榜积分"
+CMD_TDB_SYNC = "#更新属性"
+CMD_TDB_SHOP = "#天地堂"
+CMD_TDB_BUY = "#积分兑换"
+CMD_TDB_RESET = "#清空积分"
+CMD_TDB_SETTLE = "#结算天地榜奖励"
 
 
 
@@ -2222,6 +2231,21 @@ class ZhutianPlugin(Star):
                             "灵石池复用 sects.fund，db 恒 v17；原版仙宗 power 分野（倍率 2 / 池 ×10 / 门槛钳 41）"
                             "无底座已去除；原版副宗主/长老职位不存在 → 管理令一律限宗主；"
                             "cron 每日运营改惰性 tick；藏宝阁神兽 3 条未搬"),
+            ]},
+            {"title": "天地榜 · 积分赛与天地堂", "lines": [
+                (CMD_TDB_JOIN, "报名入榜，冻结当前三维为战斗快照（报名后「#更新属性」可刷新）"),
+                (CMD_TDB_PK, "每日免费 3 次，挑战紧邻前一名；榜首/前排全高阶则打「灵修兽」"),
+                (CMD_TDB_BOARD, "积分前十 + 我的名次/剩余次数/累计灵石，附下周结算日"),
+                (CMD_TDB_SYNC, "把实时三维刷回榜单档案并显示个人面板"),
+                (CMD_TDB_SHOP, "天地堂 13 件商品（「摘榜令」5100 分等），仅周日开放兑换"),
+                (f"{CMD_TDB_BUY} 名称*数量", "周日限定，扣积分发物品；次数用光时自动消耗「摘榜令」追 1 次"),
+                (CMD_TDB_RESET, "超管：清空全榜积分并把次数补满 3"),
+                (CMD_TDB_SETTLE, "超管：结算上一周前三名（1750/1300/920 万灵石 + 5/3/1 超越宝盒）"),
+                ("规则", tdb_mod.rules_text()),
+                ("⚠️ 折算", "原版整榜 JSON + redis 分布式锁 → calamity_state[\"tiandibang\"] 单例 + 单事务落库，"
+                            "db 恒 v17；cron 周一结算 → 指令入口惰性 tick；原版「#比试」「#天地榜」"
+                            "与本移植已有指令撞名 → 改名「#天地榜比试」「#天地榜积分」；"
+                            "原版 zd_battle 全量战斗 → 复用 battle.spar（无战损）"),
             ]},
         ]
 
@@ -9598,6 +9622,221 @@ class ZhutianPlugin(Star):
         ]
         async for r in self._smart(event, prefix + "\n".join(lines), "我的贡献"):
             yield r
+
+    # ---- W8-F8 天地榜（calamity_state["tiandibang"]，db 仍 v17） ----
+
+    def _tdb_rows(self) -> list[dict]:
+        return self.content.table("item/商店/天地堂") or []
+
+    def _tdb_snap(self, doc: PlayerDoc) -> dict:
+        st = self._stats(doc)
+        return {"atk": int(st.atk), "defense": int(st.defense),
+                "hp": int(st.hp), "bao": float(st.bao)}
+
+    async def _tdb_award(self, cal: dict, s: dict, msg: str, ops: list[dict]) -> str:
+        """周结算发奖：逐人加灵石 + 超越宝盒，最后一次性落全服榜档。"""
+        for op in ops:
+            raw = await self.db.get_player(op["uid"])
+            if not raw:
+                continue
+            p = PlayerDoc(**raw)
+            p.stones = int(p.stones) + int(op["stones"])
+            async with self.db.transaction():
+                await self.db.save_player(p.model_dump())
+                await self.db.add_items(op["uid"], {tdb_mod.BOX_NAME: int(op["box"])})
+        tdb_mod.commit(cal, s)
+        await self.db.save_calamity(cal)
+        return msg + "\n"
+
+    async def _tdb_flush(self, cal: dict, s: dict, player: PlayerDoc | None = None,
+                         items: tuple[str, dict] | None = None) -> None:
+        """榜档 + 玩家档 + 兑换物品在同一事务里落库。"""
+        tdb_mod.commit(cal, s)
+        async with self.db.transaction():
+            await self.db.save_calamity(cal)
+            if player is not None:
+                await self.db.save_player(player.model_dump())
+            if items:
+                await self.db.add_items(items[0], items[1])
+
+    async def _tdb_open(self, event: AstrMessageEvent):
+        """取玩家 + 全服榜档 + 惰性周结算。返回 (doc, s, cal, prefix, err)。"""
+        doc, err = await self._require_player(event)
+        if err:
+            return None, None, None, "", err
+        now = time.time()
+        cal = await self.db.get_calamity()
+        raw = cal.get("tiandibang")
+        fresh = not isinstance(raw, dict) or not raw.get("opened_week")
+        s = tdb_mod.state_of(cal, now)
+        msg, ops, changed = tdb_mod.maybe_settle(s, now)
+        tdb_mod.commit(cal, s)
+        if changed:
+            prefix = await self._tdb_award(cal, s, msg, ops)
+        else:
+            prefix = ""
+            # 赛季起算周必须落库，否则每次读档都当「首周」，周结算永远不会触发
+            if fresh:
+                await self.db.save_calamity(cal)
+        return doc, s, cal, prefix, None
+
+    @filter.command(CMD_TDB_JOIN, "报名比赛")
+    async def handle_tdb_join(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, s, cal, prefix, err = await self._tdb_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = tdb_mod.join(s, doc.uid, doc.name or doc.uid[:8] + "…",
+                               int(doc.realm_index or 0), self._tdb_snap(doc), time.time())
+        if ok:
+            await self._tdb_flush(cal, s)
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_TDB_PK, "天地榜比试")
+    async def handle_tdb_pk(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, s, cal, prefix, err = await self._tdb_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        idx = tdb_mod.find(s, doc.uid)
+        if idx < 0:
+            yield event.plain_result(prefix + "请先发「#报名比赛」入榜。")
+            return
+        now = time.time()
+        tdb_mod.refresh_daily(s, idx, now)
+        entry = tdb_mod.normalize(s)["entries"][idx]
+        if tdb_mod.need_ticket(entry):
+            if not await self.db.remove_item(doc.uid, tdb_mod.TICKET_NAME, 1):
+                yield event.plain_result(
+                    prefix + "今日挑战次数已用光，明日再来；或到「#天地堂」兑「摘榜令」追加一次。")
+                return
+            _ok, tmsg = tdb_mod.use_ticket(s, doc.uid, now)
+            prefix += tmsg + "\n"
+        kind, foe_idx, boost = tdb_mod.opponent(s, idx)
+        me = tdb_mod.boost_unit(s["entries"][idx], boost)
+        if kind == "player":
+            foe = s["entries"][foe_idx]
+            foe_name = str(foe["name"])
+            foe_unit = {"atk": int(foe["atk"]), "defense": int(foe["defense"]),
+                        "hp": int(foe["hp"]), "bao": float(foe["bao"])}
+        else:
+            rng_m = random.Random(f"tdb:beast:{doc.uid}:{int(now)}")
+            foe_unit = tdb_mod.mirror(s["entries"][idx], rng_m)
+            foe_name = tdb_mod.BEAST_NAME
+        rng = random.Random(f"tdb:spar:{doc.uid}:{int(now)}:{int(entry['score'])}")
+        winner, log = battle.spar(
+            battle.Unit(doc.name or "我", me["atk"], me["defense"], me["hp"], me["bao"]),
+            battle.Unit(foe_name, foe_unit["atk"], foe_unit["defense"],
+                        foe_unit["hp"], foe_unit["bao"]), rng,
+        )
+        outcome = "win" if winner == 0 else "lose" if winner == 1 else "draw"
+        ok, msg, stones = tdb_mod.duel(s, doc.uid, outcome, kind, foe_name, now)
+        if ok:
+            doc.stones = int(doc.stones) + stones
+            await self._tdb_flush(cal, s, doc)
+        shown = log[:4] + [f"…（共 {len(log)} 回合）"] if len(log) > 5 else log
+        tail = f"（对手攻击压制，三维补偿 ×{boost}）" if boost > 1 else ""
+        yield event.plain_result(prefix + "\n".join(shown) + tail + "\n" + msg)
+
+    @filter.command(CMD_TDB_BOARD, "天地榜积分")
+    async def handle_tdb_board(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, s, _cal, prefix, err = await self._tdb_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._smart(event, prefix + "\n".join(
+                tdb_mod.board_lines(s, doc.uid, time.time())), "天地榜"):
+            yield r
+
+    @filter.command(CMD_TDB_SYNC, "更新属性")
+    async def handle_tdb_sync(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, s, cal, prefix, err = await self._tdb_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, entry = tdb_mod.sync(s, doc.uid, doc.name or doc.uid[:8] + "…",
+                                      int(doc.realm_index or 0), self._tdb_snap(doc))
+        if ok:
+            await self._tdb_flush(cal, s)
+        text = prefix + msg
+        if entry:
+            text += "\n" + "\n".join(tdb_mod.panel_lines(entry))
+        async for r in self._smart(event, text, "天地榜档案"):
+            yield r
+
+    @filter.command(CMD_TDB_SHOP, "天地堂")
+    async def handle_tdb_shop(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, s, _cal, prefix, err = await self._tdb_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        idx = tdb_mod.find(s, doc.uid)
+        score = int(s["entries"][idx]["score"]) if idx >= 0 else 0
+        async for r in self._smart(event, prefix + "\n".join(
+                tdb_mod.shop_lines(self._tdb_rows(), score, time.time())), "天地堂"):
+            yield r
+
+    @filter.command(CMD_TDB_BUY, "积分兑换")
+    async def handle_tdb_buy(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, s, cal, prefix, err = await self._tdb_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        raw = self._adm_tail(event).strip()
+        if not raw:
+            yield event.plain_result(prefix + "格式：「#积分兑换 名称*数量」。可发「#天地堂」查看货架。")
+            return
+        ok, msg, item, qty, _cost = tdb_mod.buy(s, doc.uid, raw, self._tdb_rows(), time.time())
+        if ok:
+            await self._tdb_flush(cal, s, items=(doc.uid, {item: qty}))
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_TDB_RESET, "清空积分")
+    async def handle_tdb_reset(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result("此令唯超级管理员可执（原版 isMaster / Master 名单）。")
+            return
+        _doc, s, cal, prefix, err = await self._tdb_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        msg = tdb_mod.reset(s)
+        await self._tdb_flush(cal, s)
+        yield event.plain_result(prefix + msg)
+
+    @filter.command(CMD_TDB_SETTLE, "结算天地榜奖励")
+    async def handle_tdb_settle(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result("此令唯超级管理员可执（原版 isMaster / Master 名单）。")
+            return
+        _doc, s, cal, prefix, err = await self._tdb_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if prefix:
+            yield event.plain_result(prefix.rstrip())
+            return
+        msg, ops, changed = tdb_mod.maybe_settle(s, time.time(), force=True)
+        if not changed:
+            yield event.plain_result(msg)
+            return
+        yield event.plain_result((await self._tdb_award(cal, s, msg, ops)).rstrip())
 
     # ---- B6：剧情 NPC（狠人大帝/苏灵）+ 凝聚精血 ----
 
