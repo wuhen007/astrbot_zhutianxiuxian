@@ -828,9 +828,6 @@ CMD_RS_ATTR = "#轮回属性"
 CMD_RS_MON = "#轮回怪物"
 CMD_RS_FILE = "#轮回档案"
 # W17-F1：位面大事件（帝关 / 圣地大战 / 游商）
-CMD_PE_PASS = "#帝关战况"
-CMD_PE_REINFORCE = "#驰援帝关"
-CMD_PE_BLOOD = "#融合帝血"
 CMD_PE_WAR = "#圣战详情"
 CMD_PE_SIDE = "#圣战站队"
 CMD_PE_ACT = "#战场行动"
@@ -20549,46 +20546,6 @@ class ZhutianPlugin(Star):
         if locks is None:
             locks = self._player_locks = {}
         return locks.setdefault(str(uid), asyncio.Lock())
-
-    @filter.command(CMD_PE_PASS, "帝关战况")
-    async def handle_pe_pass(self, event: AstrMessageEvent):
-        if not self._allowed(event):
-            return
-        st = pe_mod.pass_state(await self.db.get_calamity(), time.time())
-        yield event.plain_result(pe_mod.pass_text(st, time.time()))
-
-    @filter.command(CMD_PE_REINFORCE, "驰援帝关：迎战同境异域天骄")
-    async def handle_pe_reinforce(self, event: AstrMessageEvent):
-        if not self._allowed(event):
-            return
-        doc, err = await self._require_player(event)
-        if err:
-            yield event.plain_result(err)
-            return
-        async with self.db.calamity_lock:                 # 审计修复3：全服档读改写持锁
-            cal = await self.db.get_calamity()
-            st = pe_mod.pass_state(cal, time.time())
-            ok, msg, fame = pe_mod.reinforce(doc, st, time.time(),
-                                             random.Random(f"{doc.uid}:pass:{int(time.time())}"))
-            cal["imperial_pass"] = st
-            await self._pe_save(doc, {}, cal)
-        yield event.plain_result(msg)
-
-    @filter.command(CMD_PE_BLOOD, "融合帝血：平定后1小时窗口，帝威+20%")
-    async def handle_pe_blood(self, event: AstrMessageEvent):
-        if not self._allowed(event):
-            return
-        doc, err = await self._require_player(event)
-        if err:
-            yield event.plain_result(err)
-            return
-        async with self.db.calamity_lock:
-            cal = await self.db.get_calamity()
-            st = pe_mod.pass_state(cal, time.time())
-            ok, msg = pe_mod.fuse_blood(doc, st, time.time())
-            cal["imperial_pass"] = st
-            await self._pe_save(doc, {}, cal)
-        yield event.plain_result(msg)
 
     @filter.command(CMD_PE_WAR, "圣战详情")
     async def handle_pe_war(self, event: AstrMessageEvent):

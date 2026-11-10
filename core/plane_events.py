@@ -26,10 +26,7 @@ from typing import Any, Mapping
 from .wallet import authority as _authority, set_xueqi as _set_xueqi, xueqi as _xueqi
 from .player import PlayerDoc
 
-KILL_TARGET = 30
-PASS_HOURS = 72
 FUND_GOAL = 1000
-IMPERIAL_BONUS = 0.2
 
 IMPERIAL_GOODS: tuple[tuple[str, int, str], ...] = (
     ("仙尊战袍·拓本", 1_200_000, "全属性 +18%（唯一百分比）"),
@@ -43,88 +40,6 @@ BLACK_GOODS: tuple[tuple[str, int, str], ...] = (
 )
 XIANGZI_SIGNS = ("问道签", "历练签", "寻缘签")
 XIANGZI_COST = 500_000
-
-
-# ---------------------------------------------------------------- 帝关
-
-def pass_state(calamity: Mapping[str, Any], now: float) -> dict[str, Any]:
-    st = calamity.get("imperial_pass") if isinstance(calamity.get("imperial_pass"), dict) else {}
-    st = dict(st)
-    st.setdefault("active", False)
-    st.setdefault("kills", 0)
-    st.setdefault("until", 0.0)
-    st.setdefault("defenders", {})
-    st.setdefault("blood_open_until", 0.0)
-    st.setdefault("blood_taken", [])
-    if st["active"] and now > float(st["until"]):
-        st["active"] = False
-    return st
-
-
-def pass_text(st: Mapping[str, Any], now: float) -> str:
-    lines = ["--- 帝关战况 ---"]
-    if st.get("active"):
-        left = int((float(st["until"]) - now) / 3600)
-        lines.append(f"异域叩关！士气：{st.get('kills', 0)}/{KILL_TARGET}"
-                     f"（剩余 {max(0, left)} 小时）")
-        top = sorted((st.get("defenders") or {}).items(), key=lambda kv: -kv[1])[:5]
-        if top:
-            lines.append("威名榜：" + "、".join(f"{n}({p})" for n, p in top))
-        if now < float(st.get("blood_open_until", 0) or 0):
-            lines.append("帝血已现——#融合帝血（1 小时窗口）")
-        lines.append("驰援：#驰援帝关")
-    else:
-        lines.append("帝关平静。异域叩关由 #驰援帝关 触发。")
-    return "\n".join(lines)
-
-
-def reinforce(doc: PlayerDoc, st: dict[str, Any], now: float,
-              rng: random.Random) -> tuple[bool, str, int]:
-    """#驰援帝关：未开则触发；迎战一批同境异域天骄。返回 (ok,msg,威名增量)。"""
-    if not st.get("active"):
-        st["active"] = True
-        st["kills"] = 0
-        st["until"] = now + PASS_HOURS * 3600
-        return True, ("【帝关告急】异域大军叩关——全服需斩杀 "
-                      f"{KILL_TARGET} 名异域天骄（{PASS_HOURS // 24} 天为期）！\n"
-                      "你第一时间赶到了城墙。#驰援帝关 再战。"), 10
-    auth = _authority(doc)
-    chance = min(0.9, 0.45 + auth * 0.01)
-    if rng.random() >= chance:
-        _set_xueqi(doc, 1)
-        return True, (f"【驰援 · 帝关】异域天骄一波齐射——你被轰下城墙！\n"
-                      f"（胜率 {chance:.0%}）气血归一，威名不减。"), 2
-    kills = 1 + int(rng.random() * 3) % 3
-    st["kills"] = int(st.get("kills", 0) or 0) + kills
-    fame = 10 * kills
-    uid = str(doc.uid)
-    st["defenders"] = dict(st.get("defenders") or {})
-    st["defenders"][str(doc.name or doc.uid[:8])] = int(st["defenders"].get(str(doc.name or doc.uid[:8]), 0) or 0) + fame
-    msg = (f"【驰援 · 帝关】枪出如龙，斩异域天骄 {kills} 名！"
-           f"（士气 {st['kills']}/{KILL_TARGET}｜威名 +{fame}）")
-    if st["kills"] >= KILL_TARGET:
-        st["active"] = False
-        st["blood_open_until"] = now + 3600
-        msg += "\n≡ 帝关大捷 ≡ 帝血显现——1 小时内 #融合帝血 可借仙王战力！"
-    return True, msg, fame
-
-
-def fuse_blood(doc: PlayerDoc, st: dict[str, Any], now: float) -> tuple[bool, str]:
-    """#融合帝血：平定后 1 小时窗口，永久帝威 +20%。"""
-    if now > float(st.get("blood_open_until", 0) or 0):
-        return False, "帝血已散——下一场帝关再取。"
-    if str(doc.uid) in list(st.get("blood_taken") or []):
-        return False, "你已融合过这波帝血。"
-    st["blood_taken"] = list(st.get("blood_taken") or []) + [str(doc.uid)]
-    try:
-        from . import zhengdao as _dz
-        _s = _dz.state_of(doc, now)
-        _s["power_bonus"] = round(min(3.0, float(_s.get("power_bonus", 0) or 0) + IMPERIAL_BONUS), 3)
-        _dz.save(doc, _s)
-    except Exception:
-        pass
-    return True, ("【融合帝血】滚烫的帝血入体——仙王之力短暂加身并留下永久烙印："
-                  "帝威 +20%。")
 
 
 # ---------------------------------------------------------------- 圣地大战

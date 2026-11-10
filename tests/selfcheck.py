@@ -8686,21 +8686,6 @@ async def main():
     d120 = PlayerDoc(uid="u120", name="援军", realm_index=25,
                      ext={"xueqi": 100, "potential": 0, "shouyuan": 100, "hp": 100.0})
     cal120: dict = {}
-    st120 = pe120.pass_state(cal120, time.time())
-    ok120, msg120, _ = pe120.reinforce(d120, st120, time.time(), _Lucky60())
-    assert ok120 and "告急" in msg120, msg120                  # 首援触发帝关
-    ok120, msg120, _ = pe120.reinforce(d120, st120, time.time(), _Lucky60())
-    assert ok120 and "斩异域天骄" in msg120, msg120
-    st120["kills"] = pe120.KILL_TARGET                        # 补满士气
-    ok120, msg120, _ = pe120.reinforce(d120, st120, time.time(), _Lucky60())
-    assert "大捷" in msg120 and "融合帝血" in msg120, msg120
-    assert st120["active"] is False and st120["blood_open_until"] > time.time()
-    ok120, msg120 = pe120.fuse_blood(d120, st120, time.time())
-    assert ok120 and "+20%" in msg120, msg120
-    assert abs(dz60.state_of(d120)["power_bonus"] - 0.2) < 1e-9, "帝威 +20%"
-    ok120, msg120 = pe120.fuse_blood(d120, st120, time.time())
-    assert not ok120 and "已融合" in msg120, msg120
-
     # 圣地大战
     ok120, msg120 = pe120.war_side(d120, cal120, "攻", time.time())
     assert ok120 and "攻" in msg120, msg120
@@ -8730,15 +8715,17 @@ async def main():
     assert not ok120 and "用法" in msg120, msg120
 
     src120 = open(PLUGIN / "main.py", encoding="utf-8").read()
-    names120 = ["CMD_PE_PASS", "CMD_PE_REINFORCE", "CMD_PE_BLOOD", "CMD_PE_WAR",
+    names120 = ["CMD_PE_WAR",
                 "CMD_PE_SIDE", "CMD_PE_ACT", "CMD_PE_FUND", "CMD_PE_RANK",
                 "CMD_PE_SHOP", "CMD_PE_BUY", "CMD_PE_XW_BUY", "CMD_PE_HEIM",
                 "CMD_PE_HEIM_BUY", "CMD_PE_XIANZI"]
     miss120 = [c for c in names120 if f"@filter.command({c}" not in src120]
     assert miss120 == [], f"漏注册：{miss120}"
-    assert "pe_mod.reinforce(" in src120 and "pe_mod.war_exchange(" in src120
+    assert "pe_mod.war_exchange(" in src120
+    assert "pe_mod.pass_state" not in src120, "帝关已交由远端 realm_event，不得残留"
+    assert "rev_mod.maybe_tick(" in src120, "帝关走远端 W8-F9 状态机"
     help120b = _json60.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
-    assert any(g["group"] == "位面大事件 · 帝关圣战游商" for g in help120b)
+    assert any(g["group"] == "位面大事件 · 圣地大战与游商" for g in help120b)
     assert "位面大事件" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
     print("W17-F1 plane_events ok")
 
@@ -8810,7 +8797,7 @@ async def main():
     # ========================================================= W19-B：并发锁回归
     assert hasattr(db, "calamity_lock"), "db 需自带全服档锁"
     src140b = src140  # main.py 已在上方读出
-    assert "calamity_lock" in src140b and src140b.count("async with self.db.calamity_lock") >= 7, \
+    assert "calamity_lock" in src140b and src140b.count("async with self.db.calamity_lock") >= 4, \
         "pe/tdb/转账处需持锁"
     assert "_pl_lock(target_id)" in src140b, "诸天一念需 per-uid 锁"
     assert "审计修复7" in src140b, "市场买卖需同事务"
