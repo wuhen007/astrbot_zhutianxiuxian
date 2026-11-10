@@ -1,6 +1,6 @@
 # astrbot_plugin_zhutian · 诸天修仙（Python 移植版）
 
-AstrBot 修仙群聊插件——Yunzai JS 原版 [`mo-wuming/zhutianxiuxian1.0`](https://gitee.com/mo-wuming/zhutianxiuxian1.0)（原作者 [@DD斩首](https://gitee.com/hutao222)）的 **Python 全量移植**（`python-port` 分支，移植者 [@yesu666](https://gitee.com/yesu666)）。
+AstrBot 修仙群聊插件——Yunzai JS 原版 [`mo-wuming/zhutianxiuxian1.0`](https://gitee.com/mo-wuming/zhutianxiuxian1.0)（原作者 [@DD斩首](https://gitee.com/hutao222)）的 **Python 全量移植**（移植者 [@yesu666](https://gitee.com/yesu666)；**默认分支即插件本体**，`master` 为上游 JS 原版镜像）。
 
 > 玩家向玩法指南见 [`docs/游玩说明.md`](docs/游玩说明.md)；全部指令速查由 `tests/gen_manual.py` 生成《指令手册》（1028 条常量 / 53 个帮助分组）。
 
@@ -30,9 +30,14 @@ AstrBot 修仙群聊插件——Yunzai JS 原版 [`mo-wuming/zhutianxiuxian1.0`]
 
 ## 安装
 
+> **分支说明**：本仓库**默认分支 `python-port` 即 Python 插件本体**，直接安装即可；
+> `master` 分支为上游 JS 原版镜像（当前同步至 2026.10.30 期「灵市开市·唯一之上」），
+> 仅作移植对照与上游更新参考，**不要**把 master 装进 AstrBot。
+
 ```bash
-# AstrBot WebUI → 插件 → 从仓库安装，或手动：
-git clone https://gitee.com/yesu666/zhutianxiuxian1.0.git -b python-port \
+# 方式一：AstrBot WebUI → 插件 → 从仓库安装（填仓库地址即可，默认分支就是插件）
+# 方式二：手动克隆（默认分支，无需 -b 参数）
+git clone https://gitee.com/yesu666/zhutianxiuxian1.0.git \
   AstrBot/data/plugins/astrbot_plugin_zhutian
 ```
 
