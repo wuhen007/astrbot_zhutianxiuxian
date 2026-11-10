@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_story as rs_mod, plane_events as pe_mod, games_mini as gm_mod, xtzb_birth as xb_mod, auto_task as at_mod, easter_eggs as eg_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_story as rs_mod, plane_events as pe_mod, games_mini as gm_mod, xtzb_birth as xb_mod, auto_task as at_mod, easter_eggs as eg_mod, plane_relay as pr_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -859,6 +859,18 @@ CMD_EG_YIHONG = "#怡红院"
 CMD_EG_STEAL = "#偷取纳戒"
 CMD_AC_QL = "#遣龙"
 CMD_AC_QH = "#遣虎"
+# W22-F1：位面中转（接引/送往/传送阵/五色祭坛）
+CMD_PR_JY = "#接引"
+CMD_PR_JY_YES = "#同意接引"
+CMD_PR_JY_NO = "#拒绝接引"
+CMD_PR_SONG = "#送往"
+CMD_PR_PORTAL = "#消耗位面传送阵"
+CMD_PR_WUXI = "#激活五色祭坛"
+# W22-F2：天骄处置（求饶 / 执行窗口）
+CMD_TJ_ACCEPT = "#接受求饶"
+CMD_TJ_REJECT = "#拒绝求饶"
+CMD_TJ_SOUL = "#搜魂天骄"
+CMD_TJ_SLAY = "#灭杀天骄"
 # W18-F1：金银坊（媚娘的赌坊）
 CMD_GMF = "#金银坊"
 # W8-B1b：至尊线（至尊骨 / 斩骨涅槃 / 舍骨入血 / 试炼 / 仙骨 / 重瞳 / 瞳骨合一）
@@ -13359,6 +13371,16 @@ class ZhutianPlugin(Star):
         tail = "\n".join([x for x in log if x.startswith("【")][:3] + [log[-1]]) if log else ""
 
         if winner == 0 and new_pct <= 0:
+            # W22-F2：天骄求饶判定——触发则免死（气血 1%），24h 应答
+            offer_msg, _bounty = tj_mod.maybe_offer(
+                d, row["name"], boss, now, random.Random(f"{doc.uid}:offer:{int(now)}"))
+            if offer_msg:
+                boss["hp_pct"] = 0.01
+                async with self.db.transaction():
+                    await self.db.save_player(d.model_dump())
+                    await self.db.save_tianjiao(world)
+                yield event.plain_result(offer_msg + ("\n" + tail if tail else ""))
+                return
             # 击杀：赏金 + 贡献前三加成 + 清仇恨 + 污损复原 + 轮回
             rank_pos = next((i for i, (uid, _d) in enumerate(tj_mod.ranking(boss, 3), 1)
                              if uid == doc.uid), 0)
@@ -20820,6 +20842,199 @@ class ZhutianPlugin(Star):
         ok, out = await self._xb_span(event, "", "board")
         if out:
             yield event.plain_result(out)
+
+    # ------------------------------------------------ W22-F1/F2：位面中转 + 天骄处置
+
+    @filter.command(CMD_PR_JY, "接引 @目标：仙王牵引道友瞬至你的位面")
+    async def handle_pr_jy(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        target_id = self._at_target(event)
+        if not target_id:
+            yield event.plain_result("用法：#接引 @目标（仙王级，60 秒应答）")
+            return
+        if str(target_id) == str(doc.uid):
+            yield event.plain_result("接引自己？原地不动就是了。")
+            return
+        s_st = plane.state_of(doc)
+        if authority_mod.authority_of(doc) < pr_mod.RELAY_AUTH:
+            yield event.plain_result(f"接引需仙王之力（权柄 ≥{pr_mod.RELAY_AUTH}）。")
+            return
+        async with self._pl_lock(target_id):
+            raw = await self.db.get_player(target_id)
+            if raw is None:
+                yield event.plain_result("对方尚未踏入仙途。")
+                return
+            foe = PlayerDoc(**raw)
+            t_st = plane.state_of(foe)
+            ok, msg = pr_mod.jiesong_offer(
+                s_st, authority_mod.authority_of(doc), doc.name or doc.uid[:8],
+                t_st, foe.name or foe.uid[:8], time.time())
+            async with self.db.transaction():
+                await self.db.save_player(doc.model_dump())
+                await self.db.save_player(foe.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_PR_JY_YES, "同意接引（60 秒内）")
+    async def handle_pr_jy_yes(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = plane.state_of(doc)
+        ok, msg = pr_mod.jiesong_accept(doc, st, time.time())
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_PR_JY_NO, "拒绝接引")
+    async def handle_pr_jy_no(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = pr_mod.jiesong_reject(plane.state_of(doc))
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_PR_SONG, "送往 @目标 位面名：把目标送往你已知的位面")
+    async def handle_pr_song(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        target_id = self._at_target(event)
+        plane = (arg or "").strip()
+        if not target_id or not plane:
+            yield event.plain_result("用法：#送往 @目标 位面名")
+            return
+        s_st = plane.state_of(doc)
+        coord = s_st.get("coords", {}).get(plane)
+        if not isinstance(coord, dict):
+            yield event.plain_result(f"你尚未记下「{plane}」的坐标——先 #记坐标 {plane}。")
+            return
+        if authority_mod.authority_of(doc) < pr_mod.RELAY_AUTH:
+            yield event.plain_result("送往需仙王之力。")
+            return
+        async with self._pl_lock(target_id):
+            raw = await self.db.get_player(target_id)
+            if raw is None:
+                yield event.plain_result("对方尚未踏入仙途。")
+                return
+            foe = PlayerDoc(**raw)
+            t_st = plane.state_of(foe)
+            ok, msg = pr_mod.songwang(t_st, plane, coord, foe.name or foe.uid[:8])
+            async with self.db.transaction():
+                await self.db.save_player(foe.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_PR_PORTAL, "消耗位面传送阵 位面名（25%虚空乱流）")
+    async def handle_pr_portal(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = plane.state_of(doc)
+        inv = await self.db.get_inventory(doc.uid)
+        ok, msg, delta = pr_mod.portal_use(doc, st, arg or "", inv, time.time(),
+                                           random.Random(f"{doc.uid}:portal:{int(time.time())}"))
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            for name, qty in (delta or {}).items():
+                if qty < 0:
+                    await self.db.remove_item(doc.uid, name, -qty)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_PR_WUXI, "激活五色祭坛：圣人以下记下遮天坐标")
+    async def handle_pr_wuxi(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = plane.state_of(doc)
+        ok, msg = pr_mod.wuxi_activate(doc, st, time.time())
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_TJ_ACCEPT, "接受求饶 名：收赔礼，仇恨-30")
+    async def handle_tj_accept(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = tj_mod.accept_offer(doc, (name or "").strip(), time.time())
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_TJ_REJECT, "拒绝求饶 名：邪修开执行窗口")
+    async def handle_tj_reject(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = tj_mod.reject_offer(doc, (name or "").strip(), time.time())
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_TJ_SOUL, "搜魂天骄 名：搜功法（反噬20%）")
+    async def handle_tj_soul(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, items, backlash = tj_mod.soul_search(
+            doc, (name or "").strip(), time.time(),
+            random.Random(f"{doc.uid}:soul:{int(time.time())}"))
+        if backlash:
+            dz_mod.add_wounds(doc, 2.0, "搜魂反噬")
+            doc.ext["hp"] = 1
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            for g, q in (items or {}).items():
+                await self.db.add_items(doc.uid, {g: q})
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_TJ_SLAY, "灭杀天骄 名：形神俱灭（反噬25%）")
+    async def handle_tj_slay(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, items, backlash = tj_mod.slay_tianjiao(
+            doc, (name or "").strip(), time.time(),
+            random.Random(f"{doc.uid}:slay:{int(time.time())}"))
+        if backlash:
+            dz_mod.add_wounds(doc, 2.0, "灭杀反噬")
+            doc.ext["hp"] = 1
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            for g, q in (items or {}).items():
+                await self.db.add_items(doc.uid, {g: q})
+        yield event.plain_result(msg)
 
     # ------------------------------------------------ W21-F1/F2：自动化 + 彩蛋
 

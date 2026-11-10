@@ -8985,6 +8985,91 @@ async def main():
     assert occ210.forge_rate(5.0, 0, []) == 0.95
     print("W19-D forge parity ok")
 
+    # ========================================================= W22-F1/F2：位面中转 + 天骄处置
+    from core import plane_relay as pr240, plane as pl240, tianjiao as tj240
+
+    # —— 五色祭坛：门槛 / 消耗 / 记坐标
+    d240 = PlayerDoc(uid="u240", name="中转人", realm_index=12, exp=2_000_000,
+                     ext={"xueqi": 2_000_000, "potential": 0, "shouyuan": 100, "hp": 100.0})
+    st240 = pl240.state_of(d240)
+    ok240, msg240 = pr240.wuxi_activate(d240, st240, time.time())
+    assert ok240 and "遮天" in msg240, msg240
+    assert "遮天位面" in st240["known"] and d240.exp == 2_000_000 - pr240.WUXI_COST
+    ok240, msg240 = pr240.wuxi_activate(d240, st240, time.time())
+    assert not ok240 and "早已激活" in msg240, msg240
+
+    # —— 接引：写入待确认 / 同意 / 过期 / 拒绝
+    s240 = pl240.state_of(d240)
+    s240["current"] = "遮天位面"
+    d240b = PlayerDoc(uid="u240b", name="被引人", realm_index=5, exp=1_000_000,
+                      ext={"xueqi": 100, "potential": 0, "shouyuan": 100, "hp": 1})
+    tb240 = pl240.state_of(d240b)
+    ok240, msg240 = pr240.jiesong_offer(s240, 25, "甲", tb240, "乙", time.time())
+    assert ok240 and "60 秒" in msg240, msg240
+    assert tb240["plane_offer"]["plane"] == "遮天位面"
+    ok240, msg240 = pr240.jiesong_accept(d240b, tb240, time.time())
+    assert ok240 and tb240["current"] == "遮天位面", msg240
+    pr240.jiesong_offer(s240, 25, "甲", tb240, "乙", time.time() - 61)
+    ok240, msg240 = pr240.jiesong_accept(d240b, tb240, time.time())
+    assert not ok240 and "已散" in msg240, msg240           # 过期
+    ok240, msg240 = pr240.jiesong_reject(tb240)
+    assert not ok240, "无 offer 时拒绝应失败"
+
+    # —— 送往 / 传送阵：缺物品 / 乱流 / 落位
+    ok240, msg240 = pr240.songwang(tb240, "仙界", {"x": 100, "y": 200}, "乙")
+    assert ok240 and tb240["current"] == "仙界", msg240
+    ok240, msg240, dl240 = pr240.portal_use(d240b, tb240, "凡间", {}, time.time(), _Lucky60())
+    assert not ok240 and "位面传送阵" in msg240, msg240
+    tb240["known"].append("凡间")
+    exp_b240 = d240b.exp
+    ok240, msg240, dl240 = pr240.portal_use(
+        d240b, tb240, "凡间", {"位面传送阵": 1}, time.time(), _Lucky60())
+    assert ok240 and dl240.get("位面传送阵") == -1, msg240
+    assert tb240["current"] == "凡间" and d240b.exp < exp_b240, "乱流修为 -10%"
+
+    # —— 天骄求饶：触发 / 冷却 / 应答 / 邪修窗口 / 搜魂 / 灭杀反噬
+    d241 = PlayerDoc(uid="u241", name="猎骄人", realm_index=25,
+                     ext={"xueqi": 100, "potential": 0, "shouyuan": 100, "hp": 100.0})
+    boss241 = {"name": "金翅小鹏王", "offered_at": 0.0}
+    offered240, msg241 = tj240.maybe_offer(d241, "金翅小鹏王", boss241, time.time(), _Lucky60())
+    assert offered240 and "求饶" in msg241, msg241
+    assert boss241["offered_at"] > 0
+    offered240, _ = tj240.maybe_offer(d241, "金翅小鹏王", boss241, time.time() + 1, _Lucky60())
+    assert not offered240, "24h 冷却不得重复求饶"
+    ok240, msg240 = tj240.accept_offer(d241, "金翅小鹏王", time.time())
+    assert ok240 and "仇恨 -30" in msg240, msg240
+    assert d241.stones > 0, "赔礼到账（_Lucky60 bounty=1 档 × 5000）"
+    tj240.maybe_offer(d241, "金翅小鹏王", boss241, time.time() + 100000, _Lucky60())
+    ok240, msg240 = tj240.reject_offer(d241, "金翅小鹏王", time.time())
+    assert not ok240 and "魔道" in msg240, msg240           # 非邪修拒
+    d241.ext["modao"] = 1500.0
+    ok240, msg240 = tj240.reject_offer(d241, "金翅小鹏王", time.time())
+    assert ok240 and "执行窗口" in msg240, msg240
+    ok240, msg240, it240, back240 = tj240.soul_search(d241, "金翅小鹏王", time.time(), _Doom60())
+    assert ok240 and not back240 and len(it240) == 2, (msg240, it240)
+    d241.ext["tianjiao_exec"] = {"name": "金翅小鹏王", "until": time.time() + 300}
+    ok240, msg240, it240, back240 = tj240.slay_tianjiao(d241, "金翅小鹏王", time.time(), _Lucky60())
+    assert ok240 and back240, msg240                        # Lucky 0.01 < 0.25 → 反噬
+    if back240:
+        dz60.add_wounds(d241, 2.0, "灭杀反噬")              # handler 层同款落伤
+        d241.ext["hp"] = 1
+    assert abs(dz60.peek(d241) - 2.0) < 1e-9, "反噬道伤 +2"
+    assert d241.ext["hp"] == 1
+
+    src240 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    names240 = ["CMD_PR_JY", "CMD_PR_JY_YES", "CMD_PR_JY_NO", "CMD_PR_SONG",
+                "CMD_PR_PORTAL", "CMD_PR_WUXI", "CMD_TJ_ACCEPT", "CMD_TJ_REJECT",
+                "CMD_TJ_SOUL", "CMD_TJ_SLAY"]
+    miss240 = [c for c in names240 if f"@filter.command({c}" not in src240]
+    assert miss240 == [], f"漏注册：{miss240}"
+    assert "tj_mod.maybe_offer(" in src240, "击杀判定点需挂求饶"
+    assert "pr_mod.jiesong_offer(" in src240 and "pr_mod.portal_use(" in src240
+    help240c = _json60.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
+    assert any(g["group"] == "位面中转 · 接引与传送阵" for g in help240c)
+    assert any(g["group"] == "天骄处置 · 求饶与处决" for g in help240c)
+    assert "位面中转" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
+    print("W22-F1/F2 plane_relay+tianjiao处置 ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

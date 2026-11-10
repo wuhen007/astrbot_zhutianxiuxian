@@ -22,7 +22,7 @@ from __future__ import annotations
 import random
 import time
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Mapping
 
 PERSONAL_CD_SECONDS = 90 * 60
 REVIVE_SECONDS = 18 * 3600
@@ -315,3 +315,123 @@ def pick_taint_slot(doc: Any, item_lookup, rng: random.Random) -> str | None:
 
 def fight_text(name: str, hp_pct: float) -> str:
     return f"【{name}】气血 {hp_pct:.0%}"
+
+
+# ── 天骄处置：求饶 / 处决（W22-F2，对齐原版 BOSS4 求饶-执行流） ────────────
+#
+# 原版语义：天骄战败时 50% 求饶（赔礼 1~20 万，24h 应答，接受→双方仇恨 -30）；
+# 拒绝需邪修（魔道 ≥1000 或魔头/天魔）开 5 分钟执行窗口：
+# #搜魂天骄（取 2~3 门功法，反噬自爆按境界差）/ #灭杀天骄 / #天魔炼化天骄。
+#
+# 本移植（shortcut）：
+# - 求饶挂在击杀判定点：触发则天骄免死（气血 1%），24h 应答；
+# - 搜魂奖励折为随机上品功法 ×2（原版按 SOUL_SEARCH_PROFILES 取已学表）；
+# - 灭杀不给击杀结算（求饶流程外的处决），魔道 +20、灵宝残片 ×8；
+# - 反噬固定 20%/25%（原版按境界差浮动）；#天魔炼化天骄 未搬。
+
+OFFER_CHANCE = 0.5
+OFFER_HOURS = 24
+OFFER_STONES = 5_000             # 赔礼 = 档数 × 5,000
+EXEC_SECONDS = 300
+EXEC_MODAO_GATE = 1000
+SOUL_BACKLASH = 0.20
+SLAY_BACKLASH = 0.25
+SOUL_GONGFA = ("飞仙诀", "万化圣诀", "不灭天功", "万化仙诀")
+
+
+def maybe_offer(doc: Any, name: str, boss: dict[str, Any], now: float,
+                rng: random.Random) -> tuple[bool, str]:
+    """击杀判定点：50% 天骄求饶免死。返回 (是否求饶, 文案)。"""
+    if rng.random() >= OFFER_CHANCE:
+        return False, ""
+    if now - float(boss.get("offered_at", 0) or 0) < OFFER_HOURS * 3600:
+        return False, ""
+    boss["offered_at"] = now
+    bounty = 1 + int(rng.random() * 20)
+    doc.ext["tianjiao_offer"] = {"name": name, "bounty": bounty,
+                                 "until": now + OFFER_HOURS * 3600}
+    return True, (f"「{name}」重伤跪地，道音哀鸣：愿以 {bounty * OFFER_STONES:,} 灵石赎命！\n"
+                  f"{OFFER_HOURS} 小时内：#接受求饶 收下赔礼 / "
+                  f"#拒绝求饶（邪修可开执行窗口）")
+
+
+def reduce_hatred(doc: Any, name: str, amount: int) -> int:
+    table = doc.ext.get("tianjiao_hatred")
+    table = dict(table) if isinstance(table, Mapping) else {}
+    old = max(0, int(table.get(name, 0) or 0))
+    new = max(0, old - max(0, int(amount)))
+    table[name] = new
+    doc.ext["tianjiao_hatred"] = table
+    return new
+
+
+def _offer_get(doc: Any, name: str, now: float) -> dict[str, Any] | None:
+    p = doc.ext.get("tianjiao_offer")
+    if isinstance(p, Mapping) and p.get("name") == name and float(p.get("until", 0) or 0) >= now:
+        return dict(p)
+    return None
+
+
+def accept_offer(doc: PlayerDoc, name: str, now: float) -> tuple[bool, str]:
+    """#接受求饶：收赔礼、双方仇恨 -30、天骄免死遁走。"""
+    p = _offer_get(doc, name, now)
+    if not p:
+        return False, f"「{name}」没有向你求饶（或应答已过期）。"
+    stones = int(p["bounty"]) * OFFER_STONES
+    doc.stones = int(getattr(doc, "stones", 0) or 0) + stones
+    reduce_hatred(doc, name, 30)
+    doc.ext.pop("tianjiao_offer", None)
+    return True, (f"【接受求饶】收下 {stones:,} 灵石赔礼，放其残躯遁走——"
+                  f"仇恨 -30（旧怨渐消）。")
+
+
+def reject_offer(doc: PlayerDoc, name: str, now: float) -> tuple[bool, str]:
+    """#拒绝求饶：邪修开 5 分钟执行窗口（搜魂/灭杀）。"""
+    p = _offer_get(doc, name, now)
+    if not p:
+        return False, f"「{name}」没有向你求饶（或应答已过期）。"
+    modao = float((getattr(doc, "ext", {}) or {}).get("modao", 0) or 0)
+    lg = (getattr(doc, "ext", {}) or {}).get("linggen")
+    lg_type = str(lg.get("type") or "") if isinstance(lg, Mapping) else ""
+    if modao < EXEC_MODAO_GATE and lg_type not in ("魔头", "天魔"):
+        return False, ("你心存善念（魔道不足 1000 且非魔道之身）——下不去手，"
+                       "只能 #接受求饶。")
+    doc.ext["tianjiao_exec"] = {"name": name, "until": now + EXEC_SECONDS}
+    doc.ext.pop("tianjiao_offer", None)
+    return True, (f"【拒绝求饶】杀意凛然——{EXEC_SECONDS // 60} 分钟执行窗口开启："
+                  "#搜魂天骄 / #灭杀天骄 择一而行。")
+
+
+def _exec_get(doc: Any, name: str, now: float) -> bool:
+    e = doc.ext.get("tianjiao_exec")
+    return (isinstance(e, Mapping) and e.get("name") == name
+            and float(e.get("until", 0) or 0) >= now)
+
+
+def soul_search(doc: PlayerDoc, name: str, now: float, rng: random.Random,
+                ) -> tuple[bool, str, dict[str, int], bool]:
+    """#搜魂天骄：搜功法；反噬 20%（调用方落道伤与气血）。"""
+    if not _exec_get(doc, name, now):
+        return False, "执行窗口未开或已过（先 #拒绝求饶）。", {}, False
+    doc.ext.pop("tianjiao_exec", None)
+    if rng.random() < SOUL_BACKLASH:
+        return True, "【搜魂天骄】其神魂自爆反噬——你神识重创！", {}, True
+    pool = list(SOUL_GONGFA)
+    picks = [pool.pop(int(rng.random() * len(pool)) % len(pool)) for _ in range(2)]
+    items = {g: 1 for g in picks}
+    return True, (f"【搜魂天骄】神魂被翻开——搜得功法："
+                  f"{'、'.join(picks)}（已入纳戒）。"), items, False
+
+
+def slay_tianjiao(doc: PlayerDoc, name: str, now: float, rng: random.Random,
+                  ) -> tuple[bool, str, dict[str, int], bool]:
+    """#灭杀天骄：彻底抹杀；反噬 25%。魔道 +20、灵宝残片 ×8。"""
+    if not _exec_get(doc, name, now):
+        return False, "执行窗口未开或已过（先 #拒绝求饶）。", {}, False
+    doc.ext.pop("tianjiao_exec", None)
+    if rng.random() < SLAY_BACKLASH:
+        return True, "【灭杀天骄】临死反扑——两败俱伤！", {}, True
+    ext = getattr(doc, "ext", None)
+    if isinstance(ext, dict):
+        ext["modao"] = float(ext.get("modao", 0) or 0) + 20
+    return True, "【灭杀天骄】形神俱灭，魔威震世——魔道 +20！", {"灵宝残片": 8}, False
