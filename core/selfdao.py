@@ -32,6 +32,7 @@ import random
 import time
 from typing import Any, Mapping
 
+from .wallet import authority as _authority, set_xueqi as _set_xueqi, xueqi as _xueqi
 from .player import PlayerDoc
 
 EXT_KEY = "selfdao"
@@ -89,25 +90,6 @@ def state_of(doc: Any) -> dict[str, Any]:
     st["death_until"] = float(st.get("death_until", 0) or 0)
     save(doc, st)
     return st
-
-
-def _authority(doc: Any) -> int:
-    try:
-        from . import authority as _auth
-        return int(_auth.authority_of(doc))
-    except Exception:
-        return max(int(getattr(doc, "realm_index", 0) or 0),
-                   int(getattr(doc, "physique_index", 0) or 0))
-
-
-def _xueqi(doc: Any) -> int:
-    return int(float((getattr(doc, "ext", {}) or {}).get("xueqi", 0) or 0))
-
-
-def _set_xueqi(doc: Any, v: int) -> None:
-    ext = getattr(doc, "ext", None)
-    if isinstance(ext, dict):
-        ext["xueqi"] = max(0, int(v))
 
 
 def _reached(doc: Any) -> bool:

@@ -181,6 +181,29 @@ def one_thought_gate(doc: Any) -> tuple[bool, str]:
     return False, "诸天一念为岁云五阶权柄——#岁云见证 查看进度。"
 
 
+def parse_thought(arg: str) -> tuple[str, int]:
+    """审计修复11：#诸天一念 参数解析（物品名*数量，数量缺省/非法回退 1）。"""
+    parts = (arg or "").strip().split("*")
+    item = parts[0].strip()
+    qty = 1
+    if len(parts) > 1:
+        q = parts[1].strip()
+        if q.isdigit() and int(q) > 0:
+            qty = int(q)
+    return item, qty
+
+
+def thought_check(inv: Mapping[str, int], item: str, qty: int) -> str | None:
+    """转账前置：物品名非空、数量为正、库存足额；通过返回 None。"""
+    if not item:
+        return "用法：#诸天一念 物品名*数量 @道友（岁云五阶专属）。"
+    if qty <= 0:
+        return "数量须为正整数。"
+    if int((inv or {}).get(item, 0) or 0) < qty:
+        return f"你并没有【{item}】×{qty}。"
+    return None
+
+
 def panel(doc: Any) -> str:
     st = _st(doc)
     zt = _zt(doc)

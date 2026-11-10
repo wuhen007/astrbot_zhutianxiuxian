@@ -20208,15 +20208,11 @@ class ZhutianPlugin(Star):
         if not target_id:
             yield event.plain_result("用法：#诸天一念 物品名*数量 @道友（岁云五阶专属）")
             return
-        parts = (arg or "").strip().split("*")
-        item = parts[0].strip()
-        qty = int(parts[1]) if len(parts) > 1 and parts[1].strip().isdigit() else 1
-        if not item or qty <= 0:
-            yield event.plain_result("用法：#诸天一念 物品名*数量 @道友")
-            return
+        item, qty = zx_mod.parse_thought(arg)                # 审计修复11：解析入纯函数
         inv = await self.db.get_inventory(doc.uid)
-        if int(inv.get(item, 0) or 0) < qty:
-            yield event.plain_result(f"你并没有【{item}】×{qty}。")
+        bad = zx_mod.thought_check(inv, item, qty)
+        if bad:
+            yield event.plain_result(bad)
             return
         err_tx = ""
         async with self._pl_lock(target_id):                 # 审计修复6：目标档读写串行

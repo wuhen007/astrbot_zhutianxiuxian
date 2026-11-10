@@ -30,6 +30,8 @@ shortcut:
 
 from __future__ import annotations
 
+from .wallet import set_xueqi as _set_xueqi, xueqi as _xueqi
+
 import math
 import random
 import time
@@ -320,16 +322,6 @@ def panel(doc: Any, reg: Mapping[str, Any] | None = None,
 
 
 # ---------------------------------------------------------------- 祛伤指令
-
-def _xueqi(doc: Any) -> int:
-    return int(float((getattr(doc, "ext", {}) or {}).get("xueqi", 0) or 0))
-
-
-def _set_xueqi(doc: Any, value: int) -> None:
-    ext = getattr(doc, "ext", None)
-    if isinstance(ext, dict):
-        ext["xueqi"] = max(0, int(value))
-
 
 def reshape(doc: Any, inv: Mapping[str, int], now: float | None = None,
             ) -> tuple[bool, str, dict[str, int]]:

@@ -8817,6 +8817,49 @@ async def main():
     assert "async with self.db.transaction():\n                await self.db.save_player(doc.model_dump())\n                await self.db.save_market(g)" in src140b
     print("W19-B concurrency locks ok")
 
+    # ========================================================= W19-C：审计修复11/12 收尾
+    from core import wallet as wl200, zhutian_extra as zx200
+
+    # —— 12：wallet 助手与旧实现等价
+    d200 = PlayerDoc(uid="u200", name="钱包", realm_index=9, exp=1_000_000,
+                     ext={"xueqi": 500_000, "potential": 30.0, "shouyuan": 100, "hp": 1})
+    assert wl200.authority(d200) == 9
+    assert wl200.xueqi(d200) == 500_000 and wl200.xueqi.__module__ == "core.wallet"
+    fail200 = wl200.pay_exp_xq(d200, 2_000_000)
+    assert fail200 is not None and "需修为与血气各 2,000,000" in fail200  # 返回错误文案
+    assert wl200.pay_exp_xq(d200, 400_000) is None
+    assert d200.exp == 600_000 and wl200.xueqi(d200) == 100_000
+    fail200 = wl200.pay_potential(d200, 50)
+    assert fail200 and "潜力不足" in fail200 and wl200.pay_potential(d200, 30) is None
+    assert float(d200.ext["potential"]) == 0.0
+    ok200 = wl200.pay_potential(d200, 10)
+    assert ok200 and "潜力不足" in ok200 and float(d200.ext["potential"]) == 0.0, "不足时不扣（回归）"
+
+    # 九模块不再持有本地副本，全部改走 wallet
+    for m200 in ("zhengdao", "daolu", "selfdao", "ownway", "plane_events",
+                 "physique", "exclusive_set", "occupation_extra", "wudao"):
+        src200 = open(PLUGIN / "core" / f"{m200}.py", encoding="utf-8").read()
+        assert "def _authority(" not in src200, f"{m200} 仍有本地 _authority"
+        if m200 in ("zhengdao", "daolu", "selfdao", "ownway", "plane_events"):
+            assert "def _xueqi(" not in src200, f"{m200} 仍有本地 _xueqi"
+    assert "from .wallet import" in open(PLUGIN / "core/zhengdao.py", encoding="utf-8").read()
+
+    # —— 11：诸天一念解析 / 前置检查 / 接线
+    assert zx200.parse_thought("") == ("", 1)
+    assert zx200.parse_thought("秘书") == ("秘书", 1)
+    assert zx200.parse_thought("秘书*2") == ("秘书", 2)
+    assert zx200.parse_thought("秘书*0") == ("秘书", 1), "非法数量回退 1"
+    assert zx200.parse_thought("秘书*abc") == ("秘书", 1)
+    fail200b = zx200.thought_check({}, "", 1)
+    assert fail200b and "用法" in fail200b
+    fail200b = zx200.thought_check({"秘书": 3}, "秘书", 5)
+    assert fail200b and "并没有" in fail200b
+    assert zx200.thought_check({"秘书": 3}, "秘书", 2) is None
+    src200 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    assert "zx_mod.parse_thought(" in src200 and "zx_mod.thought_check(" in src200
+    assert "_pl_lock(target_id)" in src200, "转账仍需 per-uid 锁"
+    print("W19-C wallet merge + thought tests ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

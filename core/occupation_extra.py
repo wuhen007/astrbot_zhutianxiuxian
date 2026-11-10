@@ -21,6 +21,7 @@ from __future__ import annotations
 import random
 from typing import Any, Mapping
 
+from .wallet import authority as _authority
 from .player import PlayerDoc
 
 FIELD_COST_ITEM = "源石"
@@ -28,15 +29,6 @@ FIELD_COST_QTY = 10
 FIELD_HOURS = 24
 VILLAIN_NAMES = ("血手屠夫", "采花淫贼", "黑风寨主", "食魂老怪", "千面盗圣", "裂魂妖僧")
 VILLAGE_NAMES = ("落霞村", "青岩寨", "枯藤渡", "黑水屯", "白骨涧", "乱石岗")
-
-
-def _authority(doc: Any) -> int:
-    try:
-        from . import authority as _auth
-        return int(_auth.authority_of(doc))
-    except Exception:
-        return max(int(getattr(doc, "realm_index", 0) or 0),
-                   int(getattr(doc, "physique_index", 0) or 0))
 
 
 def _job(doc: Any) -> str:

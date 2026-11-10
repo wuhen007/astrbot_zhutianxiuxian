@@ -23,6 +23,7 @@ import random
 import time
 from typing import Any, Mapping
 
+from .wallet import authority as _authority
 from .player import PlayerDoc
 
 EXT_KEY = "physique"
@@ -73,15 +74,6 @@ def state_of(doc: Any) -> dict[str, Any]:
     st["demon"] = bool(st.get("demon"))
     save(doc, st)
     return st
-
-
-def _authority(doc: Any) -> int:
-    try:
-        from . import authority as _auth
-        return int(_auth.authority_of(doc))
-    except Exception:
-        return max(int(getattr(doc, "realm_index", 0) or 0),
-                   int(getattr(doc, "physique_index", 0) or 0))
 
 
 def _lg(doc: Any) -> dict[str, Any]:

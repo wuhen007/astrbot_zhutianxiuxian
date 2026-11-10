@@ -35,6 +35,7 @@ import random
 import time
 from typing import Any, Mapping
 
+from .wallet import authority as _authority, pay_exp_xq as _pay_exp_xq, pay_potential as _pay_potential, set_xueqi as _set_xueqi, xueqi as _xueqi
 from .player import PlayerDoc
 
 EXT_KEY = "ownway"
@@ -92,25 +93,6 @@ def stage_of(seg: int) -> tuple[str, int]:
     return STAGES[0][0], STAGES[0][3]
 
 
-def _authority(doc: Any) -> int:
-    try:
-        from . import authority as _auth
-        return int(_auth.authority_of(doc))
-    except Exception:
-        return max(int(getattr(doc, "realm_index", 0) or 0),
-                   int(getattr(doc, "physique_index", 0) or 0))
-
-
-def _xueqi(doc: Any) -> int:
-    return int(float((getattr(doc, "ext", {}) or {}).get("xueqi", 0) or 0))
-
-
-def _set_xueqi(doc: Any, v: int) -> None:
-    ext = getattr(doc, "ext", None)
-    if isinstance(ext, dict):
-        ext["xueqi"] = max(0, int(v))
-
-
 def _wound_zero(doc: Any) -> tuple[bool, str]:
     try:
         from . import zhengdao as _dz
@@ -120,25 +102,6 @@ def _wound_zero(doc: Any) -> tuple[bool, str]:
     except Exception:
         pass
     return True, ""
-
-
-def _pay_exp_xq(doc: Any, amount: int) -> str | None:
-    if int(getattr(doc, "exp", 0) or 0) < amount or _xueqi(doc) < amount:
-        return (f"需修为与血气各 {amount:,}（当前 "
-                f"{int(getattr(doc, 'exp', 0) or 0):,} / {_xueqi(doc):,}）。")
-    doc.exp = int(getattr(doc, "exp", 0) or 0) - amount
-    _set_xueqi(doc, _xueqi(doc) - amount)
-    return None
-
-
-def _pay_potential(doc: Any, amount: int) -> str | None:
-    pot = int(float((getattr(doc, "ext", {}) or {}).get("potential", 0) or 0))
-    if pot < amount:
-        return f"仙道潜力不足：需 {amount}（现有 {pot}）。"
-    ext = getattr(doc, "ext", None)
-    if isinstance(ext, dict):
-        ext["potential"] = pot - amount
-    return None
 
 
 # ---------------------------------------------------------------- 创造 / 修炼 / 突破

@@ -30,6 +30,7 @@ import random
 import time
 from typing import Any, Mapping
 
+from .wallet import authority as _authority
 from .player import PlayerDoc
 
 EXT_KEY = "wudao"
@@ -123,15 +124,6 @@ def stage_of(node_exp: int, target: int) -> str:
 def _level_sum(doc: Any) -> int:
     return (int(getattr(doc, "realm_index", 0) or 0)
             + int(getattr(doc, "physique_index", 0) or 0) + 2)
-
-
-def _authority(doc: Any) -> int:
-    try:
-        from . import authority as _auth
-        return int(_auth.authority_of(doc))
-    except Exception:
-        return max(int(getattr(doc, "realm_index", 0) or 0),
-                   int(getattr(doc, "physique_index", 0) or 0))
 
 
 def _physique_mult(doc: Any) -> float:
