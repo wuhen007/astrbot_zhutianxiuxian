@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_story as rs_mod, plane_events as pe_mod, games_mini as gm_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_story as rs_mod, plane_events as pe_mod, games_mini as gm_mod, xtzb_birth as xb_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -839,6 +839,14 @@ CMD_PE_XIANZI = "#求取"
 CMD_PE_XW_BUY = "#购买仙翁商品"
 CMD_PE_HEIM = "#黑衣神秘人"
 CMD_PE_HEIM_BUY = "#购买黑市商品"
+# W20-F1：至宝出世 · 24h 全服择主（冠军本体 / 2、3 名七日投影）
+CMD_XB_OPEN = "#观摩灵宝"
+CMD_XB_T1 = "#挑战守护灵"
+CMD_XB_T2 = "#参悟先天禁制"
+CMD_XB_T3 = "#护持天地灵脉"
+CMD_XB_T4 = "#跃入命运乱流"
+CMD_XB_VOW = "#立下道心"
+CMD_XB_BOARD = "#灵宝择主榜"
 # W18-F1：金银坊（媚娘的赌坊）
 CMD_GMF = "#金银坊"
 # W8-B1b：至尊线（至尊骨 / 斩骨涅槃 / 舍骨入血 / 试炼 / 仙骨 / 重瞳 / 瞳骨合一）
@@ -20717,6 +20725,95 @@ class ZhutianPlugin(Star):
         async with self.db.transaction():
             await self.db.save_player(doc.model_dump())
         yield event.plain_result(msg)
+
+    # ------------------------------------------------ W20-F1：至宝出世 · 24h 全服择主
+
+    async def _xb_grant(self, ops: list[dict]) -> None:
+        """择主结算发放：本体/投影写进各玩家 xtzb 档（同 _raid_settle 先例）。"""
+        for op in ops:
+            raw = await self.db.get_player(op["uid"])
+            if raw:
+                p = PlayerDoc(**raw)
+                xb_mod.birth_prize(p, op["treasure"], op["prize"], time.time())
+                await self.db.save_player(p.model_dump())
+
+    async def _xb_span(self, event, arg: str, kind: str):
+        """出世玩法统一跨度：惰性结算 → 动作 → 全服档+玩家档落库。"""
+        if not self._allowed(event):
+            return None, ""
+        doc, err = await self._require_player(event)
+        if err:
+            return None, err
+        now = time.time()
+        rng = random.Random(f"{doc.uid}:xb:{kind}:{int(now)}")
+        name = (arg or "").strip()
+        vow = ""
+        if kind == "vow":
+            parts = name.split(maxsplit=1)
+            name = parts[0] if parts else ""
+            vow = parts[1] if len(parts) > 1 else ""
+        notice = ""
+        async with self.db.calamity_lock:
+            cal = await self.db.get_calamity()
+            world = xt_mod.world_of(cal)
+            notice, ops = xb_mod.birth_settle(world, now,
+                                              random.Random(f"{doc.uid}:xbsettle:{int(now)}"))
+            if kind == "open":
+                ok, msg, changed = xb_mod.birth_open(doc, world, name, now)
+            elif kind == "board":
+                ok, msg = True, xb_mod.birth_board(world, now)
+            elif kind == "vow":
+                ok, msg = xb_mod.birth_vow(doc, world, name, vow)
+            else:
+                ok, msg = xb_mod.birth_trial(doc, world, name, kind, now, rng)
+            if ops:
+                await self._xb_grant(ops)
+            xt_mod.set_world(cal, world)
+            await self._pe_save(doc, {}, cal)
+        out = (notice + "\n\n" + msg) if notice else msg
+        return ok, out
+
+    @filter.command(CMD_XB_OPEN, "观摩灵宝 至宝名：开启/加入出世之争")
+    async def handle_xb_open(self, event: AstrMessageEvent, arg: str = ""):
+        ok, out = await self._xb_span(event, arg, "open")
+        if out:
+            yield event.plain_result(out)
+
+    @filter.command(CMD_XB_T1, "挑战守护灵 至宝名（试炼一）")
+    async def handle_xb_t1(self, event: AstrMessageEvent, arg: str = ""):
+        ok, out = await self._xb_span(event, arg, "守护灵")
+        if out:
+            yield event.plain_result(out)
+
+    @filter.command(CMD_XB_T2, "参悟先天禁制 至宝名（试炼二）")
+    async def handle_xb_t2(self, event: AstrMessageEvent, arg: str = ""):
+        ok, out = await self._xb_span(event, arg, "先天禁制")
+        if out:
+            yield event.plain_result(out)
+
+    @filter.command(CMD_XB_T3, "护持天地灵脉 至宝名（试炼三）")
+    async def handle_xb_t3(self, event: AstrMessageEvent, arg: str = ""):
+        ok, out = await self._xb_span(event, arg, "天地灵脉")
+        if out:
+            yield event.plain_result(out)
+
+    @filter.command(CMD_XB_T4, "跃入命运乱流 至宝名（高风险高收益）")
+    async def handle_xb_t4(self, event: AstrMessageEvent, arg: str = ""):
+        ok, out = await self._xb_span(event, arg, "命运乱流")
+        if out:
+            yield event.plain_result(out)
+
+    @filter.command(CMD_XB_VOW, "立下道心 至宝名 道心（契合者结算+150）")
+    async def handle_xb_vow(self, event: AstrMessageEvent, arg: str = ""):
+        ok, out = await self._xb_span(event, arg or "", "vow")
+        if out:
+            yield event.plain_result(out)
+
+    @filter.command(CMD_XB_BOARD, "灵宝择主榜（进行中的出世之争）")
+    async def handle_xb_board(self, event: AstrMessageEvent):
+        ok, out = await self._xb_span(event, "", "board")
+        if out:
+            yield event.plain_result(out)
 
     @filter.command(CMD_DZ_GUARD, "护法")
     async def handle_dz_guard(self, event: AstrMessageEvent, arg: str = ""):

@@ -8847,6 +8847,66 @@ async def main():
     assert "_pl_lock(target_id)" in src200, "转账仍需 per-uid 锁"
     print("W19-C wallet merge + thought tests ok")
 
+    # ========================================================= W20-F1：至宝出世全服择主
+    from core import xtzb_birth as xb210, xtzb as xt210
+
+    world210: dict = {}
+    d210 = PlayerDoc(uid="u210", name="夺宝人", realm_index=25,
+                     ext={"xueqi": 100, "potential": 0, "shouyuan": 100, "hp": 100.0})
+    ok210, msg210, ch210 = xb210.birth_open(d210, world210, "无名至宝", time.time())
+    assert not ok210 and "未知至宝" in msg210, msg210
+    ok210, msg210, ch210 = xb210.birth_open(d210, world210, "太初仙刃", time.time())
+    assert ok210 and ch210 and "至宝出世" in msg210, msg210
+    assert "太初仙刃" in world210["birth"], "窗口建立"
+    ok210, msg210, _ = xb210.birth_open(d210, world210, "太初仙刃", time.time())
+    assert not ok210 and "已在" in msg210, msg210            # 重复报名
+    d210b = PlayerDoc(uid="u210b", name="夺宝人二", realm_index=25,
+                      ext={"xueqi": 100, "potential": 0, "shouyuan": 100, "hp": 100.0})
+    ok210, msg210, _ = xb210.birth_open(d210b, world210, "太初仙刃", time.time())
+    assert ok210 and "加入争夺" in msg210, msg210
+
+    ok210, msg210 = xb210.birth_trial(d210, world210, "太初仙刃", "做梦", time.time(), _Lucky60())
+    assert not ok210 and "试炼限定" in msg210, msg210
+    ok210, msg210 = xb210.birth_trial(d210, world210, "太初仙刃", "守护灵", time.time(), _Lucky60())
+    assert ok210 and "+100" in msg210, msg210                # Lucky 恒过
+    ok210, msg210 = xb210.birth_trial(d210, world210, "太初仙刃", "守护灵", time.time(), _Lucky60())
+    assert not ok210 and "每项一次" in msg210, msg210
+    ok210, msg210 = xb210.birth_trial(d210b, world210, "太初仙刃", "命运乱流", time.time(), _Doom60())
+    assert ok210 and "气血归一" in msg210, msg210            # Doom 恒败：乱流反噬
+    assert d210b.ext["hp"] == 1
+    assert xb210.birth_vow_of("太初仙刃") in xb210.VOWS
+
+    pref210 = xb210.birth_vow_of("太初仙刃")
+    ok210, msg210 = xb210.birth_vow(d210, world210, "太初仙刃", pref210)
+    assert ok210 and "契合" in msg210, msg210
+    ok210, msg210 = xb210.birth_vow(d210, world210, "太初仙刃", pref210)
+    assert not ok210 and "道心不二" in msg210, msg210
+    ok210, msg210 = xb210.birth_vow(d210b, world210, "太初仙刃", "镇压诸天")
+    assert ok210, msg210
+    assert "人入局" in xb210.birth_board(world210, time.time())
+
+    notices210, ops210 = xb210.birth_settle(world210, time.time() + 25 * 3600, _Lucky60())
+    assert "择主之争 · 太初仙刃" in notices210, notices210
+    assert ops210[0]["uid"] == "u210" and ops210[0]["prize"] == "本体", ops210
+    assert ops210[1]["prize"] == "投影", ops210
+    xb210.birth_prize(d210, "太初仙刃", "本体", time.time())
+    xb210.birth_prize(d210b, "太初仙刃", "投影", time.time())
+    assert "太初仙刃" in xt210.state_of(d210)["owned"]
+    assert xt210.state_of(d210b)["projection"].get("太初仙刃", 0) > time.time()
+    ok210, msg210, _ = xb210.birth_open(d210, world210, "太初仙刃", time.time())
+    assert ok210, "结算后可开启新一轮"
+
+    src210 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    names210 = ["CMD_XB_OPEN", "CMD_XB_T1", "CMD_XB_T2", "CMD_XB_T3", "CMD_XB_T4",
+                "CMD_XB_VOW", "CMD_XB_BOARD"]
+    miss210 = [c for c in names210 if f"@filter.command({c}" not in src210]
+    assert miss210 == [], f"漏注册：{miss210}"
+    assert "xb_mod.birth_settle(" in src210 and "xb_mod.birth_prize(" in src210
+    help210c = _json60.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
+    assert any(g["group"] == "至宝出世 · 全服择主" for g in help210c)
+    assert "至宝出世" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
+    print("W20-F1 xtzb_birth ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 
