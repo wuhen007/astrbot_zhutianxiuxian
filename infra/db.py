@@ -47,6 +47,9 @@ class DataBase:
         self.db_path = Path(db_path)
         self.conn: Optional[aiosqlite.Connection] = None
         self.wlock = asyncio.Lock()   # 全部写路径共用一把锁：命令并发时串行落库
+        # 审计修复3：calamity_state 是全服单例整档覆盖，"读档→改→save_calamity"
+        # 跨度必须持本锁，否则并发写入者互相回滚字段（护法/帝关/天地榜/战功）。
+        self.calamity_lock = asyncio.Lock()
 
     async def connect(self) -> None:
         if self.conn is not None:

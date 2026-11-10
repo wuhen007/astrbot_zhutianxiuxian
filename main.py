@@ -3762,8 +3762,10 @@ class ZhutianPlugin(Star):
         else:
             ok, msg = market.sell(g, doc, stock, qty, now)
         if ok:
-            await self.db.save_player(doc.model_dump())
-            await self.db.save_market(g)
+            # 审计修复7：玩家档与行情档同一事务，杜绝旧快照复活持仓
+            async with self.db.transaction():
+                await self.db.save_player(doc.model_dump())
+                await self.db.save_market(g)
         yield event.plain_result(msg)
 
     @filter.command(CMD_LS_BUY, "买入")
@@ -5896,7 +5898,7 @@ class ZhutianPlugin(Star):
     async def handle_give_stones(self, event: AstrMessageEvent, amount: int = 0):
         if not self._allowed(event):
             return
-        if not event.is_admin:
+        if not self._adm_ok(event):
             yield event.plain_result("此权柄唯管理员可执。")
             return
         target, terr = await self._target_doc(event)
@@ -9803,19 +9805,21 @@ class ZhutianPlugin(Star):
         if err:
             return None, None, None, "", err
         now = time.time()
-        cal = await self.db.get_calamity()
-        raw = cal.get("tiandibang")
-        fresh = not isinstance(raw, dict) or not raw.get("opened_week")
-        s = tdb_mod.state_of(cal, now)
-        msg, ops, changed = tdb_mod.maybe_settle(s, now)
-        tdb_mod.commit(cal, s)
-        if changed:
-            prefix = await self._tdb_award(cal, s, msg, ops)
-        else:
-            prefix = ""
-            # 赛季起算周必须落库，否则每次读档都当「首周」，周结算永远不会触发
-            if fresh:
-                await self.db.save_calamity(cal)
+        # 审计修复4：结算+发奖全程持全服档锁，并发第二人进锁后看到 completed
+        async with self.db.calamity_lock:
+            cal = await self.db.get_calamity()
+            raw = cal.get("tiandibang")
+            fresh = not isinstance(raw, dict) or not raw.get("opened_week")
+            s = tdb_mod.state_of(cal, now)
+            msg, ops, changed = tdb_mod.maybe_settle(s, now)
+            tdb_mod.commit(cal, s)
+            if changed:
+                prefix = await self._tdb_award(cal, s, msg, ops)
+            else:
+                prefix = ""
+                # 赛季起算周必须落库，否则每次读档都当「首周」，周结算永远不会触发
+                if fresh:
+                    await self.db.save_calamity(cal)
         return doc, s, cal, prefix, None
 
     @filter.command(CMD_TDB_JOIN, "报名比赛")
@@ -10941,16 +10945,20 @@ class ZhutianPlugin(Star):
         if left <= 0:
             members = await self.db.raid_members(team["code"])
             shares = await self._raid_settle(team, members, doc.uid)
-            lines.append(f"\n【全队公告】{team['boss']} 被讨伐！奖池 {int(team['reward']):,} 灵石已按伤害分奖：")
-            for s in shares:
-                lines.append(f"· {s['name']}：{s['stones']:,} 灵石（伤害 {s['dmg']:,}｜{s['share']}%）")
-            cfg = raid.boss_of(team["boss"]) or {}
-            if cfg.get("loot"):
-                lines.append(f"每人另得【{cfg['loot']}】×{int(cfg.get('loot_qty', 1))}。")
+            if shares:                                        # 审计修复5：并发二次触发不播报
+                lines.append(f"\n【全队公告】{team['boss']} 被讨伐！奖池 {int(team['reward']):,} 灵石已按伤害分奖：")
+                for s in shares:
+                    lines.append(f"· {s['name']}：{s['stones']:,} 灵石（伤害 {s['dmg']:,}｜{s['share']}%）")
+                cfg = raid.boss_of(team["boss"]) or {}
+                if cfg.get("loot"):
+                    lines.append(f"每人另得【{cfg['loot']}】×{int(cfg.get('loot_qty', 1))}。")
         async for r in self._smart(event, "\n".join(lines), "团本讨伐"):
             yield r
 
     async def _raid_settle(self, team: dict, members: list[dict], killer_uid: str) -> list[dict]:
+        fresh = await self.db.get_raid(team["code"])          # 审计修复5：已结算则不再分奖
+        if fresh and int(fresh.get("settled", 0) or 0):
+            return []
         ledger = [(m["uid"], m["name"], int(m.get("dmg", 0) or 0)) for m in members]
         shares = raid.split_rewards(
             int(team.get("reward", 0) or 0), ledger, killer_uid
@@ -12986,7 +12994,7 @@ class ZhutianPlugin(Star):
     async def handle_era_set(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
-        if not event.is_admin:
+        if not self._adm_ok(event):
             yield event.plain_result("此权柄唯管理员可执。")
             return
         parts = (event.get_message_str() or "").strip().split()[1:]
@@ -20210,15 +20218,20 @@ class ZhutianPlugin(Star):
         if int(inv.get(item, 0) or 0) < qty:
             yield event.plain_result(f"你并没有【{item}】×{qty}。")
             return
-        raw = await self.db.get_player(target_id)
-        if raw is None:
-            yield event.plain_result("对方尚未踏入仙途。")
+        err_tx = ""
+        async with self._pl_lock(target_id):                 # 审计修复6：目标档读写串行
+            raw = await self.db.get_player(target_id)
+            if raw is None:
+                err_tx = "对方尚未踏入仙途。"
+            else:
+                foe = PlayerDoc(**raw)
+                async with self.db.transaction():
+                    await self.db.remove_item(doc.uid, item, qty)
+                    await self.db.add_items(foe.uid, {item: qty})
+                    await self.db.save_player(foe.model_dump())
+        if err_tx:
+            yield event.plain_result(err_tx)
             return
-        foe = PlayerDoc(**raw)
-        async with self.db.transaction():
-            await self.db.remove_item(doc.uid, item, qty)
-            await self.db.add_items(foe.uid, {item: qty})
-            await self.db.save_player(foe.model_dump())
         yield event.plain_result(
             f"【诸天一念】一念跨越位面与维度——【{item}】×{qty} 已至 "
             f"{foe.name or foe.uid} 手中。（真实库存与绑定规则照常）")
@@ -20534,6 +20547,13 @@ class ZhutianPlugin(Star):
             if calamity is not None:
                 await self.db.save_calamity(calamity)
 
+    def _pl_lock(self, uid: str) -> asyncio.Lock:
+        """审计修复6：per-uid 玩家档锁——读档→改→存的跨度内串行，防整档覆盖。"""
+        locks = getattr(self, "_player_locks", None)
+        if locks is None:
+            locks = self._player_locks = {}
+        return locks.setdefault(str(uid), asyncio.Lock())
+
     @filter.command(CMD_PE_PASS, "帝关战况")
     async def handle_pe_pass(self, event: AstrMessageEvent):
         if not self._allowed(event):
@@ -20549,12 +20569,13 @@ class ZhutianPlugin(Star):
         if err:
             yield event.plain_result(err)
             return
-        cal = await self.db.get_calamity()
-        st = pe_mod.pass_state(cal, time.time())
-        ok, msg, fame = pe_mod.reinforce(doc, st, time.time(),
-                                         random.Random(f"{doc.uid}:pass:{int(time.time())}"))
-        cal["imperial_pass"] = st
-        await self._pe_save(doc, {}, cal)
+        async with self.db.calamity_lock:                 # 审计修复3：全服档读改写持锁
+            cal = await self.db.get_calamity()
+            st = pe_mod.pass_state(cal, time.time())
+            ok, msg, fame = pe_mod.reinforce(doc, st, time.time(),
+                                             random.Random(f"{doc.uid}:pass:{int(time.time())}"))
+            cal["imperial_pass"] = st
+            await self._pe_save(doc, {}, cal)
         yield event.plain_result(msg)
 
     @filter.command(CMD_PE_BLOOD, "融合帝血：平定后1小时窗口，帝威+20%")
@@ -20565,11 +20586,12 @@ class ZhutianPlugin(Star):
         if err:
             yield event.plain_result(err)
             return
-        cal = await self.db.get_calamity()
-        st = pe_mod.pass_state(cal, time.time())
-        ok, msg = pe_mod.fuse_blood(doc, st, time.time())
-        cal["imperial_pass"] = st
-        await self._pe_save(doc, {}, cal)
+        async with self.db.calamity_lock:
+            cal = await self.db.get_calamity()
+            st = pe_mod.pass_state(cal, time.time())
+            ok, msg = pe_mod.fuse_blood(doc, st, time.time())
+            cal["imperial_pass"] = st
+            await self._pe_save(doc, {}, cal)
         yield event.plain_result(msg)
 
     @filter.command(CMD_PE_WAR, "圣战详情")
@@ -20590,9 +20612,10 @@ class ZhutianPlugin(Star):
         if err:
             yield event.plain_result(err)
             return
-        cal = await self.db.get_calamity()
-        ok, msg = pe_mod.war_side(doc, cal, arg, time.time())
-        await self._pe_save(doc, {}, cal)
+        async with self.db.calamity_lock:
+            cal = await self.db.get_calamity()
+            ok, msg = pe_mod.war_side(doc, cal, arg, time.time())
+            await self._pe_save(doc, {}, cal)
         yield event.plain_result(msg)
 
     @filter.command(CMD_PE_ACT, "战场行动：检定积累战功")
@@ -20603,10 +20626,11 @@ class ZhutianPlugin(Star):
         if err:
             yield event.plain_result(err)
             return
-        cal = await self.db.get_calamity()
-        ok, msg = pe_mod.war_act(doc, cal, time.time(),
-                                 random.Random(f"{doc.uid}:war:{int(time.time())}"))
-        await self._pe_save(doc, {}, cal)
+        async with self.db.calamity_lock:
+            cal = await self.db.get_calamity()
+            ok, msg = pe_mod.war_act(doc, cal, time.time(),
+                                     random.Random(f"{doc.uid}:war:{int(time.time())}"))
+            await self._pe_save(doc, {}, cal)
         yield event.plain_result(msg)
 
     @filter.command(CMD_PE_FUND, "投入战资：源石数→战功")
@@ -20622,9 +20646,20 @@ class ZhutianPlugin(Star):
         except ValueError:
             qty = 0
         inv = await self.db.get_inventory(doc.uid)
-        cal = await self.db.get_calamity()
-        ok, msg, delta = pe_mod.war_fund(doc, cal, qty, inv)
-        await self._pe_save(doc, delta, cal)
+        async with self.db.calamity_lock:
+            cal = await self.db.get_calamity()
+            ok, msg, delta = pe_mod.war_fund(doc, cal, qty, inv)
+            w130 = cal.get("sect_war") or {}                 # 审计修复9：轮末站队者 +30
+            pend = w130.pop("pending_bonus", None) if isinstance(w130, dict) else None
+            await self._pe_save(doc, delta, cal)
+        if pend:
+            for uid in pend:
+                raw = await self.db.get_player(uid)
+                if raw:
+                    p = PlayerDoc(**raw)
+                    sw = p.ext.setdefault("sect_war", {})
+                    sw["merits"] = int(sw.get("merits", 0) or 0) + 30
+                    await self.db.save_player(p.model_dump())
         yield event.plain_result(msg)
 
     @filter.command(CMD_PE_RANK, "查看战场榜：个人战功与全服军资")
@@ -20651,9 +20686,10 @@ class ZhutianPlugin(Star):
         if err:
             yield event.plain_result(err)
             return
-        ok, msg, delta = pe_mod.war_exchange(doc, await self.db.get_calamity(),
-                                             arg, self.content.table("圣地战功商店", []))
-        await self._pe_save(doc, delta)
+        async with self.db.calamity_lock:
+            ok, msg, delta = pe_mod.war_exchange(doc, await self.db.get_calamity(),
+                                                 arg, self.content.table("圣地战功商店", []))
+            await self._pe_save(doc, delta)
         yield event.plain_result(msg)
 
     @filter.command("#白须仙翁", "游商：唯一百分比装备与黑市（总览）")

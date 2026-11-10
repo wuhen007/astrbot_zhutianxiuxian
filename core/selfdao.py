@@ -168,10 +168,8 @@ def deduce(doc: PlayerDoc, now: float | None = None,
         return False, f"推演需燃烧 {LAYER_COST['shouyuan']:,} 年寿元（现有 {shouyuan:,}）——先延寿。", {}
     try:
         from . import fashan as _fs
-        era_pts = _fs.era_of(doc)
-        if era_pts < LAYER_COST["era"]:
-            return False, f"纪元积累不足：需 {LAYER_COST['era']}（现有 {era_pts}），镇守永恒未知之地可得。", {}
-        doc.ext["era_points"] = era_pts - LAYER_COST["era"]
+        if _fs.era_of(doc) < LAYER_COST["era"]:
+            return False, f"纪元积累不足：需 {LAYER_COST['era']}（现有 {_fs.era_of(doc)}），镇守永恒未知之地可得。", {}
     except Exception:
         pass
     try:
@@ -179,6 +177,11 @@ def deduce(doc: PlayerDoc, now: float | None = None,
         ok_h, _, _ = _ys.consume_heart(doc, LAYER_COST["heart"], now)
         if not ok_h:
             return False, f"心神不足：需 {LAYER_COST['heart']} 点——精神宇宙归位后再来。", {}
+    except Exception:
+        pass
+    try:
+        from . import fashan as _fs
+        doc.ext["era_points"] = _fs.era_of(doc) - LAYER_COST["era"]   # 心神扣稳后再扣纪元
     except Exception:
         pass
     ext = getattr(doc, "ext", {})

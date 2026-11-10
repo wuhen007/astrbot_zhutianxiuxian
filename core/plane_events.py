@@ -187,6 +187,10 @@ def war_side(doc: PlayerDoc, calamity: dict[str, Any], side: str,
     st["side"] = side
     st["round"] = int(w.get("round", 0) or 0)
     _sw_save(doc, st)
+    w.setdefault("participants", [])
+    if str(doc.uid) not in w["participants"]:
+        w["participants"].append(str(doc.uid))          # 审计修复9：轮末奖励对象
+    calamity["sect_war"] = w
     return True, f"【圣战站队 · {side}】已登记本轮阵营——#战场行动 开始积累战功。"
 
 
@@ -229,7 +233,9 @@ def war_fund(doc: PlayerDoc, calamity: dict[str, Any], qty: int,
     if w["fund"] >= FUND_GOAL:
         w["fund"] = 0
         w["round"] = int(w.get("round", 0) or 0) + 1
-        msg += "\n≡ 军资达成 ≡ 本轮补给落地——全体站队者战功 +30（自动计入下轮）。"
+        w["pending_bonus"] = list(w.get("participants") or [])   # 审计修复9：handler 据此 +30
+        w["participants"] = []
+        msg += f"\n≡ 军资达成 ≡ 本轮补给落地——{len(w['pending_bonus'])} 名站队者战功 +30。"
     calamity["sect_war"] = w
     return True, msg, {"源石": -qty}
 

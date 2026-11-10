@@ -19,7 +19,6 @@ W7-2 时代系统接线。本模块只补三块缺口：
 from __future__ import annotations
 
 import random
-import time
 from typing import Any, Mapping
 
 from .player import PlayerDoc

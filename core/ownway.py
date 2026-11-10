@@ -196,11 +196,15 @@ def cultivate(doc: PlayerDoc, times: int, now: float | None = None,
             break
         _, mult = stage_of(seg)
         c_exp, c_pot = 150_000 * mult, 10 * mult
+        perr = _pay_potential(doc, c_pot)          # 先验潜力（不足时不扣，杜绝凭空退款）
+        if perr:
+            if total == 0:
+                return False, perr
+            break
         err = _pay_exp_xq(doc, c_exp)
-        if err or _pay_potential(doc, c_pot):
-            if err is None:
-                ext = getattr(doc, "ext", {})
-                ext["potential"] = float(ext.get("potential", 0) or 0) + c_pot
+        if err:
+            ext = getattr(doc, "ext", {})          # 已扣潜力，回滚
+            ext["potential"] = float(ext.get("potential", 0) or 0) + c_pot
             break
         seg += 1
         total += 1

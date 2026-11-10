@@ -8764,6 +8764,59 @@ async def main():
     assert "金银坊" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
     print("W18-F1 games_mini ok")
 
+    # ========================================================= W19-A：审计修复回归
+    d140 = PlayerDoc(uid="u140", name="审计人", realm_index=25, exp=1_000_000_000,
+                     ext={"xueqi": 1_000_000_000, "potential": 200.0, "shouyuan": 100,
+                          "hp": 100.0})
+    ok140, msg140 = ow80.create(d140, "攻伐", "审计道")
+    assert ok140, msg140
+    d140.ext["potential"] = 0.0                            # 审计修复1：潜力0不得凭空复制
+    ok140, msg140 = ow80.cultivate(d140, 50, time.time())
+    assert not ok140 and "潜力不足" in msg140, msg140
+    assert float(d140.ext["potential"]) == 0.0, f"潜力被复制：{d140.ext['potential']}"
+
+    d141 = PlayerDoc(uid="u141", name="审计人二", realm_index=25, exp=10_000_000,
+                     ext={"xueqi": 10_000_000, "potential": 500.0, "shouyuan": 9_000_000, "hp": 1,
+                          "era_points": 500})
+    _dz141 = dz60.state_of(d141)
+    _dz141["reached"] = True
+    dz60.save(d141, _dz141)
+    _ys141 = ys70.ensure(d141)
+    _ys141["heart"] = {"cur": 0, "max": 30, "last": time.time()}   # 心神耗尽态
+    ys70.save(d141, _ys141)
+    ok140, msg140, _ = sd70.deduce(d141, time.time(), _Lucky60())
+    assert not ok140 and "心神不足" in msg140, msg140
+    assert d141.ext["era_points"] == 500, f"纪元被白扣：{d141.ext['era_points']}"   # 审计修复2
+
+    # 审计修复9：军资达成 → pending_bonus 名单（handler 据此 +30）
+    d142 = PlayerDoc(uid="u142", name="站队人", realm_index=25,
+                     ext={"xueqi": 100, "potential": 0, "shouyuan": 100, "hp": 1})
+    cal142: dict = {}
+    ok140, msg140 = pe120.war_side(d142, cal142, "攻", time.time())
+    assert ok140, msg140
+    ok140, _, _ = pe120.war_fund(d142, cal142, 600, {"源石": 1000})
+    ok140, msg140, _ = pe120.war_fund(d142, cal142, 600, {"源石": 1000})
+    assert ok140 and "站队者战功 +30" in msg140, msg140
+    sw142 = cal142.get("sect_war") or {}
+    assert sw142.get("pending_bonus") == ["u142"], sw142
+    assert sw142.get("participants") == [], "名单已清、下轮重新站队"
+
+    src140 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    assert 'get_raid(team["code"])' in src140, "审计修复5：_raid_settle 需复读 settled"
+    assert "pending_bonus" in src140, "审计修复9：handler 需兑现轮末奖励"
+    assert src140.count('if not self._adm_ok(event)') >= 2, "审计修复10：门禁统一"
+    print("W19-A audit fixes ok")
+
+    # ========================================================= W19-B：并发锁回归
+    assert hasattr(db, "calamity_lock"), "db 需自带全服档锁"
+    src140b = src140  # main.py 已在上方读出
+    assert "calamity_lock" in src140b and src140b.count("async with self.db.calamity_lock") >= 7, \
+        "pe/tdb/转账处需持锁"
+    assert "_pl_lock(target_id)" in src140b, "诸天一念需 per-uid 锁"
+    assert "审计修复7" in src140b, "市场买卖需同事务"
+    assert "async with self.db.transaction():\n                await self.db.save_player(doc.model_dump())\n                await self.db.save_market(g)" in src140b
+    print("W19-B concurrency locks ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 
