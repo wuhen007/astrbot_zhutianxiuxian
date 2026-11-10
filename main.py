@@ -17929,9 +17929,12 @@ class ZhutianPlugin(Star):
                 f"查无此图纸或暂未开放：「{item_name}」。发「{CMD_FORGE_RECIPES}」查看。"
             )
             return
+        if doc.ext.get("occupation") != "炼器师":
+            yield event.plain_result("铜都不炼你还炼器？（图纸打造需炼器师职业）")
+            return
         forge_exp = int(doc.ext.get("forge_exp", 0))
-        lv = alchemy.level_of(forge_exp)
         occ_lv, occ_exp = self._ensure_occ(doc)
+        lv = alchemy.level_of(forge_exp)
         inv = await self.db.get_inventory(doc.uid)
         lacking = alchemy.missing_materials(recipe, inv)
         if lacking:
@@ -17940,15 +17943,14 @@ class ZhutianPlugin(Star):
             return
         import random as _random
         rng = _random.Random(f"{doc.uid}:{item_name}:{time.time()}")
-        # 对齐原版 lianqi：成功率 = 图纸 rate × (1 + 职业等级加成)，≥24 级 0.8 封顶
-        is_forger = doc.ext.get("occupation") == "炼器师"
-        suc = min(0.99, occupation.forge_rate(
-            float(recipe.get("rate", 1) or 1), occ_lv if is_forger else 0, self.occ_exp_table
-        ) + mingge.bonus(doc, "炼器成功率"))     # 命格（W4-2）
+        # 对齐原版 lianqi：图纸 rate × (1 + 职业等级加成) × (1 + 命格「炼器成功率」)，
+        # ≥24 级 0.8 封顶，clamp [0.01, 0.95]（乘区在夹取之前）
+        suc = occupation.forge_rate(
+            float(recipe.get("rate", 1) or 1), occ_lv, self.occ_exp_table
+        )
+        suc = max(0.01, min(0.95, suc * (1 + mingge.bonus(doc, "炼器成功率"))))
         mats_txt = "、".join(f"{m['name']}×{m['amount']}" for m in recipe["materials"])
         d = doc.model_copy(deep=True)
-        d.ext["forge_exp"] = forge_exp
-        new_exp = forge_exp
         if rng.random() > suc:
             async with self.db.transaction():
                 await self.db.save_player(d.model_dump())
@@ -17960,22 +17962,27 @@ class ZhutianPlugin(Star):
             yield event.plain_result(f"消耗 {mats_txt}。{flavor}（成功率 {suc:.0%}）")
             return
         pinji = occupation.forge_pinji(rng)
+        # 命格「炼制装备加成」：原版乘装备数值（本移植无 per-instance 属性模型），
+        # 以品级上调折算（shortcut 见 core/duanzao.py 文档）
+        craft_mult = 1 + mingge.bonus(doc, "炼制装备加成")
+        pinji = min(6, pinji + max(0, int((craft_mult - 1) * 4)))
         async with self.db.transaction():
             await self.db.save_player(d.model_dump())
             for m in recipe["materials"]:
                 if not await self.db.remove_item(doc.uid, str(m["name"]), int(m["amount"])):
                     raise RuntimeError("INSUFFICIENT")
             await self.db.add_items(doc.uid, {recipe["name"]: 1})
-        gain_exp = int((recipe.get("exp") or [0, 0])[0])
-        if is_forger:
-            nlv, nexp = occupation.add_exp(occ_lv, occ_exp, gain_exp, self.occ_exp_table)
-            d.ext["occupation_level"] = nlv
-            d.ext["occupation_exp"] = nexp
-            await self.db.save_player(d.model_dump())
+        gain_exp = int(float((recipe.get("exp") or [0, 0])[0])
+                       * (1 + mingge.bonus(doc, "锻造经验加成")))
+        nlv, nexp = occupation.add_exp(occ_lv, occ_exp, gain_exp, self.occ_exp_table)
+        d.ext["occupation_level"] = nlv
+        d.ext["occupation_exp"] = nexp
+        await self.db.save_player(d.model_dump())
+        top_note = "\n在你细致的把控下，一把绝世极品即将问世！！！！" if pinji > 5 else ""
         yield event.plain_result(
             f"消耗 {mats_txt}。打造成功，获得{item_name}"
             f"（品相：{occupation.PINJI_NAMES[pinji]}）×1｜成功率 {suc:.0%}"
-            + (f"，炼器师经验 +{gain_exp}" if is_forger else "")
+            f"，炼器经验 +{gain_exp}{top_note}"
         )
 
     @filter.command(CMD_FORGE_LV, "锻造等级")

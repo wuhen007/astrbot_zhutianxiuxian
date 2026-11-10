@@ -8972,6 +8972,19 @@ async def main():
     assert "自动化·彩蛋" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
     print("W21-F1/F2 auto_task+eggs ok")
 
+    # ========================================================= W19-D：锻造图纸对齐审计
+    from core import occupation as occ210
+
+    assert abs(occ210.forge_rate(0.4, 0, []) - 0.4) < 1e-9
+    assert "铜都不炼你还炼器" in src230, "图纸打造需炼器师门槛"
+    assert '"炼制装备加成"' in src230 and '"锻造经验加成"' in src230, "命格乘区缺失"
+    assert "min(0.99, occupation.forge_rate" not in src230, "锻造成功率双重夹取应去除"
+    # forge_rate 与原版公式等价：rate×(1+等级加成)，≥24 级 0.8，clamp[0.01,0.95]
+    assert abs(occ210.forge_rate(0.4, 0, []) - 0.4) < 1e-9
+    assert occ210.forge_rate(0.4, 24, []) == 0.8
+    assert occ210.forge_rate(5.0, 0, []) == 0.95
+    print("W19-D forge parity ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 
