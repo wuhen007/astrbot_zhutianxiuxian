@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_story as rs_mod, plane_events as pe_mod, games_mini as gm_mod, xtzb_birth as xb_mod, auto_task as at_mod, easter_eggs as eg_mod, plane_relay as pr_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_story as rs_mod, plane_events as pe_mod, games_mini as gm_mod, xtzb_birth as xb_mod, auto_task as at_mod, easter_eggs as eg_mod, plane_relay as pr_mod, sect_extra as se_mod, assistant as as_mod, bounty as bt_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -871,6 +871,19 @@ CMD_TJ_ACCEPT = "#接受求饶"
 CMD_TJ_REJECT = "#拒绝求饶"
 CMD_TJ_SOUL = "#搜魂天骄"
 CMD_TJ_SLAY = "#灭杀天骄"
+# W23-F1：宗门深层补全（神兽 / 药园）
+CMD_SEC_BEAST = "#召唤神兽"
+CMD_SEC_BLESS = "#神兽赐福"
+CMD_SEC_GARDEN = "#药园"
+CMD_SEC_PLANT = "#药园栽种"
+CMD_SEC_HARVEST = "#药园收获"
+CMD_SEC_UPROOT = "#拔苗助长"
+# W24-F1/F2：面板周边 + 悬赏 + 传闻
+CMD_ASST = "#修仙助手"
+CMD_BG_LIST = "#悬赏目标"
+CMD_BG_KILL = "#刺杀目标"
+CMD_BG_RUMOR = "#江湖传闻"
+CMD_STYLE_TOGGLE = "#切换练气排版"
 # W18-F1：金银坊（媚娘的赌坊）
 CMD_GMF = "#金银坊"
 # W8-B1b：至尊线（至尊骨 / 斩骨涅槃 / 舍骨入血 / 试炼 / 仙骨 / 重瞳 / 瞳骨合一）
@@ -21035,6 +21048,190 @@ class ZhutianPlugin(Star):
             for g, q in (items or {}).items():
                 await self.db.add_items(doc.uid, {g: q})
         yield event.plain_result(msg)
+
+    # ------------------------------------------------ W23-F1：宗门深层补全
+
+    async def _sec_garden_flush(self, event, doc: PlayerDoc, name: str,
+                                row: dict, s: dict, cal: dict,
+                                delta: dict[str, int] | None = None):
+        sec_mod.commit(cal, name, s)
+        async with self.db.transaction():
+            await self.db.save_calamity(cal)
+            await self.db.save_player(doc.model_dump())
+            for g, q in (delta or {}).items():
+                if q > 0:
+                    await self.db.add_items(doc.uid, {g: q})
+
+    @filter.command(CMD_SEC_BEAST, "召唤神兽：宗门等级≥5+基金5万")
+    async def handle_sec_beast(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, row, s, cal, prefix, err = await self._sec_open(event, master_only=True)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, nf = se_mod.summon_beast(doc, s, row["fund"], row["level"],
+                                          time.time(), random.Random(
+                                              f"{doc.uid}:beast:{int(time.time())}"))
+        if ok:
+            await self._sec_flush(doc.ext["sect"], row, s, cal, fund_delta=-se_mod.BEAST_COST,
+                                  player=doc)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_SEC_BLESS, "神兽赐福：每日一次，基金1万")
+    async def handle_sec_bless(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, row, s, cal, prefix, err = await self._sec_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, delta, nf = se_mod.beast_bless(doc, s, row["fund"], time.time(),
+                                                random.Random(f"{doc.uid}:bless:{int(time.time())}"))
+        if ok:
+            await self._sec_flush(doc.ext["sect"], row, s, cal,
+                                  fund_delta=-se_mod.BLESS_COST, player=doc)
+            for g, q in (delta or {}).items():
+                if q > 0:
+                    await self.db.add_items(doc.uid, {g: q})
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_SEC_GARDEN, "药园总览")
+    async def handle_sec_garden(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        _doc, row, s, _cal, _prefix, err = await self._sec_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result(se_mod.garden_text(s, time.time()))
+
+    @filter.command(CMD_SEC_PLANT, "药园栽种 地块编号 药名")
+    async def handle_sec_plant(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        _doc, row, s, cal, _prefix, err = await self._sec_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        parts = (arg or "").strip().split(maxsplit=1)
+        if len(parts) < 2 or not parts[0].isdigit():
+            yield event.plain_result(f"用法：{CMD_SEC_PLANT} 地块编号 药名（如 {CMD_SEC_PLANT} 0 万年凝血草）")
+            return
+        ok, msg = se_mod.plant(doc, s, int(parts[0]), parts[1], time.time())
+        await self._sec_garden_flush(event, doc, doc.ext["sect"], row, s, cal)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_SEC_HARVEST, "药园收获 地块编号")
+    async def handle_sec_harvest(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        _doc, row, s, cal, _prefix, err = await self._sec_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        slot = int(arg) if arg.strip().isdigit() else -1
+        ok, msg, delta = se_mod.harvest(doc, s, slot, time.time(),
+                                        random.Random(f"{doc.uid}:herb:{int(time.time())}"))
+        await self._sec_garden_flush(event, doc, doc.ext["sect"], row, s, cal, delta)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_SEC_UPROOT, "拔苗助长 地块编号（30%品质惩罚）")
+    async def handle_sec_uproot(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        _doc, row, s, cal, _prefix, err = await self._sec_open(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        slot = int(arg) if arg.strip().isdigit() else -1
+        ok, msg, delta = se_mod.uproot(doc, s, slot, time.time(),
+                                       random.Random(f"{doc.uid}:uproot:{int(time.time())}"))
+        await self._sec_garden_flush(event, doc, doc.ext["sect"], row, s, cal, delta)
+        yield event.plain_result(msg)
+
+    # ------------------------------------------------ W24-F1/F2：面板周边 + 悬赏
+
+    @filter.command(CMD_ASST, "修仙助手：按进度输出阶段建议")
+    async def handle_asst(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        era_s = await self._era_state()
+        era_name = str(era_s.get("name") or "天命时代")
+        extra = ""
+        for sys_key, sys_label in (("daolu", "秘境"), ("xian_gu", "仙古"), ("flower", "花粉")):
+            if doc.ext.get(sys_key):
+                extra = sys_label
+                break
+        text = as_mod.advice(doc, era_name, extra)
+        async for r in self._smart(event, text, "修仙助手"):
+            yield r
+
+    @filter.command(CMD_BG_LIST, "悬赏榜（今日 3 名，24h 刷新）")
+    async def handle_bg_list(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        text, _pool = bt_mod.bounty_text(doc, time.strftime("%Y%m%d"),
+                                         int(time.time()) // 3600 % 24)
+        yield event.plain_result(text)
+
+    @filter.command(CMD_BG_KILL, "刺杀目标 名字（侠客+侠客令×1）")
+    async def handle_bg_kill(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        ok, msg, delta = bt_mod.assassinate(doc, inv, name, time.strftime("%Y%m%d"),
+                                            int(time.time()) // 3600 % 24, time.time(),
+                                            random.Random(f"{doc.uid}:assn:{int(time.time())}"))
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            for g, q in (delta or {}).items():
+                if q < 0:
+                    await self.db.remove_item(doc.uid, g, -q)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_BG_RUMOR, "江湖传闻（每日随机 3 条）")
+    async def handle_bg_rumor(self, event: AstrMessageEvent):
+        yield event.plain_result(bt_mod.rumors_text(
+            time.strftime("%Y%m%d"), time.strftime("%Y%m%d")))
+
+    @filter.command(CMD_STYLE_TOGGLE, "切换练气排版（1/2/3）")
+    async def handle_style_toggle(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        cur = int(doc.ext.get("style_layout", 1) or 1)
+        doc.ext["style_layout"] = cur % 3 + 1
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(f"练气排版已切换为第 {doc.ext['style_layout']} 套。")
 
     # ------------------------------------------------ W21-F1/F2：自动化 + 彩蛋
 

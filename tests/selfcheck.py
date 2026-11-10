@@ -9070,6 +9070,79 @@ async def main():
     assert "位面中转" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
     print("W22-F1/F2 plane_relay+tianjiao处置 ok")
 
+    # ========================================================= W23/W24：宗门深层补全 + 面板周边 + 悬赏
+    from core import sect_extra as se250, assistant as as250, bounty as bt250
+
+    # —— 神兽：门槛 / 重复 / 赐福
+    d250 = PlayerDoc(uid="u250", name="宗主", realm_index=25, stones=0,
+                     ext={"xueqi": 100, "potential": 0, "shouyuan": 100, "hp": 1,
+                          "sect": "天衍宗"})
+    s250: dict = {}
+    ok250, msg250, _ = se250.summon_beast(d250, s250, 30_000, 3, time.time(), _Lucky60())
+    assert not ok250 and "等级" in msg250, msg250
+    ok250, msg250, nf250 = se250.summon_beast(d250, s250, 60_000, 5, time.time(), _Lucky60())
+    assert ok250 and "神兽降世" in msg250, msg250
+    assert s250["beast"] in se250.BEASTS and nf250 == 10_000
+    ok250, msg250, _ = se250.summon_beast(d250, s250, 60_000, 5, time.time(), _Lucky60())
+    assert not ok250 and "已有" in msg250, msg250
+    ok250, msg250, dl250, nf250 = se250.beast_bless(d250, s250, 10_000, time.time(), _Lucky60())
+    assert ok250 and "赐福" in msg250, msg250
+    ok250, msg250, _, _ = se250.beast_bless(d250, s250, 10_000, time.time(), _Lucky60())
+    assert not ok250 and "沉睡" in msg250, msg250
+
+    # —— 药园：栽种 / 收获 / 拔苗 / 总览
+    ok250, msg250 = se250.plant(d250, s250, 0, "万年凝血草", time.time())
+    assert ok250, msg250
+    ok250, msg250 = se250.plant(d250, s250, 0, "万年何首乌", time.time())
+    assert not ok250 and "已有作物" in msg250, msg250
+    ok250, msg250 = se250.harvest(d250, s250, 0, time.time(), _Lucky60())
+    assert not ok250 and "小时" in msg250, msg250              # 未成熟
+    ok250, msg250, dl250 = se250.uproot(d250, s250, 0, time.time(), _Lucky60())
+    assert ok250, msg250                                       # Lucky 0.01 < 0.70
+    ok250, msg250 = se250.plant(d250, s250, 1, "万年何首乌", time.time() - 9 * 3600)
+    ok250, msg250, dl250 = se250.harvest(d250, s250, 1, time.time(), _Lucky60())
+    assert ok250 and dl250, msg250                             # 9h > 8h 成熟
+    assert "药园" in se250.garden_text(s250, time.time())
+
+    # —— 修仙助手：各阶段建议
+    d251 = PlayerDoc(uid="u251", name="萌新", realm_index=3, ext={"xueqi": 100, "shouyuan": 99})
+    text251 = as250.advice(d251)
+    assert "每日" in text251 and "修仙助手" in text251
+    d252 = PlayerDoc(uid="u252", name="大能", realm_index=39, ext={"xueqi": 100, "shouyuan": 9999, "power": 0})
+    text252 = as250.advice(d252, "神话时代")
+    assert "渡劫" in text252 and "神话" in text252, text252
+
+    # —— 悬赏 / 江湖传闻
+    text250b, pool250b = bt250.bounty_text(d250, "20261111", 3)
+    assert "悬赏榜" in text250b and len(pool250b) == 3, text250b
+    pool250 = bt250.bounty_pool("u250", "20261111", 25)
+    assert len(pool250) == 3
+    bname250 = pool250[0]["name"]
+    d250.ext["occupation"] = "侠客"
+    ok250, msg250, _ = bt250.assassinate(d250, {"侠客令": 0}, bname250, "20261111", 3,
+                                         time.time(), _Lucky60())
+    assert not ok250 and "侠客令" in msg250, msg250
+    d250.ext["occupation"] = "侠客"
+    ok250, msg250, _ = bt250.assassinate(d250, {"侠客令": 1}, bname250, "20261111", 3,
+                                         time.time(), _Lucky60())
+    assert ok250 and "刺杀" in msg250, msg250
+    assert "江湖传闻" in bt250.rumors_text("20261111")
+
+    # main.py 接线
+    src250 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    names250 = ["CMD_SEC_BEAST", "CMD_SEC_BLESS", "CMD_SEC_GARDEN", "CMD_SEC_PLANT",
+                "CMD_SEC_HARVEST", "CMD_SEC_UPROOT", "CMD_ASST", "CMD_BG_LIST",
+                "CMD_BG_KILL", "CMD_BG_RUMOR", "CMD_STYLE_TOGGLE"]
+    miss250 = [c for c in names250 if f"@filter.command({c}" not in src250]
+    assert miss250 == [], f"漏注册：{miss250}"
+    assert "se_mod.summon_beast(" in src250 and "bt_mod.assassinate(" in src250
+    assert "as_mod.advice(" in src250
+    help250d = _json60.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
+    assert any(g["group"] == "宗门深层 · 神兽与药园" for g in help250d)
+    assert any(g["group"] == "面板周边 · 修仙助手与悬赏" for g in help250d)
+    assert "宗门深层" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
+    print("W23/W24 sect_extra+assistant+bounty ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 
