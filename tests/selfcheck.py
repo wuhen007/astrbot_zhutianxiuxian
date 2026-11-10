@@ -8907,6 +8907,71 @@ async def main():
     assert "至宝出世" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
     print("W20-F1 xtzb_birth ok")
 
+    # ========================================================= W21-F1/F2：自动化 + 彩蛋
+    from core import auto_task as at230, easter_eggs as eg230
+
+    d230 = PlayerDoc(uid="u230", name="修仙人", realm_index=25, exp=0, stones=100_000,
+                     ext={"xueqi": 100, "potential": 0, "shouyuan": 100, "hp": 100.0})
+    ok230, msg230 = at230.set_enabled(d230, True, time.time(), False)
+    assert not ok230 and "道法仙术" in msg230, msg230       # 未开卡不得开启
+    # 模拟开卡后
+    try:
+        import daofa as _df_unused  # noqa
+    except Exception:
+        pass
+    ok230, msg230 = at230.set_enabled(d230, True, time.time(), True)
+    assert ok230 and "开启" in msg230, msg230
+    d230.ext["daofaxianshu"] = 2                           # 注入道法仙术卡（FLAG 态）
+    d230.ext["daofaxianshu_endtime"] = (time.time() + 30 * 86400) * 1000
+    # run_if_due：签到手感依赖 cultivate.sign_in——离线直接断言幂等与记录
+    lines230, items230, d230 = at230.run_if_due(
+        d230, time.time(), _Lucky60(), 100, 500, 1.0, 0.0)
+    assert lines230, "首次应产生补领记录"
+    day230 = sorted(at230.state_of(d230)["log"])[-1]
+    lines230b, items230b, d230 = at230.run_if_due(
+        d230, time.time() + 5, _Lucky60(), 100, 500, 1.0, 0.0)
+    assert lines230b == [] and items230b == {}, "同日不重复补领"
+    assert "签到记录" in at230.record_text(d230)
+    # 兑换码
+    rows230 = [{"code": "ZHUTIAN2026", "name": "霜月贺礼",
+                "items": {"洗根水": 5, "秘境之匙": 10}, "stones": 66666}]
+    ok230, msg230, it230, st230 = at230.redeem(d230, rows230, "zhutian2026", time.time())
+    assert ok230 and it230.get("洗根水") == 5 and st230 == 66666, msg230
+    ok230, msg230, _, _ = at230.redeem(d230, rows230, "ZHUTIAN2026", time.time())
+    assert not ok230 and "已经兑换" in msg230, msg230
+    ok230, msg230, _, _ = at230.redeem(d230, rows230, "不存在码", time.time())
+    assert not ok230 and "无效" in msg230, msg230
+    assert "ZHUT****2026" in at230.redeem_list(rows230) or "ZH****26" in at230.redeem_list(rows230)
+    # 彩蛋
+    ok230, msg230 = eg230.da_zhuang(d230, time.time(), _Lucky60())
+    assert ok230 and "打桩" in msg230, msg230
+    ok230, msg230 = eg230.da_zhuang(d230, time.time(), _Lucky60())
+    assert not ok230 and "分钟" in msg230, msg230           # CD
+    ok230, msg230 = eg230.yihongyuan(d230, time.time(), _Lucky60())
+    assert ok230 and "怡红院" in msg230, msg230
+    d231 = PlayerDoc(uid="u231", name="被抓", realm_index=20,
+                     ext={"xueqi": 100, "potential": 0, "shouyuan": 100, "hp": 100.0})
+    inv231 = {"灵石": 5, "洗根水": 2, "秘书": 0}
+    ok230, msg230, item230, qty230 = eg230.steal(d230, inv231, time.time(), _Lucky60())
+    assert ok230, msg230
+    for _ in range(3):
+        eg230.steal(d230, inv231, time.time(), _Lucky60())
+    ok230, msg230, _, _ = eg230.steal(d230, inv231, time.time(), _Lucky60())
+    assert not ok230 and "明日" in msg230, msg230           # 每日 3 次上限
+
+    src230 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    names230 = ["CMD_AT_ON", "CMD_AT_OFF", "CMD_AT_STATUS", "CMD_AT_RECORD",
+                "CMD_REDEEM_LIST", "CMD_REDEEM", "CMD_EG_ZHUANG", "CMD_EG_YIHONG",
+                "CMD_EG_STEAL", "CMD_AC_QL", "CMD_AC_QH"]
+    miss230 = [c for c in names230 if f"@filter.command({c}" not in src230]
+    assert miss230 == [], f"漏注册：{miss230}"
+    assert "at_mod.run_if_due(" in src230, "_require_player 需挂钩惰性补领"
+    assert "eg_mod.steal(" in src230 and "_pl_lock(target_id)" in src230
+    help230c = _json60.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
+    assert any(g["group"] == "自动化 · 兑换码 · 彩蛋" for g in help230c)
+    assert "自动化·彩蛋" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
+    print("W21-F1/F2 auto_task+eggs ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

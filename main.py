@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_story as rs_mod, plane_events as pe_mod, games_mini as gm_mod, xtzb_birth as xb_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_story as rs_mod, plane_events as pe_mod, games_mini as gm_mod, xtzb_birth as xb_mod, auto_task as at_mod, easter_eggs as eg_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -847,6 +847,18 @@ CMD_XB_T3 = "#护持天地灵脉"
 CMD_XB_T4 = "#跃入命运乱流"
 CMD_XB_VOW = "#立下道心"
 CMD_XB_BOARD = "#灵宝择主榜"
+# W21-F1/F2：自动化 + 彩蛋
+CMD_AT_ON = "#开启自动任务"
+CMD_AT_OFF = "#关闭自动任务"
+CMD_AT_STATUS = "#自动任务状态"
+CMD_AT_RECORD = "#签到记录"
+CMD_REDEEM_LIST = "#兑换码图鉴"
+CMD_REDEEM = "#兑换码兑换"
+CMD_EG_ZHUANG = "#打桩"
+CMD_EG_YIHONG = "#怡红院"
+CMD_EG_STEAL = "#偷取纳戒"
+CMD_AC_QL = "#遣龙"
+CMD_AC_QH = "#遣虎"
 # W18-F1：金银坊（媚娘的赌坊）
 CMD_GMF = "#金银坊"
 # W8-B1b：至尊线（至尊骨 / 斩骨涅槃 / 舍骨入血 / 试炼 / 仙骨 / 重瞳 / 瞳骨合一）
@@ -1374,6 +1386,17 @@ class ZhutianPlugin(Star):
             await self.db.save_player(doc.model_dump())
             await self._drop_legacy_ring(doc, now)     # W8-A4：转世留下遗落纳戒
             return None, resolved
+        try:                                            # W21-F1：自动任务惰性补领
+            at_lines, at_items, doc = at_mod.run_if_due(
+                doc, now, random.Random(f"{uid}:at:{int(now)}"),
+                int(self._val("SIGN_REWARD_MIN", 100)),
+                int(self._val("SIGN_REWARD_MAX", 500)),
+                float(mingge.multiplier(doc, "签到奖励倍率") or 1.0),
+                float((daofa.card_bonus(doc, now) or {}).get("sign", 0) or 0))
+            for _atk, _atv in at_items.items():
+                await self.db.add_items(doc.uid, {_atk: int(_atv)})
+        except Exception:
+            pass
         return doc, None
 
     SMART_TEXT_LIMIT = 200
@@ -20814,6 +20837,183 @@ class ZhutianPlugin(Star):
         ok, out = await self._xb_span(event, "", "board")
         if out:
             yield event.plain_result(out)
+
+    # ------------------------------------------------ W21-F1/F2：自动化 + 彩蛋
+
+    @filter.command(CMD_AT_ON, "开启自动任务（道法仙术专享）")
+    async def handle_at_on(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = at_mod.set_enabled(doc, True, time.time(),
+                                     daofa.active(doc, time.time()))
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_AT_OFF, "关闭自动任务")
+    async def handle_at_off(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = at_mod.set_enabled(doc, False, time.time(), False)
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_AT_STATUS, "自动任务状态与近 7 天补领")
+    async def handle_at_status(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result(at_mod.record_text(doc))
+
+    @filter.command(CMD_AT_RECORD, "签到记录（同自动任务状态）")
+    async def handle_at_record(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result(at_mod.record_text(doc))
+
+    @filter.command(CMD_REDEEM_LIST, "兑换码图鉴（码打码显示）")
+    async def handle_redeem_list(self, event: AstrMessageEvent):
+        yield event.plain_result(at_mod.redeem_list(self.content.table("item/兑换码", [])))
+
+    @filter.command(CMD_REDEEM, "兑换码兑换 完整码（每人每码一次）")
+    async def handle_redeem(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg, items, stones = at_mod.redeem(
+            doc, self.content.table("item/兑换码", []), arg, time.time())
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            for name, qty in (items or {}).items():
+                if qty > 0:
+                    await self.db.add_items(doc.uid, {name: int(qty)})
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_EG_ZHUANG, "打桩（10分钟CD，两成概率打赏）")
+    async def handle_eg_zhuang(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = eg_mod.da_zhuang(doc, time.time(),
+                                   random.Random(f"{doc.uid}:zhuang:{int(time.time())}"))
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_EG_YIHONG, "怡红院（5000灵石彩蛋消费）")
+    async def handle_eg_yihong(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = eg_mod.yihongyuan(doc, time.time(),
+                                    random.Random(f"{doc.uid}:yh:{int(time.time())}"))
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_EG_STEAL, "偷取纳戒 @目标（35%得手，每日3次）")
+    async def handle_eg_steal(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        target_id = self._at_target(event)
+        if not target_id:
+            yield event.plain_result("用法：#偷取纳戒 @目标（每日 3 次）")
+            return
+        if str(target_id) == str(doc.uid):
+            yield event.plain_result("自己偷自己？纳戒里还有你的自拍。")
+            return
+        err_tx = ""
+        async with self._pl_lock(target_id):                 # 目标档读写串行
+            raw = await self.db.get_player(target_id)
+            if raw is None:
+                err_tx = "对方尚未踏入仙途。"
+            else:
+                foe = PlayerDoc(**raw)
+                foe_inv = await self.db.get_inventory(foe.uid)
+                ok, msg, item, qty = eg_mod.steal(
+                    doc, foe_inv, time.time(),
+                    random.Random(f"{doc.uid}:steal:{int(time.time())}"))
+                async with self.db.transaction():
+                    await self.db.save_player(doc.model_dump())
+                    await self.db.save_player(foe.model_dump())
+                    if item and qty:
+                        await self.db.remove_item(foe.uid, item, qty)
+                        await self.db.add_items(doc.uid, {item: qty})
+        if err_tx:
+            yield event.plain_result(err_tx)
+            return
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_AC_QL, "遣龙 [数量]：消耗遣龙令抽周年奖池")
+    async def handle_ac_ql(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        times = int(arg) if str(arg or "").strip().isdigit() else 1
+        ok, msg, delta = ac_mod.qianlong(doc, "遣龙", times, inv, time.time(),
+                                         random.Random(f"{doc.uid}:ql:{int(time.time())}"))
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            for name, qty in (delta or {}).items():
+                if qty > 0:
+                    await self.db.add_items(doc.uid, {name: qty})
+                elif qty < 0:
+                    await self.db.remove_item(doc.uid, name, -qty)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_AC_QH, "遣虎 [数量]：消耗遣虎令抽周年奖池")
+    async def handle_ac_qh(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        times = int(arg) if str(arg or "").strip().isdigit() else 1
+        ok, msg, delta = ac_mod.qianlong(doc, "遣虎", times, inv, time.time(),
+                                         random.Random(f"{doc.uid}:qh:{int(time.time())}"))
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            for name, qty in (delta or {}).items():
+                if qty > 0:
+                    await self.db.add_items(doc.uid, {name: qty})
+                elif qty < 0:
+                    await self.db.remove_item(doc.uid, name, -qty)
+        yield event.plain_result(msg)
 
     @filter.command(CMD_DZ_GUARD, "护法")
     async def handle_dz_guard(self, event: AstrMessageEvent, arg: str = ""):

@@ -170,6 +170,44 @@ def anniversary_sign(doc: PlayerDoc, now: float | None = None,
                   + "、".join(f"{p}×{delta[p]}" for p in delta)), delta
 
 
+def qianlong(doc: PlayerDoc, kind: str, times: int, inv: Mapping[str, int],
+             now: float | None = None, rng: random.Random | None = None,
+             ) -> tuple[bool, str, dict[str, int]]:
+    """#遣龙 / #遣虎 [数量]：消耗对应令牌抽周年奖池（1 或 10 连）。"""
+    now = time.time() if now is None else float(now)
+    rng = rng or random.Random()
+    times = max(1, min(10, int(times or 1)))
+    token = "遣龙令" if kind == "遣龙" else "遣虎令"
+    if int((inv or {}).get(token, 0) or 0) < times:
+        return False, f"周年签到可得【{token}】——现有 {int((inv or {}).get(token, 0) or 0)}/{times}。", {}
+    delta = {token: -times}
+    lines: list[str] = []
+    stones = 0
+    pool: tuple[tuple[str, int], ...] = (
+        ("灵石袋", 30), ("秘境之匙", 22), ("幸运草", 18),
+        ("轮回命签", 12), ("洗根水", 8), ("真我宝盒", 2),
+    )
+    for _ in range(times):
+        roll = rng.random() * 100
+        acc = 0.0
+        picked, stones_gain = "灵石袋", 8_000
+        for name, w in pool:
+            acc += w
+            if roll <= acc:
+                picked = name
+                break
+        if picked == "灵石袋":
+            stones_gain = rng.randint(5_000, 30_000)
+            stones += stones_gain
+            lines.append(f"· 灵石 +{stones_gain:,}")
+        else:
+            delta[picked] = delta.get(picked, 0) + 1
+            lines.append(f"· 【{picked}】×1")
+    doc.stones = int(getattr(doc, "stones", 0) or 0) + stones
+    return True, (f"【{kind} ×{times}】令牌化虹——\n" + "\n".join(lines)
+                  + (f"\n灵石合计 +{stones:,}" if stones else "")), delta
+
+
 def panel(doc: Any) -> str:
     st = state_of(doc)
     return "\n".join([
