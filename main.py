@@ -4114,7 +4114,9 @@ class ZhutianPlugin(Star):
                 await self.db.save_player(doc.model_dump())
                 if items:
                     await self.db.add_items(doc.uid, items)
-        yield event.plain_result(text)
+        # 长帮助页走 Playwright 出图（与 #修仙帮助 主页一致），短文本回退原文
+        async for r in self._smart(event, text, cmd.lstrip("#") or "帮助"):
+            yield r
 
     # ---- W6-2：法身四分支（时间长河 / 界海 / 圣墟 / 镇守） ----
 
