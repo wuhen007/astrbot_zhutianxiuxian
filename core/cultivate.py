@@ -163,6 +163,78 @@ def end_cultivate(
     ), d
 
 
+# ---------------------------------------------------------------- 降妖（原版 PlayerControl.Dagong / endWork）
+
+WORK_PERIOD = 15           # 原版 config work.time：15 分钟一档
+WORK_CYCLES = 48           # 原版 config work.cycle：最多 48 档 → 上限 720 分钟
+WORK_DEFAULT_MINUTES = 30  # 原版未带时长时默认 30 分钟
+WORK_MIN_HP = 200          # 原版当前血量 < 200 拒绝降妖
+
+
+def start_work(doc: PlayerDoc, minutes: int | None) -> tuple[bool, str, PlayerDoc]:
+    """降妖：时长按 15 分钟一档向下取整（原版 Dagong：15×48 档，未带时长默认 30 分钟）。"""
+    if doc.state != "空闲":
+        return False, f"道友正在「{doc.state}」中，无法分心降妖。", doc
+
+    t = WORK_DEFAULT_MINUTES if minutes is None else max(1, int(minutes))
+    for i in range(WORK_CYCLES, 0, -1):
+        if t >= WORK_PERIOD * i:
+            t = WORK_PERIOD * i
+            break
+    else:
+        t = WORK_PERIOD
+
+    d = doc.model_copy(deep=True)
+    d.state = "降妖中"
+    d.state_start = time.time()
+    d.ext["work_minutes"] = t
+    return True, f"现在开始降妖{t}分钟，完成后发「#降妖归来」结算。", d
+
+
+def end_work(
+    doc: PlayerDoc,
+    now: float,
+    stones_per_min: int,
+    period_minutes: int = WORK_PERIOD,
+) -> tuple[bool, str, PlayerDoc]:
+    """降妖归来：惰性结算，分钟数按 15 分钟一档向下取整，不足一档无收益。
+
+    对齐原版 dagong_jiesuan：每分钟灵石 = work.size × 境界id × 效率乘区 × 0.5，
+    结算分钟 = min(实际经过, 计划时长, 720)。stones_per_min 由 handler 传入。
+    """
+    if doc.state != "降妖中":
+        return False, "道友并未降妖，何谈归来？", doc
+
+    d = doc.model_copy(deep=True)
+    elapsed = max(0.0, (now - d.state_start) / 60)
+    counted = min(elapsed, float(WORK_PERIOD * WORK_CYCLES))
+    planned = d.ext.pop("work_minutes", None)
+    if planned:
+        counted = min(counted, float(planned))
+    d.state = "空闲"
+    d.state_start = 0.0
+
+    floored = int(counted // period_minutes) * period_minutes if period_minutes > 0 else int(counted)
+    if floored < period_minutes:
+        return True, "降妖不足一个周期（15 分钟），妖物四散，空手而归。", d
+
+    gained = int(floored * stones_per_min)
+    # W8-C2 先天至宝：收益倍率 / 计时缩短（对齐出关结算的处理）
+    try:
+        from . import xtzb as _xt
+        xt_mult = max(_xt.yield_mult(d, "cultivate"), 1.0 / max(0.3, _xt.time_mult(d)))
+        if xt_mult > 1:
+            gained = int(gained * xt_mult)
+    except Exception:
+        pass
+    d.stones += gained
+    tail = "（已到计划时长，按计划结算）" if planned and elapsed > planned else ""
+    return True, (
+        f"降妖归来（{int(elapsed)} 分钟，计 {floored} 分钟）：灵石 +{gained:,}{tail}。\n"
+        f"当前家底：{d.stones:,} 灵石"
+    ), d
+
+
 def breakthrough(
     doc: PlayerDoc,
     level_table: list[dict],
