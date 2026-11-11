@@ -9545,6 +9545,182 @@ async def main():
     assert "仙古秘境·NPC与阵营" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
     print("W26 xiangu NPC+阵营+擂台 ok")
 
+    # ========================================================= W27：道种神火 + 祭炼真我 + 仙遗宝地
+    from core import xiangu_dao as xdd280, xiangu_baodi as xbd280
+
+    class _Win280:
+        """首掷不打断、次掷必成。"""
+        def __init__(self):
+            self.calls = 0
+        def random(self):
+            self.calls += 1
+            return 0.01 if self.calls > 1 else 0.99
+        def uniform(self, a, b):
+            return b
+
+    class _Lucky280:
+        def random(self):
+            return 0.01
+        def uniform(self, a, b):
+            return b
+
+    # —— 借助道种融合（核心区域）→ 神火点燃
+    d280 = PlayerDoc(uid="u280", name="尊者", realm_index=30, stones=0,
+                     ext={"xueqi": 200_000, "potential": 50, "hp": 500_000,
+                          "hp_max": 500_000, "exp": 100_000})
+    st280 = xgm260.state_of(d280)
+    st280["active"] = True
+    st280["map"] = xgm260.new_run_map("seed-D")
+    st280["map"]["fragment_id"] = xgm260.CORE_FRAGMENT
+    xgm260.bag_add_seed(st280["bag"], {"名称": "青鸾焰", "品质": "稀有",
+                                       "融合成功率": 0.7, "专属技能": "青鸾焚天"})
+    txt280, intent280 = xdd280.fusion_intent(d280, st280, "青鸾焰", xgm260.load_config(), 1000.0)
+    assert intent280 and "最终成功率" in txt280, txt280[:60]
+    txt280, _ = xdd280.fusion_confirm(d280, st280, _Win280(), 2000.0, xgm260.load_config())
+    sh280 = xdd280.shenhuo_of(st280)
+    assert sh280.get("已点燃") and sh280.get("神火品质") == "中品", txt280[:80]
+    assert xdd280.xianqi_count(st280) == 0, "非顶级仙种不修仙气"
+    # 已点燃再融 → 拒绝
+    xgm260.bag_add_seed(st280["bag"], {"名称": "玄冰魄", "品质": "稀有"})
+    txt280, _ = xdd280.fusion_intent(d280, st280, "玄冰魄", xgm260.load_config(), 3000.0)
+    assert "神火已燃" in txt280
+    # 神火境界钉高：主轨 30 → 推导 9，点燃后仍 9；主轨 20 → 8
+    d280.realm_index = 20
+    assert xdd280.xg_level_of(d280) == 8, "神火境钉高"
+    d280.realm_index = 30
+
+    # —— 精粹提纯（无仙气 → 极品补第一道）
+    st280["daohuo_jingcui"] = 2
+    ok280, txt280 = xdd280.refine_shenhuo(d280, st280)     # 中品 → 上品
+    assert ok280 and "上品" in txt280
+    ok280, txt280 = xdd280.refine_shenhuo(d280, st280)     # 上品 → 极品 → 补仙气
+    assert ok280 and xdd280.xianqi_count(st280) == 1, txt280
+
+    # —— 顶级仙种 → 极境 + 第一道仙气
+    d281 = PlayerDoc(uid="u281", name="天骄", realm_index=30,
+                     ext={"potential": 50, "hp": 100, "hp_max": 100})
+    st281 = xgm260.state_of(d281)
+    st281["active"] = True
+    st281["map"] = xgm260.new_run_map("seed-E")
+    st281["map"]["fragment_id"] = xgm260.CORE_FRAGMENT
+    xgm260.bag_add_seed(st281["bag"], {"名称": "世界树幼苗", "品质": "神话"})
+    txt280, intent280 = xdd280.fusion_intent(d281, st281, "世界树幼苗", xgm260.load_config(), 1000.0)
+    assert intent280
+    txt280, _ = xdd280.fusion_confirm(d281, st281, _Win280(), 2000.0, xgm260.load_config())
+    assert "道种极境" in txt280 and st281["shenhuo"].get("极境名称") == "神火极境·世界树幼苗"
+    assert xdd280.xianqi_count(st281) == 1, "顶级仙种修出第一道仙气"
+
+    # —— 苦修 / 服丹
+    d282 = PlayerDoc(uid="u282", name="散修", realm_index=20, exp=100_000,
+                     ext={"potential": 30, "hp": 100, "hp_max": 100, "xueqi": 100_000})
+    st282 = xgm260.state_of(d282)
+    st282["active"] = True
+    st282["map"] = xgm260.new_run_map("seed-F")
+    txt280, _ = xdd280.ignite_self(d282, st282, _Lucky280(), {})
+    assert "成功" in txt280 and st282["shenhuo"]["神火品质"] == "下品"
+    consumed280 = []
+    def _consume280(name, qty):
+        consumed280.append(name)
+        return True
+    d283 = PlayerDoc(uid="u283", name="丹修", realm_index=20,
+                     ext={"potential": 30, "hp": 100, "hp_max": 100, "exp": 0, "xueqi": 0})
+    st283 = xgm260.state_of(d283)
+    st283["active"] = True
+    st283["map"] = xgm260.new_run_map("seed-H")
+    txt280, _ = xdd280.ignite_medicine(d283, st283, "神火丹", _Lucky280(), _consume280)
+    assert consumed280 == ["神火丹"] and st283["shenhuo"]["神火品质"] == "中品"
+    txt280, _ = xdd280.ignite_medicine(d283, st283, "大力丸", _Lucky280(), _consume280)
+    assert "无法炼化" in txt280 or "已点燃" in txt280
+
+    # —— 祭炼真我：门槛 → 三千道火 → 唯一真火
+    d284 = PlayerDoc(uid="u284", name="极境", realm_index=30, exp=500_000,
+                     ext={"potential": 50, "hp": 900_000, "hp_max": 900_000, "xueqi": 500_000})
+    st284 = xgm260.state_of(d284)
+    st284["active"] = True
+    st284["map"] = xgm260.new_run_map("seed-G")
+    st284["map"]["fragment_id"] = "flame_abyss"
+    st284["gains"]["daoyun"] = 600
+    assert xdd280.jilian_gate(d284, st284) is None, "六极境+道韵+火道+本源全过"
+    txt280, ev280 = xdd280.tribulation_run(d284, st284, _Lucky280(), 1.0)
+    assert "天地共鸣" in txt280 and st284["shenhuo"]["神火品质"] == "唯一"
+    assert xdd280.xianqi_count(st284) == 1 and ev280.get("technique") == "草字剑诀"
+    assert int(st284["gains"]["daoyun"]) == 100, "道韵 -500"
+    # 道伤记账：反噬路径
+    # 原版成功率公式在门槛最低时即 100%（0.3+6×0.1+0.1），反噬仅发生于未满门槛
+    # 的防御性分支——直接以 realm_index=25（极境 1/6）调用结算函数触发。
+    d285 = PlayerDoc(uid="u285", name="反噬", realm_index=25, exp=500_000,
+                     ext={"potential": 50, "hp": 900_000, "hp_max": 900_000, "xueqi": 500_000})
+    st285 = xgm260.state_of(d285)
+    st285["active"] = True
+    st285["map"] = xgm260.new_run_map("seed-I")
+    st285["map"]["fragment_id"] = "flame_abyss"
+    st285["gains"]["daoyun"] = 600
+    class _Doom280:
+        def random(self):
+            return 0.99
+        def uniform(self, a, b):
+            return a
+    txt280, _ = xdd280.tribulation_run(d285, st285, _Doom280(), 1.0)
+    assert "道火反噬" in txt280 and not xdd280.shenhuo_of(st285).get("已点燃")
+    ds280 = (d285.ext.get("daoshang") or {})
+    assert float(ds280.get("wounds", 0) or 0) >= 1.0, "道伤 +1"
+    assert int(st285["daohuo_jingcui"]) == 1
+
+    # —— 冲关极境仙气分流（神火境）
+    ok280, txt280 = xdd280.charge_extreme_xianqi(d284, st284, _Lucky280())
+    assert ok280 and "第二道仙气已成" in txt280
+    ok280, txt280 = xdd280.charge_extreme_xianqi(d282, st282, _Lucky280())
+    assert ok280 and "仙气试炼" in txt280, "下品凡火未满三道同样分流仙气试炼"
+    d286 = PlayerDoc(uid="u286", name="未燃", realm_index=20, ext={"hp": 1, "hp_max": 1})
+    ok280, _ = xdd280.charge_extreme_xianqi(d286, xgm260.state_of(d286), _Lucky280())
+    assert not ok280, "未点燃神火不分流"
+
+    # —— 以身为种
+    assert "境界不足" in xdd280.yishenweizhong_text(d282)
+    d284.realm_index = 44                     # 仙古 11 境
+    assert "道路已明" in xdd280.yishenweizhong_text(d284)
+    d284.realm_index = 30
+
+    # —— 仙遗宝地：掉落 → 探索 → 收取 → 消散
+    world280: dict = {}
+    assert xbd280.drop_baodi(world280, "u287", "殒落老怪", 40, "遮天位面", {}) is None, "空库存不掉落"
+    b280 = xbd280.drop_baodi(world280, "u287", "殒落老怪", 40, "遮天位面",
+                             {"神源石": 5, "仙古真血": 2})
+    assert b280 and "仙遗宝地" in xbd280.list_text(world280)
+    txt280, bb280 = xbd280.explore(world280, d284, {}, 1, xgm260.seeded_rng("bd-280"),
+                                   1000.0, 10**9)
+    assert bb280 is not None, txt280[:40]
+    # 冷却
+    txt280, _ = xbd280.explore(world280, d284, {}, 1, xgm260.seeded_rng("bd2"), 2000.0, 10**9)
+    assert "调息" in txt280
+    # 收取（另一玩家）
+    d288 = PlayerDoc(uid="u288", name="拾荒", realm_index=10, ext={"hp": 1, "hp_max": 1})
+    ok280, txt280, items280 = xbd280.claim(world280, d288, 1, 3000.0)
+    assert ok280 and sum(items280.values()) > 0, txt280
+    # 战力不足路线（强制低战力探索新宝地）
+    world281: dict = {}
+    xbd280.drop_baodi(world281, "u289", "大能", 60, "九天十地", {"上品神源石": 4})
+    txt280, _ = xbd280.explore(world281, d288, {}, 1, _Doom280(), 1000.0, 1)
+    # _Doom280: roll 0.99 → 40% 无所获或守护分支；两条皆合法，只验证不崩
+    assert "仙遗宝地·探索" in txt280
+
+    # main.py 接线
+    src280 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    names280w = ["CMD_XGD_SHENHUO", "CMD_XGD_CONFIRM", "CMD_XGD_CANCEL", "CMD_XGD_IGNITE",
+                 "CMD_XGD_JILIAN", "CMD_XGD_YISHEN", "CMD_XGD_REFINE", "CMD_XBD_LIST",
+                 "CMD_XBD_EXPLORE", "CMD_XBD_CLAIM", "CMD_XBD_RULES"]
+    miss280 = [c for c in names280w if f"@filter.command({c}" not in src280]
+    assert miss280 == [], f"漏注册：{miss280}"
+    assert 'regex(r"^#借助(.+?)道种点燃神火$|^#借助(.+?)点燃神火$")' in src280
+    assert 'regex(r"^#服用(.+?)点燃神火$")' in src280
+    assert "xdd_mod.combat_mult(" in src280, "战斗回调需套神火/仙气乘区"
+    assert "charge_extreme_xianqi" in src280, "#冲关极境需仙气分流"
+    assert "_xg_baodi_drop(doc)" in src280, "寿元耗尽需掉落宝地"
+    help280c = _json60.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
+    assert any(g["group"] == "仙古秘境 · 道种神火与宝地" for g in help280c)
+    assert "仙遗宝地" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
+    print("W27 xiangu 道种神火+祭炼+宝地 ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

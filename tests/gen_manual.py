@@ -260,6 +260,12 @@ def main() -> int:
                         "handle_xgm_arena_join", "handle_xgm_pvp", "handle_xgm_infamy",
                         "handle_xgm_bounty", "handle_xgm_krank", "handle_xgn_mercy",
                         "handle_xgn_fish")),
+        ("仙古秘境·道种神火", ("handle_xgd_shenhuo", "handle_xgd_jiezhu",
+                        "handle_xgd_confirm", "handle_xgd_cancel", "handle_xgd_fuyong",
+                        "handle_xgd_ignite", "handle_xgd_jilian", "handle_xgd_yishen",
+                        "handle_xgd_refine")),
+        ("仙遗宝地", ("handle_xbd_list", "handle_xbd_explore", "handle_xbd_claim",
+                   "handle_xbd_rules")),
         ("帮助", ("handle_help",)),
     ]
     grouped = {}

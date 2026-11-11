@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_story as rs_mod, plane_events as pe_mod, games_mini as gm_mod, xtzb_birth as xb_mod, auto_task as at_mod, easter_eggs as eg_mod, plane_relay as pr_mod, sect_extra as se_mod, assistant as as_mod, bounty as bt_mod, xiangu as xgm_mod, xiangu_npc as xn_mod, xiangu_camp as xc_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_story as rs_mod, plane_events as pe_mod, games_mini as gm_mod, xtzb_birth as xb_mod, auto_task as at_mod, easter_eggs as eg_mod, plane_relay as pr_mod, sect_extra as se_mod, assistant as as_mod, bounty as bt_mod, xiangu as xgm_mod, xiangu_npc as xn_mod, xiangu_camp as xc_mod, xiangu_dao as xdd_mod, xiangu_baodi as xbd_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -900,6 +900,18 @@ CMD_XGM_LEAVE = "#离开仙古秘境"
 CMD_XGM_EMERGENCY = "#紧急撤离"
 CMD_XGM_CONFIRM = "#确认撤离"
 CMD_XGM_VIEW_SEEDS = "#查看道种"
+# W27：道种神火 + 仙遗宝地
+CMD_XGD_SHENHUO = "#查看神火"
+CMD_XGD_CONFIRM = "#确认融合道种"
+CMD_XGD_CANCEL = "#取消融合道种"
+CMD_XGD_IGNITE = "#点燃神火"
+CMD_XGD_JILIAN = "#祭炼真我"
+CMD_XGD_YISHEN = "#以身为种"
+CMD_XGD_REFINE = "#炼化道火精粹"
+CMD_XBD_LIST = "#仙遗宝地"
+CMD_XBD_EXPLORE = "#探索仙遗宝地"
+CMD_XBD_CLAIM = "#收取仙遗宝地"
+CMD_XBD_RULES = "#仙遗宝地规则"
 CMD_XGN_TALK = "#与NPC交谈"
 CMD_XGN_TRADE = "#向NPC购买"
 CMD_XGN_ATTACK = "#攻击NPC"
@@ -1445,6 +1457,7 @@ class ZhutianPlugin(Star):
         if resolved:
             await self.db.save_player(doc.model_dump())
             await self._drop_legacy_ring(doc, now)     # W8-A4：转世留下遗落纳戒
+            await self._xg_baodi_drop(doc)             # W27：库存封入仙遗宝地
             return None, resolved
         try:                                            # W21-F1：自动任务惰性补领
             at_lines, at_items, doc = at_mod.run_if_due(
@@ -19691,6 +19704,14 @@ class ZhutianPlugin(Star):
         if err:
             yield event.plain_result(err)
             return
+        # W27 分流：神火已燃且仙气 <3 → 仙气试炼（原版神火境极境冲关修仙气）
+        _st_xg = xgm_mod.state_of(doc)
+        ok_xq, msg_xq = xdd_mod.charge_extreme_xianqi(
+            doc, _st_xg, random.Random(f"{doc.uid}:xq:{time.time()}"))
+        if ok_xq:
+            await self._pe_save(doc, {})
+            yield event.plain_result(msg_xq)
+            return
         inv = await self.db.get_inventory(doc.uid)
         result = dz_mod.charge(doc, inv, time.time(), random.Random(), extreme=True)
         async for r in self._dz_finish(event, doc, result, "极境冲关"):
@@ -23795,6 +23816,13 @@ class ZhutianPlugin(Star):
                           bao=float(enemy.get("bao", 0.05) or 0.05))
             if float(enemy.get("orb", 0) or 0) > 0:
                 foe.effects["orb"] = float(enemy["orb"])
+            # W27：神火 + 仙气乘区（简化：无条件增伤 +10%/倍率档 +30%/道仙气）
+            try:
+                mult = xdd_mod.combat_mult(xgm_mod.state_of(doc))
+                if mult > 1.0:
+                    me.effects["dmg_dealt_mult"] = float(me.eff("dmg_dealt_mult", 1.0)) * mult
+            except Exception:
+                pass
             rng_b = random.Random(f"{doc.uid}:xg:{enemy.get('name')}:{time.time()}")
             winner, log, a_hp, _b_hp = run_1v1(me, foe, rng_b)
             doc.ext["hp"] = max(1, int(a_hp))
@@ -24587,3 +24615,239 @@ class ZhutianPlugin(Star):
         xgm_mod.eject_after_defeat(doc, st, now_ms)
         await self._pe_save(doc, {})
         yield event.plain_result(text)
+
+
+    # ================================================================ W27：道种神火 + 祭炼真我 + 仙遗宝地
+
+    @filter.command(CMD_XGD_SHENHUO, "查看神火（品质/仙气/技能/加成）")
+    async def handle_xgd_shenhuo(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result(xdd_mod.shenhuo_text(doc, xgm_mod.state_of(doc)))
+
+    @filter.regex(r"^#借助(.+?)道种点燃神火$|^#借助(.+?)点燃神火$")
+    async def handle_xgd_jiezhu(self, event: AstrMessageEvent):
+        """#借助XX道种点燃神火（核心区域，60 秒确认）。"""
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        m = re.match(r"^#借助(.+?)道种点燃神火$|^#借助(.+?)点燃神火$", str(event.message_str).strip())
+        arg = (m.group(1) or m.group(2) or "").strip() if m else ""
+        st = xgm_mod.state_of(doc)
+        st["_doc"] = doc
+        now_ms = time.time() * 1000
+        text, _intent = xdd_mod.fusion_intent(doc, st, arg, xgm_mod.load_config(), now_ms)
+        if st.get("fusion"):
+            await self._pe_save(doc, {})
+        yield event.plain_result(text)
+
+    @filter.command(CMD_XGD_CONFIRM, "确认融合道种（60 秒窗口内）")
+    async def handle_xgd_confirm(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        st["_doc"] = doc
+        text, ev = xdd_mod.fusion_confirm(doc, st, random.Random(f"{doc.uid}:fus:{time.time()}"),
+                                          time.time() * 1000, xgm_mod.load_config())
+        delta = {}
+        if ev.get("technique"):
+            delta[ev["technique"]] = 1
+        await self._pe_save(doc, delta)
+        yield event.plain_result(text)
+
+    @filter.command(CMD_XGD_CANCEL, "取消融合道种")
+    async def handle_xgd_cancel(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        removed = bool(st.pop("fusion", None))
+        await self._pe_save(doc, {})
+        yield event.plain_result("已取消本次道种融合，道种未消耗。" if removed
+                                 else "当前没有待取消的道种融合。")
+
+    @filter.regex(r"^#服用(.+?)点燃神火$")
+    async def handle_xgd_fuyong(self, event: AstrMessageEvent):
+        """#服用神火丹/九转神丹点燃神火。"""
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        m = re.match(r"^#服用(.+?)点燃神火$", str(event.message_str).strip())
+        med = (m.group(1) or "").strip() if m else ""
+        st = xgm_mod.state_of(doc)
+
+        async def _consume(name: str, qty: int) -> bool:
+            inv = await self.db.get_inventory(doc.uid)
+            if int(inv.get(name, 0) or 0) < qty:
+                return False
+            async with self.db.transaction():
+                await self.db.remove_item(doc.uid, name, qty)
+            return True
+
+        text, _ev = xdd_mod.ignite_medicine(doc, st, med,
+                                            random.Random(f"{doc.uid}:med:{time.time()}"),
+                                            _consume)
+        await self._pe_save(doc, {})
+        yield event.plain_result(text)
+
+    @filter.command(CMD_XGD_IGNITE, "点燃神火（尊者苦修·60%·下品）")
+    async def handle_xgd_ignite(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        text, _ev = xdd_mod.ignite_self(doc, st,
+                                        random.Random(f"{doc.uid}:ign:{time.time()}"), {})
+        await self._pe_save(doc, {})
+        yield event.plain_result(text)
+
+    @filter.command(CMD_XGD_JILIAN, "祭炼真我（三千道火·唯一真火·火道禁区）")
+    async def handle_xgd_jilian(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        gate = xdd_mod.jilian_gate(doc, st)
+        if gate:
+            yield event.plain_result(gate)
+            return
+        now = time.time()
+        text, ev = xdd_mod.tribulation_run(doc, st, random.Random(f"{doc.uid}:trib:{now}"), now)
+        delta = {}
+        if ev.get("technique"):
+            delta[ev["technique"]] = 1
+        await self._pe_save(doc, delta)
+        async for r in self._smart(event, text, "祭炼真我"):
+            yield r
+
+    @filter.command(CMD_XGD_YISHEN, "以身为种（天神绝巅路线指引）")
+    async def handle_xgd_yishen(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result(xdd_mod.yishenweizhong_text(doc))
+
+    @filter.command(CMD_XGD_REFINE, "炼化道火精粹（提纯神火品质一档）")
+    async def handle_xgd_refine(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        ok, text = xdd_mod.refine_shenhuo(doc, st)
+        await self._pe_save(doc, {})
+        yield event.plain_result(text)
+
+    @filter.command(CMD_XBD_LIST, "仙遗宝地（寿元耗尽者遗藏现世）")
+    async def handle_xbd_list(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        async with self.db.calamity_lock:
+            cal = await self.db.get_calamity()
+            world = xgm_mod.world_state(cal)
+            yield event.plain_result(xbd_mod.list_text(world))
+            cal["xiangu"] = world
+            await self.db.save_calamity(cal)
+
+    @filter.command(CMD_XBD_EXPLORE, "探索仙遗宝地 序号（20 分钟冷却）")
+    async def handle_xbd_explore(self, event: AstrMessageEvent, idx: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if not idx.strip().isdigit():
+            yield event.plain_result("用法：#探索仙遗宝地 序号（先 #仙遗宝地 查看列表）")
+            return
+        sa = self._stats(doc)
+        combat_power = int(sa.atk + sa.defense * 0.5)
+        now_ms = time.time() * 1000
+        async with self.db.calamity_lock:
+            cal = await self.db.get_calamity()
+            world = xgm_mod.world_state(cal)
+            text, baodi = xbd_mod.explore(world, doc, xgm_mod.state_of(doc), int(idx),
+                                          random.Random(f"{doc.uid}:bd:{now_ms}"),
+                                          now_ms, combat_power)
+            if baodi is not None:
+                cal["xiangu"] = world
+                await self.db.save_calamity(cal)
+        if "守护残魂" in text and "不敌" in text:
+            hp_loss = max(1, int(xgm_mod._hp_of(doc) * 0.3))
+            xgm_mod._set_hp(doc, max(1, xgm_mod._hp_of(doc) - hp_loss))
+            await self._pe_save(doc, {})
+        yield event.plain_result(text)
+
+    @filter.command(CMD_XBD_CLAIM, "收取仙遗宝地 序号")
+    async def handle_xbd_claim(self, event: AstrMessageEvent, idx: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if not idx.strip().isdigit():
+            yield event.plain_result("用法：#收取仙遗宝地 序号（先 #仙遗宝地 查看列表）")
+            return
+        now_ms = time.time() * 1000
+        async with self.db.calamity_lock:
+            cal = await self.db.get_calamity()
+            world = xgm_mod.world_state(cal)
+            ok, text, items = xbd_mod.claim(world, doc, int(idx), now_ms)
+            if ok:
+                cal["xiangu"] = world
+                async with self.db.transaction():
+                    await self.db.save_calamity(cal)
+                    if items:
+                        await self.db.add_items(doc.uid, items)
+        yield event.plain_result(text)
+
+    @filter.command(CMD_XBD_RULES, "仙遗宝地规则")
+    async def handle_xbd_rules(self, event: AstrMessageEvent):
+        yield event.plain_result(xbd_mod.rules_text())
+
+    async def _xg_baodi_drop(self, doc: PlayerDoc) -> None:
+        """寿元耗尽转世：库存封入仙遗宝地（W27）。"""
+        try:
+            inv = await self.db.get_inventory(doc.uid)
+            if not inv:
+                return
+            plane_st = plane.state_of(doc)
+            async with self.db.calamity_lock:
+                cal = await self.db.get_calamity()
+                world = xgm_mod.world_state(cal)
+                b = xbd_mod.drop_baodi(world, doc.uid, doc.name or "无名修士",
+                                       int(doc.realm_index) + 1, plane.current(plane_st), inv)
+                if b:
+                    cal["xiangu"] = world
+                    await self.db.save_calamity(cal)
+        except Exception:
+            pass
