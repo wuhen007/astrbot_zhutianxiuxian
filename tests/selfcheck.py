@@ -9143,6 +9143,238 @@ async def main():
     assert "宗门深层" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
     print("W23/W24 sect_extra+assistant+bounty ok")
 
+    # ========================================================= W25：仙古秘境（网格引擎）
+    from core import xiangu as xgm260
+
+    # —— 种子随机确定性 + 地图生成一致性
+    r260a = xgm260.seeded_rng("seed-A")
+    seq_a = [round(r260a.random(), 6) for _ in range(5)]
+    r260b = xgm260.seeded_rng("seed-A")
+    seq_b = [round(r260b.random(), 6) for _ in range(5)]
+    assert seq_a == seq_b and len(set(seq_a)) == 5, "同种子必须同序列"
+    map260 = xgm260.new_run_map("seed-A")
+    map260b = xgm260.new_run_map("seed-A")
+    assert map260["grid"] == map260b["grid"] and map260["pos"] == map260b["pos"], "同种子同图"
+    assert map260["fragment_id"] in xgm260.ZONE_POOLS["边缘区域"]
+    h260, w260 = len(map260["grid"]), len(map260["grid"][0])
+    assert (h260, w260) == (11, 11)
+    # 出口与连接一一对应；边界全墙；连接目标合法
+    for d260, tgt260 in map260["connections"].items():
+        if tgt260:
+            assert tgt260 in xgm260.FRAGMENTS, tgt260
+    assert len(map260["exit_positions"]) == sum(1 for v in map260["connections"].values() if v)
+    for p260 in map260["exit_positions"]:
+        assert map260["grid"][p260["y"]][p260["x"]] == xgm260.CELL_EXIT
+    # 边界除出口外全墙
+    for y260 in range(11):
+        for x260 in range(11):
+            if y260 in (0, 10) or x260 in (0, 10):
+                cell260 = map260["grid"][y260][x260]
+                assert cell260 in (xgm260.CELL_WALL, xgm260.CELL_EXIT), (x260, y260, cell260)
+
+    # —— 拓扑：擂台/核心/终极/隐藏专用路径清理
+    conn260 = xgm260.create_connections("seed-A", xgm260.CORE_FRAGMENT)
+    assert set(conn260) <= {"top", "bottom", "left", "right"}
+    assert all(t in (None, xgm260.ARENA_FRAGMENT, xgm260.ULTIMATE_FRAGMENT, "void_rift")
+               for t in conn260.values()), "核心只连擂台/终极/隐藏"
+    conn_arena = xgm260.create_connections("seed-A", xgm260.ARENA_FRAGMENT)
+    assert all(t in (None, xgm260.CORE_FRAGMENT)
+               or xgm260.FRAGMENTS[t]["zone"] == "深层区域"
+               for t in conn_arena.values()), "擂台只连核心/深层"
+
+    # —— 门槛：仙古境界映射（realm_index 20 → 尊者 7）
+    d260 = PlayerDoc(uid="u260", name="天骄", realm_index=20, stones=0,
+                     ext={"xueqi": 1000, "potential": 0, "hp": 500_000, "hp_max": 500_000})
+    assert xgm260.xg_level_of(d260) == 7 and xgm260.realm_name(7) == "尊者境"
+    assert xgm260.zone_entry_block(d260, "隐藏区域"), "尊者不能进隐藏（需神火 8）"
+    d260.realm_index = 24
+    assert xgm260.xg_level_of(d260) == 8 and xgm260.zone_entry_block(d260, "隐藏区域") is None
+    assert xgm260.fragment_entry_block(d260, xgm260.ULTIMATE_FRAGMENT, crowned=False), "终极需冠军"
+    assert xgm260.fragment_entry_block(d260, xgm260.ULTIMATE_FRAGMENT, crowned=True) is None
+
+    # —— 移动：多步遇墙停 / 机缘格触发结算 / 出口切换碎片
+    st260 = xgm260.state_of(d260)
+    st260["active"] = True
+    st260["map"] = xgm260.new_run_map("seed-A")
+    claims260: dict = {}
+    rng260 = xgm260.seeded_rng("move-260")
+    # 把出生点右邻强制设为机缘格，单步必触发
+    m260 = st260["map"]
+    px260, py260 = m260["pos"]["x"], m260["pos"]["y"]
+    m260["grid"][py260][px260 + 1] = xgm260.CELL_TREASURE
+    m260["revealed"][py260][px260 + 1] = True
+    txt260, ev260 = xgm260.move(d260, st260, "右", 1, xgm260.load_config(), rng260, 0.0, None, claims260)
+    assert "机缘" in txt260, txt260
+    assert m260["grid"][py260][px260 + 1] == xgm260.CELL_EXPLORED, "机缘格结算后变已搜"
+    # 多步：把前方一路设墙
+    m260["grid"][py260][px260 + 2] = xgm260.CELL_WALL
+    m260["pos"] = {"x": px260, "y": py260}
+    txt260, _ = xgm260.move(d260, st260, "右", 3, xgm260.load_config(), rng260, 0.0, None, claims260)
+    assert m260["pos"]["x"] == px260 + 1 and m260["pos"]["y"] == py260, "多步遇墙停"
+    # 出口切换：把右边界做成出口并连接灵湖
+    tx260 = 10
+    m260["grid"][py260][tx260] = xgm260.CELL_EXIT
+    m260["exit_positions"] = [{"x": tx260, "y": py260}]
+    m260["connections"]["right"] = "spirit_lake"
+    for x260 in range(m260["pos"]["x"] + 1, tx260):
+        m260["grid"][py260][x260] = xgm260.CELL_EMPTY
+    m260["revealed"][py260][tx260] = True
+    m260["pos"] = {"x": tx260 - 1, "y": py260}   # 站到出口旁
+    d260.realm_index = 12                      # 灵湖=边缘区（铭文 5）→ realm_index 12 可过
+    txt260, ev260 = xgm260.move(d260, st260, "右", 1, xgm260.load_config(), rng260, 0.0, None, claims260)
+    assert ev260["transition"] is None, "第一步踏上出口格不切换"     # 踏上出口格
+    txt260, ev260 = xgm260.move(d260, st260, "右", 1, xgm260.load_config(), rng260, 0.0, None, claims260)
+    assert ev260["transition"] == "spirit_lake", (txt260, ev260)
+    assert m260["fragment_id"] == "spirit_lake" and st260["location"] == "边缘区域"
+    assert st260["history"].get("edge_camp", {}).get("fragment_id") == "edge_camp"
+
+    # —— 探索：bias 道韵 / Boss 战（假战斗回调）
+    d260.realm_index = 20
+    gains260_before = int(st260["gains"].get("daoyun", 0))
+    txt260, g260 = xgm260.perform_explore(d260, st260, "边缘区域", {"daoyun": 1.0},
+                                          xgm260.load_config(), xgm260.seeded_rng("exp-A"),
+                                          0.0, None)
+    assert any(k in txt260 for k in ("道韵", "源石", "奇遇", "遭遇", "惊天", "无果")), txt260[:60]
+    won260 = []
+    def _battle_win(enemy, btype):
+        won260.append(enemy["name"])
+        return True, [f"第1回合：{d260.name} 击溃 {enemy['name']}"]
+    class _Seq260:
+        """按序掷点：0.01 过成功率 → 0.70 落 fight 段 → 0.99 免伏击 → 0.01 中 Boss。"""
+        def __init__(self, vals):
+            self._vals = list(vals)
+        def random(self):
+            return self._vals.pop(0) if len(self._vals) > 1 else self._vals[0]
+        def uniform(self, a, b):
+            return b
+    txt260, g260 = xgm260.perform_explore(d260, st260, "深层区域", {"fight": 0.95},
+                                          xgm260.load_config(), _Seq260([0.01, 0.70, 0.99, 0.01]),
+                                          0.0, _battle_win)
+    assert won260, "fight bias 必触发一场战斗"
+    assert st260["infamy"] > 0, "战斗胜利涨凶名"
+    # 战败 → 战败抉择
+    def _battle_lose(enemy, btype):
+        return False, ["第1回合：不敌"]
+    st260b = dict(st260)
+    st260b["bag"] = xgm260.bag_new()
+    st260b["gains"] = {}
+    txt260, _ = xgm260.perform_explore(d260, st260b, "深层区域", {"fight": 0.95},
+                                       xgm260.load_config(), xgm260.seeded_rng("exp-C"),
+                                       0.0, _battle_lose)
+    assert st260b.get("pending_defeat"), "战败必须挂生死抉择"
+    t260 = xgm260.settle_defeat_choice(d260, st260b, "slaughter", 1000.0)
+    assert "任凭鱼肉" in t260 and xgm260.bag_summary(st260b["bag"])["item_count"] == 0
+
+    # —— 探索回合：三选项生成 + 选择结算
+    st260c = xgm260.state_of(d260)
+    st260c["active"] = True
+    st260c["map"] = xgm260.new_run_map("seed-C")
+    txt260, ev260 = xgm260.explore_turn(d260, st260c, xgm260.seeded_rng("turn-260"), 1000.0, {})
+    opts260 = (st260c.get("options") or {}).get("list") or []
+    assert len(opts260) == 3, "三径择一"
+    st260c["options"]["expires_at"] = 1e18
+    for i260 in range(1, 4):
+        st260c["options"] = {"expires_at": 1e18,
+                             "list": xgm260.explore_options("边缘区域", xgm260.seeded_rng(f"o{i260}"))}
+        t260, _ = xgm260.choose_explore(d260, st260c, i260, xgm260.load_config(),
+                                        xgm260.seeded_rng(f"c{i260}"), 2000.0, None, {})
+        assert t260, i260
+    st260c["options"] = {"expires_at": 0, "list": []}
+    t260, _ = xgm260.choose_explore(d260, st260c, 1, xgm260.load_config(), _Lucky60(), 3000.0)
+    assert "消散" in t260, "过期选项作废"
+
+    # —— 道种掉落：区域品质分层 + 认领幂等
+    cfg260 = xgm260.load_config()
+    for _ in range(30):
+        sd260 = xgm260.draw_seed(cfg260, "核心区域", "xiangu_core", "treasure",
+                                 rng=xgm260.seeded_rng(f"sd{_}"))
+        # 核心区域常规池全传说；另有 30% 顶级道种占比出神话仙种
+        assert sd260["品质"] in ("传说", "神话") and sd260["顶级道种"] == (sd260["品质"] == "神话"), sd260
+    sd_top = xgm260.draw_seed(cfg260, "核心区域", "xiangu_core", "boss",
+                              force_top=True, rng=xgm260.seeded_rng("sd-top"))
+    assert sd_top["顶级道种"] and sd_top["名称"] in {s["名称"] for s in xgm260.top_seed_catalog(cfg260)}
+    scope260 = xgm260.claim_scope("seed-A", "f1", "cell:1,1")
+    xgm260.world_claim_put(claims260, scope260, "u260", "天骄", 1.0)
+    assert xgm260.world_claim(claims260, scope260)["claimant"] == "u260"
+
+    # —— 仙髓池：放置 + 浸泡收益
+    pool260 = xgm260.place_marrow_pool(m260, xgm260.seeded_rng("pool-260"))
+    assert pool260 and xgm260.is_marrow_position(m260, pool260["pos"]["x"], pool260["pos"]["y"])
+    rw260 = xgm260.marrow_rewards(d260, 5.0, xgm260.seeded_rng("pool-rw"))
+    assert rw260["xiuwei"] > 0 and rw260["xueqi"] > 0
+
+    # —— 撤离：时长 / 校验状态机 / 结算转化
+    assert xgm260.evac_duration("normal", 0) == 10 and xgm260.evac_duration("normal", 100) == 60
+    assert xgm260.evac_duration("emergency", 0) == 30
+    st260d = xgm260.state_of(d260)
+    st260d["active"] = True
+    st260d["map"] = xgm260.create_fragment_state("seed-A", xgm260.CORE_FRAGMENT,
+                                                 xgm260.create_connections("seed-A", xgm260.CORE_FRAGMENT))
+    st260d["run"] = {"run_id": "run-260", "started_at": 0.0, "start_kills": 0, "start_infamy": 0.0}
+    st260d["bag"] = xgm260.bag_new()   # 前面战斗掉落会污染同一背包，测试需精确计数
+    xgm260.bag_add_item(st260d["bag"], {"name": "残破战戟", "type": "材料", "quantity": 2})
+    xgm260.bag_add_item(st260d["bag"], {"name": "秘境灵药", "type": "材料", "quantity": 3})
+    xgm260.bag_add_growth(st260d["bag"], xiuwei=1200, xueqi=800, source_stone=5000)
+    xgm260.bag_add_potential(st260d["bag"], 30)
+    xgm260.bag_add_seed(st260d["bag"], {"名称": "青鸾焰", "品质": "稀有"})
+    evac260 = xgm260.begin_evacuation(d260, st260d, "normal", 1000.0)
+    # 战利品单位：物品 5 + 道种 1 + 标量 4 = 10 → 10 + 2×10 = 30s
+    assert evac260 and evac260["ready_at"] == 1000.0 + 30 * 1000, evac260
+    ok260, code260, _ = xgm260.validate_evacuation(st260d, d260, 1000.0)
+    assert not ok260 and code260 == "not_ready"
+    st260d["map"]["pos"] = {"x": 0, "y": 0}
+    ok260, code260, _ = xgm260.validate_evacuation(st260d, d260, 1500.0)
+    assert not ok260 and code260 == "moved", "移动中断撤离"
+    conv260 = xgm260.convert_evacuation_items(st260d["bag"])
+    names260c = {i["name"]: i["quantity"] for i in conv260["items"]}
+    assert names260c.get("庚金玄土") == 2 and conv260["refined"] == 2, conv260
+    assert conv260["lingshi"] == 3 * 10_000 and conv260["currency_count"] == 3
+
+    # —— 生命周期：概率递增 → preparing → open → close
+    lc260 = xgm260.lifecycle_of({})
+    class _AlwaysWin:
+        def random(self):
+            return 0.01
+    assert xgm260.advance_lifecycle(lc260, 1_999, _AlwaysWin()) == "preparing"
+    assert xgm260.advance_lifecycle(lc260, 2_000, _AlwaysWin()) is None
+    assert xgm260.advance_lifecycle(lc260, 3_001, _AlwaysWin()) == "opened"
+    assert lc260["session"] == "xiangu-3001"
+    assert xgm260.advance_lifecycle(lc260, 3_001 + 10_000, _AlwaysWin()) == "closed"
+    lc260b = xgm260.lifecycle_of({})
+    class _AlwaysLose:
+        def random(self):
+            return 0.99
+    assert xgm260.advance_lifecycle(lc260b, 2_000, _AlwaysLose()) is None
+    assert abs(lc260b["prob"] - 0.15) < 1e-9, "失败后开启概率 +10%"
+
+    # —— 准入门
+    d260c = PlayerDoc(uid="u261", name="低境", realm_index=8, ext={"xueqi": 1})
+    st260e = xgm260.state_of(d260c)
+    gate260 = xgm260.entry_gate(d260c, st260e, xgm260.lifecycle_of({"lifecycle": {"stage": "open"}}),
+                                3001, 0.0, "九天十地")
+    assert gate260 and "境界不足" in gate260
+    d260.realm_index = 20
+    gate260 = xgm260.entry_gate(d260, st260d, xgm260.lifecycle_of({"lifecycle": {"stage": "open"}}),
+                                3001, 0.0, "遮天位面")
+    assert gate260 and "位面不符" in gate260
+
+    # main.py 接线
+    src260 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    names260w = ["CMD_XGM_RULES", "CMD_XGM_ENTER", "CMD_XGM_STATUS", "CMD_XGM_MAP",
+                 "CMD_XGM_EXPLORE", "CMD_XGM_BAG", "CMD_XGM_GOAL", "CMD_XGM_FINDNPC",
+                 "CMD_XGM_SCAN", "CMD_XGM_LEAVE", "CMD_XGM_EMERGENCY", "CMD_XGM_CONFIRM",
+                 "CMD_XGM_VIEW_SEEDS"]
+    miss260 = [c for c in names260w if f"@filter.command({c}" not in src260]
+    assert miss260 == [], f"漏注册：{miss260}"
+    assert 'regex(r"^#(上|下|左|右|左上|右上|左下|右下)' in src260, "八方向移动未注册"
+    assert 'regex(r"^([123])$")' in src260, "探索选择未注册"
+    assert "xgm_mod.move(" in src260 and "xgm_mod.explore_turn(" in src260
+    assert "xgm_mod.begin_evacuation(" in src260 and "xgm_mod.convert_evacuation_items(" in src260
+    help260 = _json60.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
+    assert any(g["group"] == "仙古秘境 · 网格探秘" for g in help260)
+    assert "仙古秘境" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
+    print("W25 xiangu 网格引擎 ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

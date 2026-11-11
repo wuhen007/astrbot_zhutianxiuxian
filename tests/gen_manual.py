@@ -248,6 +248,11 @@ def main() -> int:
                           "handle_rev_join", "handle_rev_spawn", "handle_rev_clear")),
         ("异域叩击帝关 · 全服防守", ("handle_ip_board", "handle_ip_sortie",
                           "handle_ip_fuse", "handle_ip_rank", "handle_ip_force")),
+        ("仙古秘境", ("handle_xgm_rules", "handle_xgm_enter", "handle_xgm_status",
+                   "handle_xgm_map", "handle_xgm_explore", "handle_xgm_choice",
+                   "handle_xgm_move", "handle_xgm_scan", "handle_xgm_bag",
+                   "handle_xgm_goal", "handle_xgm_findnpc", "handle_xgm_view_seeds",
+                   "handle_xgm_leave", "handle_xgm_emergency", "handle_xgm_confirm")),
         ("帮助", ("handle_help",)),
     ]
     grouped = {}

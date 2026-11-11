@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_story as rs_mod, plane_events as pe_mod, games_mini as gm_mod, xtzb_birth as xb_mod, auto_task as at_mod, easter_eggs as eg_mod, plane_relay as pr_mod, sect_extra as se_mod, assistant as as_mod, bounty as bt_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_story as rs_mod, plane_events as pe_mod, games_mini as gm_mod, xtzb_birth as xb_mod, auto_task as at_mod, easter_eggs as eg_mod, plane_relay as pr_mod, sect_extra as se_mod, assistant as as_mod, bounty as bt_mod, xiangu as xgm_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -884,6 +884,20 @@ CMD_BG_LIST = "#悬赏目标"
 CMD_BG_KILL = "#刺杀目标"
 CMD_BG_RUMOR = "#江湖传闻"
 CMD_STYLE_TOGGLE = "#切换练气排版"
+# W25：仙古秘境（网格引擎）
+CMD_XGM_RULES = "#仙古秘境规则"
+CMD_XGM_ENTER = "#进入仙古秘境"
+CMD_XGM_STATUS = "#秘境状态"
+CMD_XGM_MAP = "#秘境地图"
+CMD_XGM_EXPLORE = "#秘境探索"
+CMD_XGM_BAG = "#秘境背包"
+CMD_XGM_GOAL = "#秘境目标"
+CMD_XGM_FINDNPC = "#寻找NPC"
+CMD_XGM_SCAN = "#秘境推演"
+CMD_XGM_LEAVE = "#离开仙古秘境"
+CMD_XGM_EMERGENCY = "#紧急撤离"
+CMD_XGM_CONFIRM = "#确认撤离"
+CMD_XGM_VIEW_SEEDS = "#查看道种"
 # W18-F1：金银坊（媚娘的赌坊）
 CMD_GMF = "#金银坊"
 # W8-B1b：至尊线（至尊骨 / 斩骨涅槃 / 舍骨入血 / 试炼 / 仙骨 / 重瞳 / 瞳骨合一）
@@ -23629,3 +23643,447 @@ class ZhutianPlugin(Star):
         else:
             async for r in self._bag_view(event):
                 yield r
+
+
+    # ================================================================ W25：仙古秘境（网格引擎）
+
+    async def _xg_world(self, advance: bool = True):
+        """读全服仙古世界态（calamity_state["xiangu"]）并懒推进生命周期。
+
+        返回 (cal, world, note)：note 为生命周期跃迁播报（无则空串）。
+        """
+        async with self.db.calamity_lock:
+            cal = await self.db.get_calamity()
+            world = xgm_mod.world_state(cal)
+            note = ""
+            if advance:
+                era_st = await self._era_state()
+                year = int(era_st.get("years_total", 0) or 0)
+                lc = xgm_mod.lifecycle_of(world)
+                tr = xgm_mod.advance_lifecycle(lc, year, random.Random(f"xiangu:lifecycle:{year}"))
+                if tr:
+                    world["lifecycle"] = lc
+                    note = {"preparing": "🌱 仙古花蕾现世，正在凝聚——千年后绽放！",
+                            "opened": "🌺 三千道州气运汇聚，仙古花蕾绽放，秘境开启！",
+                            "closed": "❄️ 万年一期，仙古秘境重归沉寂。"}.get(tr, "")
+            world.setdefault("claims", {})
+            cal["xiangu"] = world
+            return cal, world, note
+
+    def _xg_battle_fn(self, doc: PlayerDoc):
+        """core 战斗回调：敌规格 dict → combat.run_1v1。"""
+        from .core.combat.engine import Fighter
+        from .core.combat.loadout import build_fighter
+        from .core.combat import run_1v1
+
+        def battle(enemy: dict, btype: str) -> tuple[bool, list[str]]:
+            st_ = self._stats(doc)
+            hp_cur, _hp_max = self._hp_pair(doc)
+            me = build_fighter(doc, doc.name or "道友", st_.atk, st_.defense,
+                               max(1, int(hp_cur)), st_.bao, self.item_index.get)
+            foe = Fighter(name=str(enemy.get("name") or "秘境之敌"),
+                          atk=max(1, int(enemy.get("atk", 1))),
+                          defense=max(1, int(enemy.get("defense", 1))),
+                          hp=max(1, int(enemy.get("hp", 1))),
+                          hp_max=max(1, int(enemy.get("hp_max", enemy.get("hp", 1)))),
+                          bao=float(enemy.get("bao", 0.05) or 0.05))
+            if float(enemy.get("orb", 0) or 0) > 0:
+                foe.effects["orb"] = float(enemy["orb"])
+            rng_b = random.Random(f"{doc.uid}:xg:{enemy.get('name')}:{time.time()}")
+            winner, log, a_hp, _b_hp = run_1v1(me, foe, rng_b)
+            doc.ext["hp"] = max(1, int(a_hp))
+            return winner == 0, log
+
+        return battle
+
+    @filter.command(CMD_XGM_RULES, "仙古秘境规则")
+    async def handle_xgm_rules(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        yield event.plain_result(xgm_mod.rules_text())
+
+    @filter.command(CMD_XGM_ENTER, "进入仙古秘境（铭文~尊者·九天十地·12h CD）")
+    async def handle_xgm_enter(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        now_ms = time.time() * 1000
+        cal, world, note = await self._xg_world()
+        lc = xgm_mod.lifecycle_of(world)
+        st = xgm_mod.state_of(doc)
+        era_st = await self._era_state()
+        plane_st = plane.state_of(doc)
+        gate = xgm_mod.entry_gate(doc, st, lc, int(era_st.get("years_total", 0) or 0),
+                                  now_ms, plane.current(plane_st))
+        if gate:
+            yield event.plain_result(gate)
+            return
+        async with self._pl_lock(doc.uid):
+            st = xgm_mod.state_of(doc)
+            if st.get("active"):
+                frag = xgm_mod.FRAGMENTS.get((st.get("map") or {}).get("fragment_id", ""), {})
+                yield event.plain_result(
+                    f"【已在仙古秘境】当前位于 {frag.get('name', '未知区域')}。\n"
+                    "正常撤离：抵达仙古花蕾核心后 #离开仙古秘境；受困时可 #紧急撤离。")
+                return
+            seed = str(lc.get("session") or f"xiangu-{int(now_ms)}")
+            rng = random.Random(f"{doc.uid}:xgm:enter:{now_ms}")
+            xgm_mod.begin_run(st, seed, now_ms, rng)
+            xgm_mod.bind_map_npcs(doc, st, rng)
+            ecfg = xgm_mod.evac_config()
+            st.setdefault("cd", {})["enter_until"] = now_ms + ecfg["cooldown_h"] * 3600 * 1000
+            await self._pe_save(doc, {}, cal)
+        intro = "\n".join([
+            "【仙古花蕾绽放·秘境开启】",
+            f"{doc.name or '修士'}立于三千州上空🌺——仙古花蕾绽放，霞光万道！",
+            "你化作一道仙虹，顺着绽放的花瓣，踏入仙古秘境！", "",
+            "【开局】接引营地（边缘区域·安全区）｜神识揭示出生点周围",
+            "【指引】#秘境探索 展开三径择一 → 1/2/3 应答",
+            "#上/#下/#左/#右/#左上… 移动（可带步数如 #左5）",
+            "#秘境推演 花 5 道韵窥探 4 格天机",
+            "机缘💎危险⚡修士👤出口🚪裂缝🌀唯一机缘✨", "",
+            "【撤离】核心区域 #离开仙古秘境｜任意区域 #紧急撤离（读条后 #确认撤离）",
+            "【冷却】进入即计 12 小时",
+        ] + ([note] if note else []))
+        yield event.plain_result(intro)
+
+    @filter.command(CMD_XGM_STATUS, "秘境状态面板")
+    async def handle_xgm_status(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        cal, world, _note = await self._xg_world(advance=False)
+        lc = xgm_mod.lifecycle_of(world)
+        st = xgm_mod.state_of(doc)
+        era_st = await self._era_state()
+        text = xgm_mod.status_text(doc, st, lc, int(era_st.get("years_total", 0) or 0))
+        async for r in self._smart(event, text, "秘境状态"):
+            yield r
+
+    @filter.command(CMD_XGM_MAP, "秘境地图（迷雾网格）")
+    async def handle_xgm_map(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        map_st = st.get("map")
+        if not st.get("active") or not map_st:
+            yield event.plain_result("【未入秘境·何来地图】使用 #进入仙古秘境 踏入秘境。")
+            return
+        text = xgm_mod.render_grid(map_st, doc, st.get("gains"))
+        frag = xgm_mod.FRAGMENTS.get(map_st.get("fragment_id", ""), {})
+        text += "\n\n【区域特性】" + "、".join(frag.get("features", ())) + "\n" + frag.get("desc", "")
+        async for r in self._smart(event, text, "秘境地图"):
+            yield r
+
+    @filter.command(CMD_XGM_EXPLORE, "秘境探索：神识感知 + 三径择一")
+    async def handle_xgm_explore(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        if not st.get("active"):
+            yield event.plain_result("【未入秘境·何来探索】使用 #进入仙古秘境 踏入秘境。")
+            return
+        if st.get("evac"):
+            yield event.plain_result("【撤离中断】你重新展开神识探索，撤离通道随之消散。")
+            st.pop("evac", None)
+        now_ms = time.time() * 1000
+        cal, world, _note = await self._xg_world(advance=False)
+        rng = random.Random(f"{doc.uid}:xgm:explore:{now_ms}")
+        text, _ev = xgm_mod.explore_turn(doc, st, rng, now_ms, world)
+        await self._pe_save(doc, {}, cal)
+        async for r in self._smart(event, text, "秘境探索"):
+            yield r
+
+    @filter.regex(r"^([123])$")
+    async def handle_xgm_choice(self, event: AstrMessageEvent):
+        """秘境探索三径择一（仅在持有未过期选项时响应）。"""
+        if not self._allowed(event):
+            return
+        doc = await self._find_player(event)
+        if not doc:
+            return
+        st = xgm_mod.state_of(doc)
+        if not st.get("active") or not (st.get("options") or {}).get("list"):
+            return
+        try:
+            idx = int(str(event.message_str).strip())
+        except ValueError:
+            return
+        now_ms = time.time() * 1000
+        cal, world, _note = await self._xg_world(advance=False)
+        rng = random.Random(f"{doc.uid}:xgm:choice:{now_ms}")
+        text, _ev = xgm_mod.choose_explore(doc, st, idx, xgm_mod.load_config(), rng, now_ms,
+                                           self._xg_battle_fn(doc), world)
+        await self._pe_save(doc, {}, cal)
+        async for r in self._smart(event, text, "秘境探索"):
+            yield r
+
+    @filter.regex(r"^#(上|下|左|右|左上|右上|左下|右下)(\d*)$")
+    async def handle_xgm_move(self, event: AstrMessageEvent):
+        """八方向移动（支持 #左5 多步，最多 20 步）。"""
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        if not st.get("active"):
+            yield event.plain_result("【未入秘境·何来移动】使用 #进入仙古秘境 踏入秘境。")
+            return
+        match = re.match(r"^#(上|下|左|右|左上|右上|左下|右下)(\d*)$", str(event.message_str).strip())
+        if not match:
+            return
+        key, digits = match.group(1), match.group(2)
+        steps = max(1, min(20, int(digits) if digits else 1))
+        now_ms = time.time() * 1000
+        ready, remain = xgm_mod._cd_ready(st, "move", now_ms)
+        if not ready:
+            yield event.plain_result(f"{doc.name or '修士'}刚移动过，请稍等 {remain} 秒再行动。")
+            return
+        if st.get("evac"):
+            st.pop("evac", None)
+            yield event.plain_result("【撤离中断】你离开原位，尚未稳定的撤离通道随之崩散。")
+        cal, world, _note = await self._xg_world(advance=False)
+        rng = random.Random(f"{doc.uid}:xgm:move:{now_ms}")
+        text, _ev = xgm_mod.move(doc, st, key, steps, xgm_mod.load_config(), rng, now_ms,
+                                 self._xg_battle_fn(doc), world)
+        xgm_mod._cd_set(st, "move", now_ms + xgm_mod.MOVE_CD_MS)
+        await self._pe_save(doc, {}, cal)
+        async for r in self._smart(event, text, "秘境移动"):
+            yield r
+
+    @filter.command(CMD_XGM_SCAN, "秘境推演：5 道韵窥探 4 格天机")
+    async def handle_xgm_scan(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        if not st.get("active"):
+            yield event.plain_result("【未入秘境·何来推演】使用 #进入仙古秘境 踏入秘境。")
+            return
+        text, _spent = xgm_mod.divine_scan(doc, st)
+        await self._pe_save(doc, {})
+        yield event.plain_result(text)
+
+    @filter.command(CMD_XGM_BAG, "秘境背包（撤离时结算）")
+    async def handle_xgm_bag(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        yield event.plain_result(xgm_mod.bag_format(st.get("bag") or {}))
+
+    @filter.command(CMD_XGM_GOAL, "秘境目标：神火路线进度")
+    async def handle_xgm_goal(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        cal, world, _note = await self._xg_world()
+        lc = xgm_mod.lifecycle_of(world)
+        st = xgm_mod.state_of(doc)
+        era_st = await self._era_state()
+        text = xgm_mod.goal_text(doc, st, lc, int(era_st.get("years_total", 0) or 0))
+        await self.db.save_calamity(cal)
+        async for r in self._smart(event, text, "秘境目标"):
+            yield r
+
+    @filter.command(CMD_XGM_FINDNPC, "寻找NPC：列出本碎片修士方位")
+    async def handle_xgm_findnpc(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        if not st.get("active"):
+            yield event.plain_result("需先进入仙古秘境！")
+            return
+        yield event.plain_result(xgm_mod.find_npc_text(doc, st))
+
+    @filter.command(CMD_XGM_VIEW_SEEDS, "查看道种（秘境背包内）")
+    async def handle_xgm_view_seeds(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        yield event.plain_result(xgm_mod.seed_view_text(st, xgm_mod.load_config()))
+
+    @filter.command(CMD_XGM_LEAVE, "离开仙古秘境（须核心，10-60s 读条）")
+    async def handle_xgm_leave(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._xgm_begin_evac(event, doc, "normal"):
+            yield r
+
+    @filter.command(CMD_XGM_EMERGENCY, "紧急撤离（任意区域，30-90s 读条）")
+    async def handle_xgm_emergency(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async for r in self._xgm_begin_evac(event, doc, "emergency"):
+            yield r
+
+    async def _xgm_begin_evac(self, event, doc: PlayerDoc, mode: str):
+        st = xgm_mod.state_of(doc)
+        if not st.get("active"):
+            yield event.plain_result("【未入秘境·何来撤离】使用 #进入仙古秘境 踏入秘境。")
+            return
+        if st.get("pending_defeat"):
+            yield event.plain_result("【生死抉择】战败抉择未决，无法撤离——先 #求饶 或 #任凭鱼肉。")
+            return
+        now_ms = time.time() * 1000
+        evac = xgm_mod.begin_evacuation(doc, st, mode, now_ms)
+        if evac is None:
+            map_st = st.get("map") or {}
+            frag = xgm_mod.FRAGMENTS.get(map_st.get("fragment_id", ""), {})
+            yield event.plain_result(
+                "【未至仙古花蕾·无法正常撤离】\n"
+                f"当前碎片：{frag.get('name', '未知区域')}\n"
+                "正常撤离点：仙古花蕾·核心；若受困可用 #紧急撤离。")
+            return
+        await self._pe_save(doc, {})
+        bag = xgm_mod.bag_summary(st.get("bag") or {})
+        cmd = "#紧急撤离" if mode == "emergency" else "#离开仙古秘境"
+        lead = ("【紧急撤离·强开虚空通道】" if mode == "emergency"
+                else "【仙古花蕾·撤离通道开启】")
+        body = ("燃烧秘境印记，强行锚定外界坐标！" if mode == "emergency"
+                else "立于仙古花蕾核心，引动归途法则！")
+        yield event.plain_result("\n".join([
+            lead,
+            f"{doc.name or '修士'}{body}",
+            "",
+            f"秘境背包物品：{bag['item_count']} 件｜道种：{bag['seed_count']} 枚｜"
+            f"源石：{bag['source_stone']:,}",
+            f"撤离准备时间：{xgm_mod.evac_duration(mode, bag['loot_units'])} 秒",
+            "",
+            f"等待结束后再次发送 {cmd} 或 #确认撤离。",
+            "移动、探索、主动交战或受到伤害都会中断撤离。"]))
+
+    @filter.command(CMD_XGM_CONFIRM, "确认撤离（读条完毕后结算收获）")
+    async def handle_xgm_confirm(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        now_ms = time.time() * 1000
+        ok, code, remain = xgm_mod.validate_evacuation(st, doc, now_ms)
+        if not ok:
+            if code == "not_ready":
+                yield event.plain_result(f"【撤离通道尚未稳定】还需等待 {remain} 秒，请留在原地。")
+                return
+            st.pop("evac", None)
+            reason = {"expired": "撤离通道已经消散，请重新开始撤离。",
+                      "run_mismatch": "撤离印记不属于当前这次秘境，会话已作废。",
+                      "not_in_xiangu": "你已不在仙古秘境中，撤离状态已清理。",
+                      "not_in_core": "你已离开仙古花蕾核心，正常撤离被中断。",
+                      "moved": "你的位置发生变化，撤离通道被中断。",
+                      "damaged": "你在读条期间受到伤害，撤离通道被中断。",
+                      }.get(code, "撤离条件发生变化，请重新开始撤离。")
+            await self._pe_save(doc, {})
+            yield event.plain_result(f"【撤离中断】{reason}")
+            return
+        async with self._pl_lock(doc.uid):
+            st = xgm_mod.state_of(doc)
+            ok, code, _remain = xgm_mod.validate_evacuation(st, doc, now_ms)
+            if not ok:
+                yield event.plain_result(f"【撤离未完成】撤离条件在结算前发生变化（{code}）。")
+                return
+            mode = str((st.get("evac") or {}).get("mode") or "normal")
+            bag = xgm_mod.bag_summary(st.get("bag") or {})
+            conv = xgm_mod.convert_evacuation_items(st.get("bag") or {})
+            ext = doc.ext
+            doc.exp = int(doc.exp or 0) + int(bag.get("xiuwei", 0) or 0)
+            ext["xueqi"] = int(float(ext.get("xueqi", 0) or 0)) + int(bag.get("xueqi", 0) or 0)
+            ext["potential"] = int(float(ext.get("potential", 0) or 0)) + int(bag.get("potential", 0) or 0)
+            doc.stones = int(doc.stones or 0) + int(conv["lingshi"])
+            delta: dict[str, int] = {}
+            if int(bag.get("source_stone", 0) or 0) > 0:
+                delta["源石"] = int(bag["source_stone"])
+            for item in conv["items"]:
+                qty = int(item.get("quantity", 0) or 0)
+                if qty > 0:
+                    delta[str(item.get("name"))] = delta.get(str(item.get("name")), 0) + qty
+            for tech in bag.get("techniques", ()):
+                tname = tech.get("name") if isinstance(tech, dict) else str(tech)
+                if tname:
+                    delta[str(tname)] = delta.get(str(tname), 0) + 1
+            seeds_keep = ext.get("xiangu_seeds")
+            if not isinstance(seeds_keep, list):
+                seeds_keep = []
+            seeds_keep = seeds_keep + [json.dumps(s, ensure_ascii=False) if isinstance(s, dict) else str(s)
+                                       for s in bag.get("seeds", ())]
+            ext["xiangu_seeds"] = seeds_keep[-200:]
+            summary = xgm_mod.run_summary(st, now_ms / 1000)
+            summary["exit_mode"] = mode
+            ecfg = xgm_mod.evac_config()
+            xgm_mod.clear_session(st, summary)
+            st.setdefault("cd", {})["enter_until"] = now_ms + ecfg["cooldown_h"] * 3600 * 1000
+            async with self.db.transaction():
+                await self.db.save_player(doc.model_dump())
+                for name, qty in delta.items():
+                    await self.db.add_items(doc.uid, {name: qty})
+        seed_names = summary.get("seed_names") or []
+        lines = [
+            "【紧急撤离成功·脱离险境】" if mode == "emergency" else "【撤离成功·重返九天】",
+            f"{doc.name or '修士'}在通道崩塌前冲出秘境，重新立于三千州上空。"
+            if mode == "emergency" else f"{doc.name or '修士'}踏入仙古花蕾开启的归途，平安离开秘境。",
+            "",
+            "【本轮记录】",
+            f"- 探索时间：{summary.get('minutes', 0)} 分钟",
+            f"- 安全带出物品：{len(conv['items'])} 类",
+            f"- 获得道种：{bag['seed_count']} 枚"
+            + (f"（{'、'.join(str(s) for s in seed_names[:5])}{'等' if len(seed_names) > 5 else ''}）"
+               if seed_names else ""),
+            f"- 源石：+{bag['source_stone']:,}",
+        ]
+        if conv["lingshi"] > 0:
+            lines.append(f"- 灵石：+{conv['lingshi']:,}")
+        if conv["refined"] > 0:
+            lines.append(f"- 残兵熔炼：庚金玄土 ×{conv['refined']}")
+        lines.append(f"- 修为：+{bag['xiuwei']:,}｜血气：+{bag['xueqi']:,}")
+        if bag["potential"] > 0:
+            lines.append(f"- 仙道潜力：+{bag['potential']:,}")
+        lines += [
+            f"- 道韵领悟：{summary.get('daoyun', 0)} 点",
+            f"- 击杀：{summary.get('kill_delta', 0)}｜凶名变化：{summary.get('infamy_delta', 0):+.0f}",
+            "",
+            f"秘境背包已完成结算。冷却 {ecfg['cooldown_h']} 小时。"]
+        yield event.plain_result("\n".join(lines))
