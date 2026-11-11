@@ -266,6 +266,13 @@ def main() -> int:
                         "handle_xgd_refine")),
         ("仙遗宝地", ("handle_xbd_list", "handle_xbd_explore", "handle_xbd_claim",
                    "handle_xbd_rules")),
+        ("天神书院", ("handle_tssy_panel", "handle_tssy_rules", "handle_tssy_apply",
+                   "handle_tssy_my", "handle_tssy_promote", "handle_tssy_good",
+                   "handle_tssy_holy", "handle_tssy_salary")),
+        ("红包与赠送", ("handle_hb_send", "handle_hb_grab", "handle_hb_wall",
+                    "handle_gift")),
+        ("一键与特技", ("handle_batch_use", "handle_batch_heal", "handle_sublime",
+                    "handle_emp_title", "handle_mojie")),
         ("帮助", ("handle_help",)),
     ]
     grouped = {}

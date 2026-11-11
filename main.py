@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_story as rs_mod, plane_events as pe_mod, games_mini as gm_mod, xtzb_birth as xb_mod, auto_task as at_mod, easter_eggs as eg_mod, plane_relay as pr_mod, sect_extra as se_mod, assistant as as_mod, bounty as bt_mod, xiangu as xgm_mod, xiangu_npc as xn_mod, xiangu_camp as xc_mod, xiangu_dao as xdd_mod, xiangu_baodi as xbd_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_story as rs_mod, plane_events as pe_mod, games_mini as gm_mod, xtzb_birth as xb_mod, auto_task as at_mod, easter_eggs as eg_mod, plane_relay as pr_mod, sect_extra as se_mod, assistant as as_mod, bounty as bt_mod, xiangu as xgm_mod, xiangu_npc as xn_mod, xiangu_camp as xc_mod, xiangu_dao as xdd_mod, xiangu_baodi as xbd_mod, academy as acd_mod, social as soc_mod, abilities as ab_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -912,6 +912,24 @@ CMD_XBD_LIST = "#仙遗宝地"
 CMD_XBD_EXPLORE = "#探索仙遗宝地"
 CMD_XBD_CLAIM = "#收取仙遗宝地"
 CMD_XBD_RULES = "#仙遗宝地规则"
+# W28 深度核查补漏：天神书院 / 红包赠送 / 一键系列 / 境界特技
+CMD_TSSY_PANEL = "#天神书院"
+CMD_TSSY_APPLY = "#申请入院"
+CMD_TSSY_MY = "#我的院籍"
+CMD_TSSY_PROMOTE = "#院籍晋升"
+CMD_TSSY_GOOD = "#选择仙院"
+CMD_TSSY_HOLY = "#选择圣院"
+CMD_TSSY_SALARY = "#领取书院俸禄"
+CMD_TSSY_RULES = "#书院规则"
+CMD_HB_SEND = "#发红包"
+CMD_HB_GRAB = "#抢红包"
+CMD_HB_WALL = "#红包墙"
+CMD_GIFT = "#赠送"
+CMD_BATCH_USE = "#一键服用"
+CMD_BATCH_HEAL = "#一键回血"
+CMD_SUBLIME = "#极尽升华"
+CMD_EMP_TITLE = "#自封帝号"
+CMD_MOJIE = "#堕入魔界"
 CMD_XGN_TALK = "#与NPC交谈"
 CMD_XGN_TRADE = "#向NPC购买"
 CMD_XGN_ATTACK = "#攻击NPC"
@@ -1565,6 +1583,9 @@ class ZhutianPlugin(Star):
         ev = motou.state_of(doc)
         mult = (1.0 + motou.magic_bonus(ev) + motou.slave_bonus(ev, time.time())
                 + pup_mod.battle_bonus(ev, time.time()))
+        # W28：极尽升华（×4 时限）+ 天神书院择院（圣院全极境 +20%）
+        mult *= ab_mod.sublime_mult(doc)
+        mult *= acd_mod.combat_mult(doc)
         if abs(mult - 1.0) > 1e-9:
             st = equipment.Stats(
                 atk=int(st.atk * mult), defense=int(st.defense * mult),
@@ -23848,8 +23869,10 @@ class ZhutianPlugin(Star):
             if float(enemy.get("orb", 0) or 0) > 0:
                 foe.effects["orb"] = float(enemy["orb"])
             # W27：神火 + 仙气乘区（简化：无条件增伤 +10%/倍率档 +30%/道仙气）
+            # W28：书院仙院再乘 1.15（圣院乘区走 _stats 全局，不在此重复）
             try:
                 mult = xdd_mod.combat_mult(xgm_mod.state_of(doc))
+                mult *= acd_mod.BRANCH_EFFECTS.get(acd_mod.branch_of(doc), {}).get("xianqi_mult", 1.0)
                 if mult > 1.0:
                     me.effects["dmg_dealt_mult"] = float(me.eff("dmg_dealt_mult", 1.0)) * mult
             except Exception:
@@ -24886,3 +24909,332 @@ class ZhutianPlugin(Star):
                     await self.db.save_calamity(cal)
         except Exception:
             pass
+
+
+    # ================================================================ W28 深度核查补漏：天神书院 / 红包赠送 / 一键系列 / 境界特技
+
+    def _ac_stones(self, doc: PlayerDoc, inv: dict | None = None) -> int:
+        """书院源石 = 库存「源石」。"""
+        if inv is not None:
+            return int((inv or {}).get("源石", 0) or 0)
+        return 0
+
+    @filter.command(CMD_TSSY_PANEL, "天神书院（仙古学院面板）")
+    async def handle_tssy_panel(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result(acd_mod.panel(doc))
+
+    @filter.command(CMD_TSSY_RULES, "天神书院规则")
+    async def handle_tssy_rules(self, event: AstrMessageEvent):
+        yield event.plain_result(acd_mod.rules_text())
+
+    @filter.command(CMD_TSSY_APPLY, "申请入院（尊者境·九天十地）")
+    async def handle_tssy_apply(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        plane_st = plane.state_of(doc)
+        ok, msg = acd_mod.apply(doc, xgm_mod.xg_level_of(doc), plane.current(plane_st))
+        if ok:
+            await self._pe_save(doc, {})
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_TSSY_MY, "我的院籍")
+    async def handle_tssy_my(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        yield event.plain_result(acd_mod.my_text(
+            doc, xgm_mod.xg_level_of(doc), self._ac_stones(doc, inv)))
+
+    @filter.command(CMD_TSSY_PROMOTE, "院籍晋升（境界门+源石）")
+    async def handle_tssy_promote(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        ok, msg, cost = acd_mod.promote(doc, xgm_mod.xg_level_of(doc),
+                                        self._ac_stones(doc, inv))
+        if ok:
+            async with self.db.transaction():
+                await self.db.save_player(doc.model_dump())
+                if cost > 0:
+                    await self.db.remove_item(doc.uid, "源石", cost)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_TSSY_GOOD, "选择仙院（道种+10%/仙气+15%，不可更改）")
+    async def handle_tssy_good(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = acd_mod.choose_branch(doc, "仙院")
+        if ok:
+            await self._pe_save(doc, {})
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_TSSY_HOLY, "选择圣院（全极境+20%/涅槃重塑，不可更改）")
+    async def handle_tssy_holy(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = acd_mod.choose_branch(doc, "圣院")
+        if ok:
+            await self._pe_save(doc, {})
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_TSSY_SALARY, "领取书院俸禄（每日）")
+    async def handle_tssy_salary(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        ok, msg, salary = acd_mod.claim_salary(doc, self._ac_stones(doc, inv))
+        if ok:
+            async with self.db.transaction():
+                await self.db.save_player(doc.model_dump())
+                await self.db.add_items(doc.uid, {"源石": salary})
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_HB_SEND, "发红包 单份灵石*个数")
+    async def handle_hb_send(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        m = re.match(r"^(\d+)\s*[*xX×]\s*(\d+)$", (arg or "").strip())
+        if not m:
+            yield event.plain_result("用法：#发红包 单份灵石*个数（如 #发红包 10000*5）")
+            return
+        now_ms = time.time() * 1000
+        async with self.db.calamity_lock:
+            cal = await self.db.get_calamity()
+            world = xgm_mod.world_state(cal)
+            ok, msg, cost = soc_mod.send(world, doc.uid, doc.name or "无名修士",
+                                         int(m.group(1)), int(m.group(2)),
+                                         int(doc.stones or 0), now_ms)
+            if ok:
+                doc.stones = int(doc.stones or 0) - cost
+                cal["xiangu"] = world
+                async with self.db.transaction():
+                    await self.db.save_player(doc.model_dump())
+                    await self.db.save_calamity(cal)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_HB_GRAB, "抢红包 @发送者")
+    async def handle_hb_grab(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        target = self._at_target(event)
+        if not target:
+            yield event.plain_result("用法：#抢红包 @发送红包的道友")
+            return
+        now_ms = time.time() * 1000
+        ext = doc.ext
+        last_grab = float(ext.get("hongbao_grab_at", 0) or 0)
+        async with self.db.calamity_lock:
+            cal = await self.db.get_calamity()
+            world = xgm_mod.world_state(cal)
+            # 先做到期退回
+            refunds = soc_mod._refund_due(world, now_ms)
+            ok, msg, got = soc_mod.grab(world, target, doc.uid, doc.name or "无名修士",
+                                        last_grab, now_ms)
+            if ok or refunds:
+                cal["xiangu"] = world
+                async with self.db.transaction():
+                    if ok:
+                        doc.stones = int(doc.stones or 0) + got
+                        ext["hongbao_grab_at"] = now_ms
+                    await self.db.save_player(doc.model_dump())
+                    for uid, amount in refunds:
+                        rdoc_dict = await self.db.get_player(uid)
+                        if rdoc_dict:
+                            rdoc = PlayerDoc(**rdoc_dict)
+                            rdoc.stones = int(rdoc.stones or 0) + amount
+                            await self.db.save_player(rdoc.model_dump())
+                    await self.db.save_calamity(cal)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_HB_WALL, "红包墙（在挂红包一览）")
+    async def handle_hb_wall(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        async with self.db.calamity_lock:
+            cal = await self.db.get_calamity()
+            world = xgm_mod.world_state(cal)
+            text = soc_mod.wall_text(world, time.time() * 1000)
+            cal["xiangu"] = world
+            await self.db.save_calamity(cal)
+        yield event.plain_result(text)
+
+    @filter.command(CMD_GIFT, "赠送 @对方 物品*数量")
+    async def handle_gift(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        target = self._at_target(event)
+        spec = (arg or "").strip()
+        m = re.match(r"^(.*?)(\S+)\s*[*xX×]\s*(\d+)$", spec)
+        if not m:
+            yield event.plain_result("用法：#赠送 @对方 物品*数量（如 #赠送 @道友 神源石*2）")
+            return
+        item_name = (m.group(2) or "").strip()
+        qty = int(m.group(3))
+        if not target:
+            yield event.plain_result("请 @ 对方（或确认平台已推送 @ 标记）。")
+            return
+        if str(target) == str(doc.uid):
+            yield event.plain_result("不能赠送给自己。")
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        have = int((inv or {}).get(item_name, 0) or 0)
+        item_def = self.item_index.get(item_name) or {}
+        why = soc_mod.gift_check({"name": item_name, "class": item_def.get("class"),
+                                  "type": item_def.get("type"),
+                                  "不可交易": item_def.get("不可交易"),
+                                  "unique": item_def.get("unique")}, qty)
+        if why:
+            yield event.plain_result(why)
+            return
+        if have < qty:
+            yield event.plain_result(f"纳戒里「{item_name}」只有 {have} 件。")
+            return
+        uid_a, uid_b = sorted([str(doc.uid), str(target)])
+        async with self._pl_lock(uid_a):
+            async with self._pl_lock(uid_b):
+                rdoc_dict = await self.db.get_player(str(target))
+                if not rdoc_dict:
+                    yield event.plain_result("对方尚未踏入仙途。")
+                    return
+                rdoc = PlayerDoc(**rdoc_dict)
+                async with self.db.transaction():
+                    await self.db.remove_item(doc.uid, item_name, qty)
+                    await self.db.add_items(str(target), {item_name: qty})
+                    await self.db.save_player(doc.model_dump())
+        yield event.plain_result(f"【赠送】你将「{item_name}」× {qty} 赠予 {rdoc.name or '道友'}。"
+                                 "愿此宝物助道友仙途更上一层楼！")
+
+    @filter.command(CMD_BATCH_USE, "一键服用 物品名（吃光纳戒内该消耗品）")
+    async def handle_batch_use(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        name = (name or "").strip()
+        if not name:
+            yield event.plain_result("用法：#一键服用 物品名（如 #一键服用 修为丹）")
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        _hp_cur, hp_max = self._hp_pair(doc)
+        ok, msg, used = ab_mod.batch_use(doc, inv, self.item_index.get(name), hp_max,
+                                         random.Random(f"{doc.uid}:bu:{time.time()}"),
+                                         time.time())
+        if ok and used > 0:
+            async with self.db.transaction():
+                await self.db.save_player(doc.model_dump())
+                await self.db.remove_item(doc.uid, name, used)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_BATCH_HEAL, "一键回血（吃光回复类丹药直到血满）")
+    async def handle_batch_heal(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        _hp_cur, hp_max = self._hp_pair(doc)
+        ok, msg, used = ab_mod.batch_heal(doc, inv, self.item_index.get, hp_max,
+                                          random.Random(f"{doc.uid}:bh:{time.time()}"),
+                                          time.time())
+        if ok and used:
+            async with self.db.transaction():
+                await self.db.save_player(doc.model_dump())
+                for n, q in used.items():
+                    await self.db.remove_item(doc.uid, n, q)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_SUBLIME, "极尽升华（×4 十分钟，主轨永久 -1 境）")
+    async def handle_sublime(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        gate = ab_mod.sublime_gate(doc)
+        if gate:
+            yield event.plain_result(gate)
+            return
+        msg = ab_mod.sublime_apply(doc, st, time.time())
+        await self._pe_save(doc, {})
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_EMP_TITLE, "自封帝号 帝号（证道成帝者）")
+    async def handle_emp_title(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = ab_mod.emperor_title_set(doc, xgm_mod.state_of(doc), (arg or "").strip())
+        if ok:
+            await self._pe_save(doc, {})
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_MOJIE, "堕入魔界（魔头挂机历练·一次性结算）")
+    async def handle_mojie(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        s = motou.state_of(doc)
+        gate = ab_mod.mojie_gate(doc, s)
+        if gate:
+            yield event.plain_result(gate)
+            return
+        msg, _stones = ab_mod.mojie_run(doc, s, random.Random(f"{doc.uid}:mj:{time.time()}"))
+        d = doc.model_copy(deep=True)
+        d.ext["evil"] = dict(s)
+        d.ext["modao"] = float(s.get("modao", 0))
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)

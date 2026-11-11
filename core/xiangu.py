@@ -1153,6 +1153,20 @@ def should_drop_seed(cfg: Mapping, location: str, source: str = "treasure",
     return (rng or random.Random()).random() < max(0.0, min(1.0, float(rule.get(key, 0) or 0)))
 
 
+def should_drop_seed_b(doc: Any, cfg: Mapping, location: str, source: str = "treasure",
+                       rng: Callable[[], float] | None = None) -> bool:
+    """带天神书院仙院加成（×1.1）的道种掉落判定（W28）。"""
+    try:
+        from . import academy as _acd
+        bonus = _acd.seed_rate_bonus(doc)
+    except Exception:
+        bonus = 0.0
+    rule = _seed_drop_rule(cfg, location)
+    key = {"boss": "Boss道种率", "unique": "唯一机缘道种率"}.get(source, "机缘格道种率")
+    chance = max(0.0, min(1.0, float(rule.get(key, 0) or 0))) * (1.0 + max(0.0, bonus))
+    return (rng or random.Random()).random() < min(1.0, chance)
+
+
 def _weighted_pick(entries: list, get_weight: Callable, rng: Callable[[], float]) -> Any:
     if not entries:
         return None
@@ -1791,7 +1805,7 @@ def perform_explore(doc: Any, st: dict, location: str, bias: Mapping | None,
             st["infamy"] = int(st.get("infamy", 0) or 0) + infamy_gain
             gains["xiongmng"] = infamy_gain
             drop_txt = ""
-            if should_drop_seed(cfg, location, "treasure", rng):
+            if should_drop_seed_b(doc, cfg, location, "treasure", rng):
                 seed = draw_seed(cfg, location, None, "treasure", rng=rng)
                 bag_add_seed(st["bag"], seed)
                 drop_txt = (f"\n\n【意外之喜！】击败{name}后发现其体内蕴含道种！\n"
@@ -1872,7 +1886,7 @@ def _explore_boss(doc: Any, st: dict, location: str, cfg: Mapping,
                                          "desc": f"击败{bdef['name']}掉落的战利品"})
                 drops.append(f"{d_name}（{d_rarity}）")
         seed_txt = ""
-        if should_drop_seed(cfg, location, "boss", rng):
+        if should_drop_seed_b(doc, cfg, location, "boss", rng):
             seed = draw_seed(cfg, location, None, "boss", rng=rng)
             bag_add_seed(st["bag"], seed)
             seed_txt = f"\n【Boss 道种掉落】{seed['名称']} [{seed['品质']}]"
@@ -2098,7 +2112,7 @@ def _cell_treasure(doc: Any, st: dict, map_st: dict, pos: Mapping,
         if world_claim(claims, scope):
             return "💨【机缘已失】此处造化已被另一位天骄先一步搜走，只余残存道痕。"
         world_claim_put(claims, scope, getattr(doc, "uid", ""), getattr(doc, "name", ""), time.time())
-    if should_drop_seed(cfg, zone, "treasure", rng):
+    if should_drop_seed_b(doc, cfg, zone, "treasure", rng):
         sd = draw_seed(cfg, zone, map_st["fragment_id"], "treasure", rng=rng)
         bag_add_seed(st["bag"], sd)
         xw, xq = calc_rewards(doc, risk_mult * 2, rng)
@@ -2190,7 +2204,7 @@ def _cell_danger(doc: Any, st: dict, map_st: dict, pos: Mapping, zone: str,
             st["infamy"] = int(st.get("infamy", 0) or 0) + 10
             map_st["grid"][y][x] = CELL_EXPLORED
             drop_txt = ""
-            if should_drop_seed(load_config(), zone, "boss", rng):
+            if should_drop_seed_b(doc, load_config(), zone, "boss", rng):
                 sd = draw_seed(load_config(), zone, map_st["fragment_id"], "boss", rng=rng)
                 bag_add_seed(st["bag"], sd)
                 drop_txt = f"\n【Boss 道种掉落】{sd['名称']} [{sd['品质']}]"

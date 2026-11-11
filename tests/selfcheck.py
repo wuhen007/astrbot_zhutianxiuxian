@@ -9797,6 +9797,129 @@ async def main():
     assert "仙遗宝地" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
     print("W27 xiangu 道种神火+祭炼+宝地 ok")
 
+    # ========================================================= W28：深度核查补漏（天神书院/红包/一键/特技）
+    from core import academy as acd290, social as soc290, abilities as ab290
+    from core import motou as mt290
+
+    d290 = PlayerDoc(uid="u290", name="院生", realm_index=20, stones=0,
+                     ext={"xueqi": 1, "hp": 100, "hp_max": 100, "xiangu": {}})
+    ok290, msg290 = acd290.apply(d290, xgm260.xg_level_of(d290), "遮天位面")
+    assert not ok290 and "九天十地" in msg290
+    ok290, msg290 = acd290.apply(d290, xgm260.xg_level_of(d290), "九天十地")
+    assert ok290 and "外院弟子" in msg290
+    ok290, msg290 = acd290.apply(d290, xgm260.xg_level_of(d290), "九天十地")
+    assert not ok290 and "已经拥有" in msg290
+    ok290, msg290 = acd290.choose_branch(d290, "仙院")
+    assert ok290 and "不可重复更改" in msg290
+    ok290, msg290 = acd290.choose_branch(d290, "圣院")
+    assert not ok290 and "不可重复选择" in msg290
+    assert acd290.seed_rate_bonus(d290) > 0.09, "仙院道种加成"
+    ok290, msg290, cost290 = acd290.claim_salary(d290, 0)
+    assert ok290 and cost290 == 100, msg290
+    ok290, msg290, _ = acd290.claim_salary(d290, 0)
+    assert not ok290 and "已经领取" in msg290
+    ok290, msg290, _ = acd290.promote(d290, xgm260.xg_level_of(d290), 999_999)
+    assert not ok290 and "需要达到" in msg290, "神火境内院需仙古 8 境"
+    d290.realm_index = 24
+    ok290, msg290, cost290 = acd290.promote(d290, xgm260.xg_level_of(d290), 499)
+    assert not ok290 and "源石" in msg290
+    ok290, msg290, cost290 = acd290.promote(d290, xgm260.xg_level_of(d290), 500)
+    assert ok290 and cost290 == 500 and "内院弟子" in msg290
+
+    world290b: dict = {}
+    ok290, msg290, cost290 = soc290.send(world290b, "u290", "院生", 5_000, 3, 1_000_000, 1000.0)
+    assert ok290 and cost290 == 15_000 + 150, msg290
+    ok290, msg290, got290 = soc290.grab(world290b, "u290", "u290", "自己", 0, 2000.0)
+    assert not ok290 and "不能抢自己" in msg290
+    for uid290 in ("u291", "u292", "u293"):
+        ok290, msg290, got290 = soc290.grab(world290b, "u290", uid290, "抢客", 0, 2000.0)
+        assert ok290 and got290 == 5_000, msg290
+    assert "u290" not in (world290b.get("hongbao") or {}), "抢空即摘"
+    world290b["hongbao"]["u290"] = {"per": 100, "left": 1, "name": "x", "at": time.time() * 1000}
+    ok290, msg290, _ = soc290.grab(world290b, "u290", "u291", "抢客", time.time() * 1000,
+                                   time.time() * 1000)
+    assert not ok290 and "CD" in msg290
+    world290b["hongbao"]["u299"] = {"per": 100, "left": 2, "name": "旧", "at": 0.0}
+    refunds = soc290._refund_due(world290b, time.time() * 1000)
+    assert refunds and refunds[0][1] == 200, refunds
+
+    d292 = PlayerDoc(uid="u292", name="服药", realm_index=10,
+                     ext={"hp": 10, "hp_max": 1000, "xueqi": 0})
+    inv292 = {"小还丹": 3, "金创药": 2}
+    def _lookup292(name):
+        return {"小还丹": {"name": "小还丹", "HP": 500},
+                "金创药": {"name": "金创药", "HPp": 0.5}}.get(name)
+    ok290, msg290, used290 = ab290.batch_heal(d292, inv292, _lookup292, 1000, _Lucky60())
+    assert ok290 and sum(used290.values()) >= 2, (msg290, used290)
+    assert int(d292.ext["hp"]) >= 990, f"回血到接近满：{d292.ext['hp']}"
+    d293 = PlayerDoc(uid="u293", name="服丹", realm_index=10,
+                     ext={"hp": 100, "hp_max": 1000, "exp": 0})
+    ok290, msg290, used290 = ab290.batch_use(
+        d293, {"修为丹": 5}, {"name": "修为丹", "exp": 1000}, 1000, _Lucky60())
+    assert ok290 and used290 == 5 and int(d293.exp) == 5_000, (msg290, d293.exp)
+    ok290, msg290, _ = ab290.batch_use(d293, {"铁剑": 1}, {"name": "铁剑", "class": "装备"}, 1000)
+    assert not ok290 and "装备" in msg290
+
+    d294 = PlayerDoc(uid="u294", name="升华", realm_index=39, ext={"hp": 1, "hp_max": 1})
+    st294 = xgm260.state_of(d294)
+    gate294 = ab290.sublime_gate(d294)
+    assert gate294 and "境界不足" in gate294
+    d294.realm_index = 40
+    assert ab290.sublime_gate(d294) is None
+    msg290 = ab290.sublime_apply(d294, st294, 1000.0)
+    assert "×4" in msg290 and int(d294.realm_index) == 39
+    assert ab290.sublime_mult(d294, 1500.0) == 4.0, "窗口内 ×4（apply@1000+600s）"
+    assert ab290.sublime_mult(d294, 9999.0) == 1.0, "10 分钟后失效"
+    gate294 = ab290.sublime_gate(d294, now=1500.0)
+    assert gate294 and "已处于" in gate294
+
+    d295 = PlayerDoc(uid="u295", name="帝者", realm_index=50, ext={})
+    ok290, msg290 = ab290.emperor_title_set(d295, xgm260.state_of(d295), "焚天武帝")
+    assert not ok290 and "登临帝位" in msg290, "未证道拒绝"
+    # zhengdao.state_of 返回合并临时档，测试直接写 ext["daoshang"]
+    d295.ext.setdefault("daoshang", {})["reached"] = True
+    ok290, msg290 = ab290.emperor_title_set(d295, xgm260.state_of(d295), "玉皇大帝")
+    assert not ok290 and "禁忌" in msg290
+    ok290, msg290 = ab290.emperor_title_set(d295, xgm260.state_of(d295), "焚天武帝")
+    assert ok290 and "◈焚天武帝◈" in msg290
+    assert (d295.ext.get("daoshang") or {}).get("emperor_title") == "焚天武帝"
+
+    d296 = PlayerDoc(uid="u296", name="魔头", realm_index=20, exp=10_000, stones=0,
+                     ext={"modao": 150, "evil": {}})
+    s296 = mt290.state_of(d296)
+    assert ab290.mojie_gate(d296, s296) is None
+    msg290, stones290 = ab290.mojie_run(d296, s296, _Lucky60())
+    assert "历练归来" in msg290 and stones290 > 0
+    assert int(d296.exp) >= 10_000 - 4_000, "扣 4000 收更多"
+    assert abs(float(s296["modao"]) - (150 - 100 + 5)) < 1e-9
+    d297 = PlayerDoc(uid="u297", name="善人", realm_index=20, exp=10_000,
+                     ext={"modao": 10, "evil": {}})
+    gate294 = ab290.mojie_gate(d297, mt290.state_of(d297))
+    assert gate294 and "非真魔" in gate294
+
+    d298 = PlayerDoc(uid="u298", name="仙院", realm_index=20,
+                     ext={"hp": 1, "hp_max": 1,
+                          "xiangu": {"academy": {"学院": "天神书院", "分院": "仙院"}}})
+    hit280 = sum(1 for i in range(200)
+                 if xgm260.should_drop_seed_b(d298, xgm260.load_config(), "核心区域",
+                                              "boss", rng=xgm260.seeded_rng(f"sr{i}")))
+    assert hit280 > 0, "核心区域 Boss 道种率 0.42×1.1 必有命中"
+
+    src290 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    names290w = ["CMD_TSSY_PANEL", "CMD_TSSY_APPLY", "CMD_TSSY_MY", "CMD_TSSY_PROMOTE",
+                 "CMD_TSSY_GOOD", "CMD_TSSY_HOLY", "CMD_TSSY_SALARY", "CMD_TSSY_RULES",
+                 "CMD_HB_SEND", "CMD_HB_GRAB", "CMD_HB_WALL", "CMD_GIFT",
+                 "CMD_BATCH_USE", "CMD_BATCH_HEAL", "CMD_SUBLIME", "CMD_EMP_TITLE",
+                 "CMD_MOJIE"]
+    miss290 = [c for c in names290w if f"@filter.command({c}" not in src290]
+    assert miss290 == [], f"漏注册：{miss290}"
+    assert "ab_mod.sublime_mult(doc)" in src290 and "acd_mod.combat_mult(doc)" in src290,         "_stats 需挂升华与书院乘区"
+    assert "should_drop_seed_b" in open(PLUGIN / "core/xiangu.py", encoding="utf-8").read()
+    help290e = _json60.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
+    assert any(g["group"] == "天神书院与社交经济" for g in help290e)
+    assert "天神书院" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
+    print("W28 深度核查补漏 ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 
