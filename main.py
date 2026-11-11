@@ -19704,12 +19704,28 @@ class ZhutianPlugin(Star):
         if err:
             yield event.plain_result(err)
             return
-        # W27 分流：神火已燃且仙气 <3 → 仙气试炼（原版神火境极境冲关修仙气）
+        # W27 分流：神火已燃且仙气 <3 → 仙气试炼（原版神火境极境冲关修仙气）。
+        # 审计 #6：与主轨极境冲关同价同风险——三种太古遗种真血×1 + 血气 100 万，
+        # 失败照扣（与 dz_mod.charge 失败不退一致）。
+        from .core import wallet as wallet_mod
         _st_xg = xgm_mod.state_of(doc)
-        ok_xq, msg_xq = xdd_mod.charge_extreme_xianqi(
-            doc, _st_xg, random.Random(f"{doc.uid}:xq:{time.time()}"))
-        if ok_xq:
-            await self._pe_save(doc, {})
+        if xdd_mod.shenhuo_of(_st_xg).get("已点燃") and xdd_mod.xianqi_count(_st_xg) < 3:
+            inv_xq = await self.db.get_inventory(doc.uid)
+            missing_xq = [b for b in dz_mod.EXTREME_BLOODS
+                          if int((inv_xq or {}).get(b, 0) or 0) < 1]
+            if missing_xq:
+                yield event.plain_result("仙气试炼需三种太古遗种真血各 1 份，尚缺："
+                                         + "、".join(missing_xq) + "。")
+                return
+            if wallet_mod.xueqi(doc) < dz_mod.EXTREME_XUEQI:
+                yield event.plain_result(
+                    f"仙气试炼需血气 ≥{dz_mod.EXTREME_XUEQI:,}（当前 {wallet_mod.xueqi(doc):,}）。")
+                return
+            delta_xq = {b: -1 for b in dz_mod.EXTREME_BLOODS}
+            wallet_mod.set_xueqi(doc, wallet_mod.xueqi(doc) - dz_mod.EXTREME_XUEQI)
+            ok_xq, msg_xq = xdd_mod.charge_extreme_xianqi(
+                doc, _st_xg, random.Random(f"{doc.uid}:xq:{time.time()}"))
+            await self._pe_save(doc, delta_xq)
             yield event.plain_result(msg_xq)
             return
         inv = await self.db.get_inventory(doc.uid)
@@ -23793,6 +23809,13 @@ class ZhutianPlugin(Star):
                     note = {"preparing": "🌱 仙古花蕾现世，正在凝聚——千年后绽放！",
                             "opened": "🌺 三千道州气运汇聚，仙古花蕾绽放，秘境开启！",
                             "closed": "❄️ 万年一期，仙古秘境重归沉寂。"}.get(tr, "")
+                    # 跃迁当场落库：即使随后被门槛拦下，概率推进/花蕾阶段也不丢
+                    cal["xiangu"] = world
+                    await self.db.save_calamity(cal)
+                    # 审计 #12：轮次闭合后清理该轮一次性认领（机缘格/NPC 死亡）
+                    if tr == "closed" and world.get("lifecycle", {}).get("open_year"):
+                        xgm_mod.prune_round_claims(world, f"xiangu-{world['lifecycle']['open_year']}")
+                        await self.db.save_calamity(cal)
             world.setdefault("claims", {})
             cal["xiangu"] = world
             return cal, world, note
@@ -23808,11 +23831,19 @@ class ZhutianPlugin(Star):
             hp_cur, _hp_max = self._hp_pair(doc)
             me = build_fighter(doc, doc.name or "道友", st_.atk, st_.defense,
                                max(1, int(hp_cur)), st_.bao, self.item_index.get)
+            xgm_mod.set_hp_hint(xgm_mod.state_of(doc), _hp_max)
+            # 审计 #14：仙古表 ÷1000 的敌属性对主轨+装备玩家过弱（打不动玩家），
+            # 以玩家面板做下限钳制：攻 ≥45% 玩家攻、血 ≥60% 玩家上限、防 ≥40% 玩家攻。
+            floor_atk = max(1, int(st_.atk * 0.45))
+            floor_hp = max(1, int(_hp_max * 0.60))
+            e_atk = max(int(enemy.get("atk", 1)), floor_atk)
+            e_def = max(int(enemy.get("defense", 1)), int(st_.atk * 0.40))
+            e_hp = max(int(enemy.get("hp", 1)), floor_hp)
             foe = Fighter(name=str(enemy.get("name") or "秘境之敌"),
-                          atk=max(1, int(enemy.get("atk", 1))),
-                          defense=max(1, int(enemy.get("defense", 1))),
-                          hp=max(1, int(enemy.get("hp", 1))),
-                          hp_max=max(1, int(enemy.get("hp_max", enemy.get("hp", 1)))),
+                          atk=max(1, e_atk),
+                          defense=max(1, e_def),
+                          hp=max(1, e_hp),
+                          hp_max=max(1, int(enemy.get("hp_max", e_hp)) if enemy.get("hp_max", 0) >= e_hp else e_hp),
                           bao=float(enemy.get("bao", 0.05) or 0.05))
             if float(enemy.get("orb", 0) or 0) > 0:
                 foe.effects["orb"] = float(enemy["orb"])
@@ -23935,6 +23966,8 @@ class ZhutianPlugin(Star):
             yield event.plain_result("【撤离中断】你重新展开神识探索，撤离通道随之消散。")
             st.pop("evac", None)
         now_ms = time.time() * 1000
+        _hp_cur_xe, _hp_max_xe = self._hp_pair(doc)
+        xgm_mod.set_hp_hint(st, _hp_max_xe)
         cal, world, _note = await self._xg_world(advance=False)
         rng = random.Random(f"{doc.uid}:xgm:explore:{now_ms}")
         text, _ev = xgm_mod.explore_turn(doc, st, rng, now_ms, world)
@@ -23964,6 +23997,8 @@ class ZhutianPlugin(Star):
         except ValueError:
             return
         now_ms = time.time() * 1000
+        _hp_cur_ch, _hp_max_ch = self._hp_pair(doc)
+        xgm_mod.set_hp_hint(st, _hp_max_ch)
         cal, world, _note = await self._xg_world(advance=False)
         rng = random.Random(f"{doc.uid}:xgm:choice:{now_ms}")
         text, _ev = xgm_mod.choose_explore(doc, st, idx, xgm_mod.load_config(), rng, now_ms,
@@ -23991,6 +24026,8 @@ class ZhutianPlugin(Star):
         key, digits = match.group(1), match.group(2)
         steps = max(1, min(20, int(digits) if digits else 1))
         now_ms = time.time() * 1000
+        _hp_cur_mv, _hp_max_mv = self._hp_pair(doc)
+        xgm_mod.set_hp_hint(st, _hp_max_mv)
         ready, remain = xgm_mod._cd_ready(st, "move", now_ms)
         if not ready:
             yield event.plain_result(f"{doc.name or '修士'}刚移动过，请稍等 {remain} 秒再行动。")
@@ -24079,7 +24116,7 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         st = xgm_mod.state_of(doc)
-        yield event.plain_result(xgm_mod.seed_view_text(st, xgm_mod.load_config()))
+        yield event.plain_result(xdd_mod.seed_detail_text(st, xgm_mod.load_config()))
 
     @filter.command(CMD_XGM_LEAVE, "离开仙古秘境（须核心，10-60s 读条）")
     async def handle_xgm_leave(self, event: AstrMessageEvent):
@@ -24641,7 +24678,6 @@ class ZhutianPlugin(Star):
         m = re.match(r"^#借助(.+?)道种点燃神火$|^#借助(.+?)点燃神火$", str(event.message_str).strip())
         arg = (m.group(1) or m.group(2) or "").strip() if m else ""
         st = xgm_mod.state_of(doc)
-        st["_doc"] = doc
         now_ms = time.time() * 1000
         text, _intent = xdd_mod.fusion_intent(doc, st, arg, xgm_mod.load_config(), now_ms)
         if st.get("fusion"):
@@ -24657,7 +24693,6 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         st = xgm_mod.state_of(doc)
-        st["_doc"] = doc
         text, ev = xdd_mod.fusion_confirm(doc, st, random.Random(f"{doc.uid}:fus:{time.time()}"),
                                           time.time() * 1000, xgm_mod.load_config())
         delta = {}

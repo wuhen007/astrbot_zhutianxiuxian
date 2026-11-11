@@ -182,7 +182,7 @@ def shenhuo_text(doc: Any, st: Mapping) -> str:
 
 def seed_detail_text(st: Mapping, cfg: Mapping | None = None) -> str:
     """#查看道种 分品质详表（W27 增强版）。"""
-    seeds = usable_seeds(st, cfg)
+    seeds = usable_seeds(doc, st, cfg)
     if not seeds:
         return ("【道种查看·空空如也】\n尚未获得任何道种。\n\n【获取途径】\n"
                 "• #秘境探索 机缘格\n• 击杀秘境 Boss\n• 唯一机缘 / NPC 交易")
@@ -216,24 +216,22 @@ def seed_detail_text(st: Mapping, cfg: Mapping | None = None) -> str:
 
 # ---------------------------------------------------------------- 融合（道种孕育路线）
 
-def usable_seeds(st: Mapping, cfg: Mapping | None = None) -> list[dict]:
+def usable_seeds(doc: Any, st: Mapping, cfg: Mapping | None = None) -> list[dict]:
     """秘境背包 + 常驻道种库（ext["xiangu_seeds"]，撤离时转入）的可用道种档案。"""
     out: list[dict] = []
     for s in (st.get("bag") or {}).get("seeds", ()):
         rec = xg.resolve_seed_record(s, cfg)
         if rec:
             out.append(rec)
-    doc = st.get("_doc")  # handler 注入（可选）：常驻库在 doc.ext["xiangu_seeds"]
-    if doc is not None:
-        ext = getattr(doc, "ext", {}) or {}
-        for raw in ext.get("xiangu_seeds", ()) or ():
-            try:
-                rec = xg.resolve_seed_record(json.loads(raw), cfg) if isinstance(raw, str) \
-                    else xg.resolve_seed_record(raw, cfg)
-            except Exception:
-                rec = None
-            if rec:
-                out.append(rec)
+    ext = getattr(doc, "ext", {}) or {}
+    for raw in ext.get("xiangu_seeds", ()) or ():
+        try:
+            rec = xg.resolve_seed_record(json.loads(raw), cfg) if isinstance(raw, str) \
+                else xg.resolve_seed_record(raw, cfg)
+        except Exception:
+            rec = None
+        if rec:
+            out.append(rec)
     return out
 
 
@@ -257,7 +255,7 @@ def fusion_intent(doc: Any, st: dict, name_or_idx: str,
                 f"当前区域：{st.get('location')}（#秘境移动 前往核心）"), None
     if shenhuo_of(st).get("已点燃"):
         return "【道种融合·神火已燃】神火既已点燃，便不可再次融合道种（#查看神火）。", None
-    seeds = usable_seeds(st, cfg)
+    seeds = usable_seeds(doc, st, cfg)
     if not seeds:
         return "【道种融合·无种可融】体内空空如也——探索机缘格 / 击杀 Boss 获取道种。", None
     selected: dict | None = None
@@ -304,19 +302,30 @@ def fusion_confirm(doc: Any, st: dict, rng: Callable[[], float], now_ms: float,
         return "当前没有待确认的道种融合，或确认已超时。", events
     seed_name = str(intent.get("seed") or "")
     st.pop("fusion", None)
-    seeds = usable_seeds(st, cfg)
+    seeds = usable_seeds(doc, st, cfg)
     seed = next((s for s in seeds if s.get("名称") == seed_name), None)
     if seed is None:
         return f"道种【{seed_name}】已不在身，融合作废。", events
-    in_core = xg.FRAGMENTS.get((st.get("map") or {}).get("fragment_id", ""), {}).get("zone") == "核心区域"
-    rate = fusion_rate(doc, st, seed, in_core)
-    # 移除道种（背包优先，再常驻库）
+    # 消耗：背包与常驻库两处同名道种一并移除（损毁/融合只此一份）
     bag_seeds = st["bag"].get("seeds", [])
     for i, s in enumerate(bag_seeds):
         nm = str(s.get("名称") if isinstance(s, dict) else s)
         if nm == seed_name:
             bag_seeds.pop(i)
             break
+    _doc_ext = getattr(doc, "ext", None)
+    if isinstance(_doc_ext, dict) and isinstance(_doc_ext.get("xiangu_seeds"), list):
+        kept = []
+        for raw in _doc_ext["xiangu_seeds"]:
+            try:
+                nm = str((json.loads(raw) if isinstance(raw, str) else raw).get("名称") or "")
+            except Exception:
+                nm = ""
+            if nm != seed_name:
+                kept.append(raw)
+        _doc_ext["xiangu_seeds"] = kept
+    in_core = xg.FRAGMENTS.get((st.get("map") or {}).get("fragment_id", ""), {}).get("zone") == "核心区域"
+    rate = fusion_rate(doc, st, seed, in_core)
     # 三成概率禁制打断
     if rng.random() < FUSION_INTERRUPT:
         hp_loss = max(1, int(xg._hp_of(doc) * 0.2))
@@ -380,11 +389,10 @@ def ignite_self(doc: Any, st: dict, rng: Callable[[], float],
     if poor:
         return poor, events
     from . import wallet
+    # 原版：雄厚根基是「门槛」而非消耗；失败另扣 5% 修为
     if int(getattr(doc, "exp", 0) or 0) < IGNITE_ENERGY or wallet.xueqi(doc) < IGNITE_ENERGY:
         return (f"【点燃神火·根基未足】苦修点燃神火需雄厚根基，"
                 f"修为/血气需各达 {IGNITE_ENERGY:,}。"), events
-    doc.exp = int(doc.exp) - IGNITE_ENERGY
-    wallet.set_xueqi(doc, wallet.xueqi(doc) - IGNITE_ENERGY)
     if rng.random() > 0.6:
         loss = int(int(getattr(doc, "exp", 0) or 0) * 0.05)
         doc.exp = max(0, int(doc.exp) - loss)

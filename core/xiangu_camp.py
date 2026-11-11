@@ -251,7 +251,7 @@ def offer_seed(doc: Any, st: dict, seed_name: str, rng: Callable[[], float]) -> 
     frep["good"] = int(frep.get("good", 0) or 0) + rep
     gains = st.setdefault("gains", {})
     gains["daoyun"] = int(gains.get("daoyun", 0) or 0) + daoyun
-    rw = xg.grant_growth(st, doc, stone_rolls=0)
+    rw = xg.grant_growth(doc, stone_rolls=0)
     xg.bag_add_growth(st["bag"], source_stone=lingshi)
     name = str(target.get("名称") if isinstance(target, dict) else target)
     return True, "\n".join([

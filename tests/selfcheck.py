@@ -9704,6 +9704,82 @@ async def main():
     # _Doom280: roll 0.99 → 40% 无所获或守护分支；两条皆合法，只验证不崩
     assert "仙遗宝地·探索" in txt280
 
+    # —— 审计回归：本次修复的关键行为
+    # (2) 攻击 NPC 战败不登记死亡名额
+    d290 = PlayerDoc(uid="u290", name="挑战者", realm_index=20,
+                     ext={"potential": 50, "hp": 400_000, "hp_max": 400_000})
+    st290 = xgm260.state_of(d290)
+    st290["active"] = True
+    st290["map"] = xgm260.new_run_map("seed-Z")
+    world290: dict = {}
+    xnk270.ensure_bindings(d290, st290, xgm260.seeded_rng("audit-290"))
+    spot290 = next(s for s in st290["map"]["npc_locations"] if s.get("npc"))
+    st290["map"]["pos"] = {"x": spot290["x"], "y": spot290["y"]}
+    if (spot290["npc"].get("faction") == "good" and not spot290["npc"].get("hostile")
+            and not spot290["npc"].get("is_canon") and not spot290["npc"].get("personality")):
+        xnk270.ensure_bindings(d290, st290, xgm260.seeded_rng("audit-290b"))
+        spot290 = next(s for s in st290["map"]["npc_locations"]
+                       if s.get("npc") and not ((s["npc"].get("faction") == "good"
+                                                 and not s["npc"].get("is_canon"))))
+        st290["map"]["pos"] = {"x": spot290["x"], "y": spot290["y"]}
+    def _lose290(enemy, btype):
+        return False, ["第1回合：不敌"]
+    xnk270.attack(d290, st290, world290, _Lucky60(), 1000.0, _lose290)
+    death_scopes = [k for k in (world290.get("claims") or {}) if ":npc:" in k]
+    assert not death_scopes, "战败不得登记 NPC 死亡名额"
+    assert st290.get("pending_defeat"), "战败仍需进入生死抉择"
+    # (4) 购买当场扣灵石
+    d291 = PlayerDoc(uid="u291", name="买家", realm_index=20, stones=100_000,
+                     ext={"hp": 1, "hp_max": 1})
+    st291 = xgm260.state_of(d291)
+    st291["active"] = True
+    st291["map"] = xgm260.new_run_map("seed-Y")
+    st291["map"]["fragment_id"] = "ancient_ruins"   # 中层才有交易 NPC（道种贩者）
+    xnk270.ensure_bindings(d291, st291, xgm260.seeded_rng("audit-291"))
+    trade_spot = next((s for s in st291["map"]["npc_locations"]
+                       if (s.get("npc") or {}).get("trade")), None)
+    assert trade_spot, "交易 NPC 必然可绑定（道种贩者/秘境猎手）"
+    st291["map"]["pos"] = {"x": trade_spot["x"], "y": trade_spot["y"]}
+    item291 = trade_spot["npc"]["trade"]["items"][0]["name"]
+    price291 = trade_spot["npc"]["trade"]["items"][0]["price"]
+    ok291, _t291, _d291 = xnk270.buy(d291, st291, item291, _Lucky60())
+    assert ok291 and int(d291.stones) == 100_000 - price291, (ok291, d291.stones, price291)
+    # (3) 新一轮 begin_run 作废上轮冠冕
+    st291["crowned"] = "xiangu-old"
+    xgm260.begin_run(st291, "xiangu-new", 1000.0, _Lucky60())
+    assert not st291.get("crowned"), "冠冕跨轮必须作废"
+    # (7) 陷阱仙髓池 → 伏杀而非奖励
+    st292 = xgm260.state_of(d290)
+    pool292 = xgm260.place_marrow_pool(st292["map"], xgm260.seeded_rng("trap-292"))
+    st292["map"]["unique_treasures"][pool292["key"]]["is_trap"] = True
+    pool292b = st292["map"]["unique_treasures"][pool292["key"]]
+    if not pool292b.get("claimed"):
+        t292b = xgm260._cell_marrow(d290, st292, st292["map"], pool292["pos"],
+                                     pool292b, pool292["key"],
+                                     battle=lambda e, b: (True, ["反杀"]), rng=_Lucky60())
+        assert "伏杀" in t292b and "万道仙髓池" in t292b, t292b[:50]
+        assert "浸泡所得" not in t292b, "陷阱池不得发放浸泡奖励"
+    # (5) 苦修点燃是门槛不是消耗：成功后修为/血气不扣
+    d293 = PlayerDoc(uid="u293", name="苦修", realm_index=20, exp=100_000,
+                     ext={"potential": 30, "hp": 100, "hp_max": 100, "xueqi": 100_000})
+    st293 = xgm260.state_of(d293)
+    st293["active"] = True
+    st293["map"] = xgm260.new_run_map("seed-W")
+    t293, _ = xdd280.ignite_self(d293, st293, _Lucky280(), {})
+    assert "成功" in t293 and int(d293.exp) == 100_000, "门槛不扣修为"
+    # (15) 融合消耗同时清常驻库
+    d294 = PlayerDoc(uid="u294", name="双库", realm_index=30,
+                     ext={"potential": 50, "hp": 100, "hp_max": 100,
+                          "xiangu_seeds": ['{"名称": "玄冰魄", "品质": "稀有"}']})
+    st294 = xgm260.state_of(d294)
+    st294["active"] = True
+    st294["map"] = xgm260.new_run_map("seed-V")
+    st294["map"]["fragment_id"] = xgm260.CORE_FRAGMENT
+    t294, intent294 = xdd280.fusion_intent(d294, st294, "玄冰魄", xgm260.load_config(), 1000.0)
+    assert intent294, "常驻库道种可融合"
+    t294, _ = xdd280.fusion_confirm(d294, st294, _Win280(), 2000.0, xgm260.load_config())
+    assert not d294.ext["xiangu_seeds"], "常驻库同名道种应一并消耗"
+
     # main.py 接线
     src280 = open(PLUGIN / "main.py", encoding="utf-8").read()
     names280w = ["CMD_XGD_SHENHUO", "CMD_XGD_CONFIRM", "CMD_XGD_CANCEL", "CMD_XGD_IGNITE",

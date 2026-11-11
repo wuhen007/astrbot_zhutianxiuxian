@@ -163,9 +163,17 @@ def xg_gate_index(zone: str) -> int:
 
 
 def xg_level_of(doc: Any) -> int:
-    """主轨 realm_index → 仙古境界（2-11）。"""
+    """主轨 realm_index → 仙古境界（2-11）。
+    已点燃神火者钉到 ≥8（神火境；W27 道种孕育/苦修/服丹/祭炼真我共用）。"""
     ri = int(getattr(doc, "realm_index", 0) or 0)
-    return min(11, 2 + max(0, ri) // XG_LEVEL_DIV)
+    base = min(11, 2 + max(0, ri) // XG_LEVEL_DIV)
+    try:
+        st = ((getattr(doc, "ext", {}) or {}).get("xiangu") or {})
+        if (st.get("shenhuo") or {}).get("已点燃"):
+            return max(base, 8)
+    except Exception:
+        pass
+    return base
 
 
 def realm_name(level: int) -> str:
@@ -795,7 +803,8 @@ def state_of(doc: Any) -> dict[str, Any]:
 def clear_session(st: dict, summary: dict | None = None) -> None:
     """一轮结束（撤离/死亡/闭合）：清临时态，保留 gains 供查看/奖励。"""
     for key in ("map", "history", "run", "evac", "options", "pending_defeat",
-                "soul_target", "teammate", "npc_interactions", "defeated_npcs"):
+                "soul_target", "teammate", "npc_interactions", "defeated_npcs",
+                "fusion", "hp_max_hint"):
         st.pop(key, None)
     st["active"] = False
     st["location"] = "边缘区域"
@@ -806,6 +815,10 @@ def clear_session(st: dict, summary: dict | None = None) -> None:
 
 
 def begin_run(st: dict, seed: str, now: float, rng: Callable[[], float]) -> None:
+    # 冠冕/融合意图属于上一轮 world_seed，新一轮一律作废
+    st.pop("crowned", None)
+    st.pop("fusion", None)
+    st.pop("hp_max_hint", None)
     st["world_seed"] = seed
     st["entry_at"] = now
     st["run"] = {
@@ -923,9 +936,10 @@ def source_stone_reward(doc: Any, rolls: int = 1) -> int:
     return 2_000 * max(1, lv) * max(1, int(rolls or 1))
 
 
-def grant_growth(st: dict, doc: Any, xiuwei: int = 0, xueqi: int = 0,
-                 stone_rolls: int = 0, rng: Callable[[], float] | None = None) -> dict:
-    """收获入背包（原版 grantXianguGrowthRewards → addXianguBagGrowth）。"""
+def grant_growth(doc: Any, xiuwei: int = 0, xueqi: int = 0,
+                 stone_rolls: int = 0) -> dict:
+    """收获入背包（原版 grantXianguGrowthRewards → addXianguBagGrowth）。
+    只写 state_of(doc)["bag"]——调用方的 st 必须就是 state_of(doc) 的同一对象。"""
     out = {"xiuwei": max(0, int(xiuwei)), "xueqi": max(0, int(xueqi)), "source_stone": 0}
     if stone_rolls > 0:
         out["source_stone"] = source_stone_reward(doc, stone_rolls)
@@ -1304,6 +1318,18 @@ def claim_scope(seed: str, fragment_id: str, entity: str) -> str:
     return f"{seed}:{fragment_id}:{entity}"
 
 
+def prune_round_claims(world: dict, seed: str) -> int:
+    """轮次闭合后清理该轮的一次性认领（机缘格 cell:* / NPC 死亡 npc:*）。
+    唯一机缘 unique:* 与冠军造化 claim_scope=round-champion 永久保留
+    （原版 Redis TTL 语义：一次性键随轮次过期，天地唯一键永存）。"""
+    claims = world.get("claims") or {}
+    stale = [k for k in claims
+             if k.startswith(f"{seed}:") and (":cell:" in k or ":npc:" in k)]
+    for k in stale:
+        del claims[k]
+    return len(stale)
+
+
 def world_claim(world: dict, scope: str) -> dict | None:
     return ((world.get("claims") or {}).get(scope)) or None
 
@@ -1624,7 +1650,7 @@ def options_text(options: list[dict]) -> str:
 def _flame_trial(doc: Any, st: dict, now: float,
                  rng: Callable[[], float]) -> tuple[str, dict]:
     """三千道火试炼：三波焚身，扛过得三千道火种 + 道火精粹。"""
-    hp_max = max(1, int(float((getattr(doc, "ext", {}) or {}).get("hp_max", 0) or 0)) or _hp_of(doc))
+    hp_max = _hp_max_of(doc)
     hp = _hp_of(doc)
     for i in range(3):
         burn = int(hp_max * 0.15 * (1 + i * 0.3))
@@ -1700,7 +1726,7 @@ def perform_explore(doc: Any, st: dict, location: str, bias: Mapping | None,
         st.setdefault("gains", {})
         st["gains"]["daoyun"] = int(st["gains"].get("daoyun", 0) or 0) + gain
         xw, xq = calc_rewards(doc, mult, rng)
-        rw = grant_growth(st, doc, xw, xq)
+        rw = grant_growth(doc, xw, xq)
         msg = "\n".join([
             "【探索·道韵领悟】", "",
             f"{getattr(doc, 'name', '')}盘膝而坐，感悟{location}中的残留道则...", "",
@@ -1711,7 +1737,7 @@ def perform_explore(doc: Any, st: dict, location: str, bias: Mapping | None,
     if kind == "lingshi":
         xw, xq = calc_rewards(doc, mult, rng)
         stone = int(5_000 * mult * (0.8 + rng.random() * 0.4))
-        rw = grant_growth(st, doc, xw, xq, stone_rolls=1)
+        rw = grant_growth(doc, xw, xq, stone_rolls=1)
         msg = "\n".join([
             "【探索·源石矿脉】", "",
             f"{getattr(doc, 'name', '')}挖掘出一处仙古源石矿脉，浓郁源气自裂隙间喷薄而出！", "",
@@ -1730,7 +1756,7 @@ def perform_explore(doc: Any, st: dict, location: str, bias: Mapping | None,
         bag_add_item(st["bag"], item)
         gains[item["name"]] = 1
         xw, xq = calc_rewards(doc, mult, rng)
-        rw = grant_growth(st, doc, xw, xq)
+        rw = grant_growth(doc, xw, xq)
         msg = "\n".join([
             f"【探索·奇遇·{item['rarity']}】", "",
             f"{getattr(doc, 'name', '')}在{location}深处发现一处隐蔽的遗迹...", "",
@@ -1760,7 +1786,7 @@ def perform_explore(doc: Any, st: dict, location: str, bias: Mapping | None,
             won, log_lines = battle(enemy, "xiangu_normal")
         if won:
             xw, xq = calc_rewards(doc, mult * 1.5, rng)
-            rw = grant_growth(st, doc, xw, xq, stone_rolls=1)
+            rw = grant_growth(doc, xw, xq, stone_rolls=1)
             infamy_gain = int(5 * mult)
             st["infamy"] = int(st.get("infamy", 0) or 0) + infamy_gain
             gains["xiongmng"] = infamy_gain
@@ -1805,7 +1831,7 @@ def perform_explore(doc: Any, st: dict, location: str, bias: Mapping | None,
     bag_add_item(st["bag"], special)
     gains[special["name"]] = 1
     xw, xq = calc_rewards(doc, mult * 2, rng)
-    rw = grant_growth(st, doc, xw, xq)
+    rw = grant_growth(doc, xw, xq)
     msg = "\n".join([
         f"【探索·惊天发现·{special['rarity']}】", "",
         f"{getattr(doc, 'name', '')}在{location}深处感应到一股浩瀚的气息...", "",
@@ -1834,7 +1860,7 @@ def _explore_boss(doc: Any, st: dict, location: str, cfg: Mapping,
     if won:
         risk_mult = {"深层区域": 2, "核心区域": 3}.get(location, 1)
         xw, xq = calc_rewards(doc, 3 * risk_mult, rng)
-        rw = grant_growth(st, doc, xw, xq, stone_rolls=1)
+        rw = grant_growth(doc, xw, xq, stone_rolls=1)
         infamy_gain = int(20 * risk_mult)
         st["infamy"] = int(st.get("infamy", 0) or 0) + infamy_gain
         st.setdefault("gains", {})
@@ -2042,7 +2068,19 @@ def _mosquito_drain(doc: Any) -> int:
 
 
 def _hp_max_of(doc: Any) -> int:
+    """血量上限：handler 经 set_hp_hint 写入 ext["xiangu"]["hp_max_hint"]；
+    缺省回退当前血量（仅量级兜底，强度失真由 handler 保证不再发生）。"""
+    st = ((getattr(doc, "ext", {}) or {}).get("xiangu") or {})
+    hint = int(float(st.get("hp_max_hint", 0) or 0))
+    if hint > 0:
+        return hint
     return max(1, int(float((getattr(doc, "ext", {}) or {}).get("hp_max", 0) or 0)) or _hp_of(doc))
+
+
+def set_hp_hint(st: dict, hp_max: int) -> None:
+    """handler 在移动/探索入口写入真实血量上限（原版按 血量上限 结算强度）。"""
+    if int(hp_max or 0) > 0:
+        st["hp_max_hint"] = int(hp_max)
 
 
 def _cell_treasure(doc: Any, st: dict, map_st: dict, pos: Mapping,
@@ -2064,7 +2102,7 @@ def _cell_treasure(doc: Any, st: dict, map_st: dict, pos: Mapping,
         sd = draw_seed(cfg, zone, map_st["fragment_id"], "treasure", rng=rng)
         bag_add_seed(st["bag"], sd)
         xw, xq = calc_rewards(doc, risk_mult * 2, rng)
-        rw = grant_growth(st, doc, xw, xq)
+        rw = grant_growth(doc, xw, xq)
         return "\n".join([
             f"💎🔥【机缘·道种现世·{sd['品质']}】",
             f"{getattr(doc, 'name', '')}在{frag.get('name', zone)}深处感应到一枚道种，",
@@ -2079,7 +2117,7 @@ def _cell_treasure(doc: Any, st: dict, map_st: dict, pos: Mapping,
             item = _pick(rng, items)
             bag_add_item(st["bag"], item)
             xw, xq = calc_rewards(doc, risk_mult * 2, rng)
-            rw = grant_growth(st, doc, xw, xq)
+            rw = grant_growth(doc, xw, xq)
             return "\n".join([
                 f"💎✨【机缘·稀世宝物·{item.get('rarity', '稀有')}】",
                 f"{getattr(doc, 'name', '')}在{frag.get('name', zone)}深处发现一件宝物...", "",
@@ -2090,9 +2128,9 @@ def _cell_treasure(doc: Any, st: dict, map_st: dict, pos: Mapping,
             lambda t: t[1], rng)
         key = kind[0] if isinstance(kind, tuple) else str(kind)
         if key == "stone":
-            stone = max(1, int((5_000 + rng.random() * 30_000) * risk_mult / 100))
+            stone = source_stone_reward(doc, 1)
             xw, xq = calc_rewards(doc, risk_mult, rng)
-            rw = grant_growth(st, doc, xw, xq, stone_rolls=0)
+            rw = grant_growth(doc, xw, xq, stone_rolls=0)
             bag_add_growth(st["bag"], source_stone=stone)
             return (f"发现小型源石矿脉！\n秘境背包：源石 +{stone:,}｜"
                     f"修为 +{rw['xiuwei']:,}｜血气 +{rw['xueqi']:,}")
@@ -2104,9 +2142,9 @@ def _cell_treasure(doc: Any, st: dict, map_st: dict, pos: Mapping,
             fn = _pick(rng, ["残破战戟", "断裂古剑", "破碎神甲碎片", "古盾残片", "仙古符骨"])
             bag_add_item(st["bag"], {"name": fn, "type": "材料",
                                      "desc": "仙古宝池中出土的残破法器遗片"})
-            stone = max(1, int((2_000 + rng.random() * 8_000) * risk_mult / 10))
+            stone = source_stone_reward(doc, 1)
             xw, xq = calc_rewards(doc, risk_mult, rng)
-            rw = grant_growth(st, doc, xw, xq)
+            rw = grant_growth(doc, xw, xq)
             bag_add_growth(st["bag"], source_stone=stone)
             return (f"挖出{fn}，源石矿脉同时喷薄！\n秘境背包：源石 +{stone:,}｜"
                     f"修为 +{rw['xiuwei']:,}｜血气 +{rw['xueqi']:,}")
@@ -2118,7 +2156,7 @@ def _cell_treasure(doc: Any, st: dict, map_st: dict, pos: Mapping,
         st.setdefault("gains", {})
         st["gains"]["daoyun"] = int(st["gains"].get("daoyun", 0) or 0) + dg
         xw, xq = calc_rewards(doc, risk_mult, rng)
-        rw = grant_growth(st, doc, xw, xq)
+        rw = grant_growth(doc, xw, xq)
         return (f"盘膝感悟道则...\n获得：{dg} 道韵｜修为 +{rw['xiuwei']:,}｜"
                 f"血气 +{rw['xueqi']:,}")
 
@@ -2191,7 +2229,7 @@ def _cell_danger(doc: Any, st: dict, map_st: dict, pos: Mapping, zone: str,
         extra = f"\n反杀守护兽，获得 {dg} 道韵！"
     elif danger.get("herb") and rng.random() < 0.3:
         xw, _ = calc_rewards(doc, risk_mult * 0.5, rng)
-        grant_growth(st, doc, xiuwei=xw)
+        grant_growth(doc, xiuwei=xw)
         extra = f"\n毒瘴中竟生长着稀有灵药！修为 +{xw:,}"
     elif danger.get("teleport") and rng.random() < 0.3:
         cands = [{"x": tx, "y": ty} for ty in range(int(map_st["h"]))
@@ -2231,7 +2269,7 @@ def _cell_void(doc: Any, st: dict, map_st: dict, pos: Mapping,
             return "\n".join(["🌀【虚空传送】", "被虚空裂缝吸入，天旋地转后出现在全新之地！",
                               f"新坐标：[{np_['x']}, {np_['y']}]"])
     if roll < 0.7:
-        stone = int((5_000 + rng.random() * 20_000) / 10)
+        stone = source_stone_reward(doc, 1)
         bag_add_growth(st["bag"], source_stone=stone)
         map_st["grid"][y][x] = CELL_EXPLORED
         return "\n".join(["🌀【虚空宝藏】", "裂缝中竟有源石喷薄！",
@@ -2254,7 +2292,7 @@ def _cell_unique(doc: Any, st: dict, map_st: dict, pos: Mapping,
     if not found:
         return "【机缘已逝】此处的造化已被取走。"
     if found.get("kind") == MARROW_POOL_KIND:
-        return _cell_marrow(doc, st, map_st, pos, found, found_name)
+        return _cell_marrow(doc, st, map_st, pos, found, found_name, battle=battle, rng=rng)
     champion = found.get("claim_scope") == "round-champion"
     crowned = bool(st.get("crowned") or "")
     if champion and not crowned:
@@ -2302,12 +2340,44 @@ def _cell_unique(doc: Any, st: dict, map_st: dict, pos: Mapping,
 
 
 def _cell_marrow(doc: Any, st: dict, map_st: dict, pos: Mapping,
-                 pool: dict, pool_key: str) -> str:
+                 pool: dict, pool_key: str,
+                 battle: Callable | None = None,
+                 rng: Callable[[], float] | None = None) -> str:
     if pool.get("claimed"):
         return f"【{MARROW_POOL_NAME}】这方机缘已经被你浸取过了。"
     cfg = marrow_config()
+    rng = rng or random.Random()
     x, y = pos["x"], pos["y"]
-    rw = marrow_rewards(doc, cfg["mult"], random.Random())
+    if pool.get("is_trap"):
+        # 假池杀局（原版 handleXianguMarrowPoolCell·trap）：伏兵自杀阵中齐出
+        pool["claimed"] = True
+        map_st["grid"][y][x] = CELL_EXPLORED
+        invited_by = str(pool.get("invited_by") or "")
+        if invited_by:
+            rels = st.setdefault("npc_relations", {})
+            rels[invited_by] = int(rels.get(invited_by, 0) or 0) - 30
+        enemy = make_enemy("蒙面猎手", xg_level_of(doc), 0.8, bao=0.1, orb=0.12, crit=0.15)
+        if battle is None:
+            won, log_lines = True, ["（演武：跳过战斗）"]
+        else:
+            won, log_lines = battle(enemy, "xiangu_ambush")
+        if won:
+            st.setdefault("gains", {})
+            st["gains"]["daoyun"] = int(st["gains"].get("daoyun", 0) or 0) + 20
+            return "\n".join([
+                "🩸【万道仙髓池·伏杀反转】",
+                "假池为饵，伏兵自杀阵中齐出——你反杀猎手，识破杀局！", "",
+                *log_lines[-3:], "",
+                "道韵 +20"])
+        hp_loss = max(1, int(_hp_of(doc) * 0.35))
+        _set_hp(doc, max(1, _hp_of(doc) - hp_loss))
+        apply_heavy_injury(st, time.time())
+        return "\n".join([
+            "🩸【万道仙髓池·伏杀】",
+            "假池为饵，伏兵自杀阵中齐出！你拼死突围，身受重伤。", "",
+            *log_lines[-3:], "",
+            f"【损失】血量 -{hp_loss:,}｜状态：重伤"])
+    rw = marrow_rewards(doc, cfg["mult"], rng)
     bag_add_growth(st["bag"], xiuwei=rw["xiuwei"], xueqi=rw["xueqi"])
     bag_add_potential(st["bag"], cfg["potential"])
     pool["claimed"] = True
@@ -2475,26 +2545,6 @@ NPC_NAME_POOL = {
              "道种寻访者", "仙古遗民", "散修奇人", "不世天骄", "隐世修士", "无名散人"),
 }
 
-CANON_NPCS: tuple[dict, ...] = (
-    {"id": "shiguan_tianzi", "name": "十冠王天子", "zone": "核心区域", "faction": "neutral",
-     "xg": 11, "desc": "十冠加身的天子，仙古纪元最耀眼的争渡者"},
-    {"id": "wangxi", "name": "王曦", "zone": "核心区域", "faction": "good",
-     "xg": 8, "desc": "身怀鸿蒙紫气种的上古奇女子"},
-    {"id": "zhexian", "name": "谪仙", "zone": "核心区域", "faction": "neutral",
-     "xg": 8, "desc": "神火境巅峰的谪仙人，出尘绝世"},
-    {"id": "ningchuan", "name": "六冠王宁川", "zone": "深层区域", "faction": "neutral",
-     "xg": 7, "desc": "六冠加身，尊者境巅峰"},
-    {"id": "dugu_yun", "name": "独孤云", "zone": "深层区域", "faction": "evil",
-     "xg": 7, "desc": "行事狠辣的独孤世家天骄"},
-    {"id": "dichong", "name": "帝冲", "zone": "深层区域", "faction": "evil",
-     "xg": 7, "desc": "帝族天骄，尊者境巅峰，视秘境为猎场"},
-    {"id": "yaoyue", "name": "邀月公主", "zone": "中层区域", "faction": "neutral",
-     "xg": 6, "desc": "身怀宇宙雏形种的绝世公主"},
-    {"id": "honghuang", "name": "红凰", "zone": "中层区域", "faction": "good",
-     "xg": 6, "desc": "列阵境巅峰的凰族传人"},
-)
-
-
 def generate_npc_name(rng: Callable[[], float]) -> dict[str, str]:
     surname = _pick(rng, list(NPC_NAME_POOL["姓"]))
     single = rng.random() < 0.4
@@ -2538,22 +2588,7 @@ def generate_npc(location: str, infamy: int, rng: Callable[[], float],
     }
 
 
-def bind_map_npcs(doc: Any, st: dict, rng: Callable[[], float]) -> None:
-    """为新碎片补 NPC 实体（机缘池 canon 按区域 + 随机修士）。"""
-    map_st = st.get("map") or {}
-    zone = FRAGMENTS.get(map_st.get("fragment_id", ""), {}).get("zone", "边缘区域")
-    for spot in map_st.get("npc_locations", ()):
-        if spot.get("npc"):
-            continue
-        canon = [c for c in CANON_NPCS if c["zone"] == zone and rng.random() < 0.15]
-        if canon:
-            c = _pick(rng, canon)
-            spot["npc"] = {**c, "is_canon": True, "xg": min(9, max(7, c["xg"])),
-                           "personality": "neutral", "hostile": False,
-                           "dialogs": (f"吾乃{c['name']}。", "仙古遗泽，有缘者得之。"),
-                           "trade": None}
-        else:
-            spot["npc"] = generate_npc(zone, int(st.get("infamy", 0) or 0), rng)
+
 
 
 def status_text(doc: Any, st: Mapping, lc: Mapping, world_year: int) -> str:
@@ -2651,8 +2686,6 @@ def explore_turn(doc: Any, st: dict, rng: Callable[[], float], now_ms: float,
             events["placed_pool"] = placed["pos"]
     reveal(map_st, map_st["pos"], divine_range(doc))
     exit_gain = exit_discovery_daoyun(st, map_st, exits_before, doc)
-    if claims is not None:
-        bind_map_npcs(doc, st, rng)
 
     lines: list[str] = []
     if placed:

@@ -423,6 +423,7 @@ def buy(doc: Any, st: dict, item_name: str, rng: Callable[[], float]) -> tuple[b
         return False, (f"【购买失败】灵石不足\n需要：{price:,} 灵石\n"
                        f"拥有：{int(getattr(doc, 'stones', 0) or 0):,} 灵石"
                        + (f"\n凶名溢价：×{mult}（凶名 {infamy}）" if mult > 1 else "")), 0
+    doc.stones = int(getattr(doc, "stones", 0) or 0) - price
     xg.bag_add_item(st["bag"], {"name": item_name, "type": "道具", "quantity": 1})
     note = f"\n※ 凶名溢价 ×{mult} 已生效" if mult > 1 else ""
     return True, (f"【购买成功】\n\n从{npc.get('name')}处购得：{item_name}\n"
@@ -441,8 +442,9 @@ def attack(doc: Any, st: dict, world: dict, rng: Callable[[], float], now_ms: fl
         return "【攻击NPC·无目标】此处没有可攻击的NPC，请先 #寻找NPC 并移动到目标所在格。", events
     npc = spot["npc"]
     npc_id = str(npc.get("id") or npc.get("name"))
-    prior = claim_npc_death(world, st, npc_id, str(getattr(doc, "uid", "")),
-                            str(getattr(doc, "name") or ""), now_ms / 1000)
+    # 只查既有死亡名额，不在此登记——名额必须在「战斗胜利」后落位，
+    # 否则道德警告/战败路径会把活 NPC 标成已陨（审计 #2）。
+    prior = xg.world_claim(world, npc_death_scope(st, npc_id))
     if prior and str(prior.get("claimant")) != str(getattr(doc, "uid", "")):
         _remove_npc(st["map"], spot)
         killer = prior.get("name") or prior.get("claimant") or "另一位天骄"
@@ -481,10 +483,13 @@ def attack(doc: Any, st: dict, world: dict, rng: Callable[[], float], now_ms: fl
             xg._defeat_menu(str(npc.get("name"))),
             "", f"“不自量力...” — {npc.get('name')}冷冷道。"]), events
 
-    # === 胜利：掉落 + 幂等名额 ===
-    if claims is not None and prior is None:
-        # claims 与 world 为同一 dict（handler 传入 calamity_state["xiangu"]），已在上方登记
-        pass
+    # === 胜利：先落全服死亡名额（幂等），再结算掉落 ===
+    prior = claim_npc_death(world, st, npc_id, str(getattr(doc, "uid", "")),
+                            str(getattr(doc, "name") or ""), now_ms / 1000)
+    if prior and str(prior.get("claimant")) != str(getattr(doc, "uid", "")):
+        killer = prior.get("name") or prior.get("claimant") or "另一位天骄"
+        return (f"【战场残影·未获战利品】你击散了{npc.get('name')}留下的法则残影，"
+                f"真身已被{killer}先一步击杀，本轮战利品归其所有。"), events
     location = str(st.get("location") or "边缘区域")
     loot_lines = ["【战利品搜刮】"]
     kills = st.setdefault("kills", 0)
@@ -530,7 +535,7 @@ def attack(doc: Any, st: dict, world: dict, rng: Callable[[], float], now_ms: fl
         for g in dropped:
             xg.bag_add_technique(st["bag"], g)
         loot_lines += ["", "【功法领悟】从战斗中领悟："] + [f"  📖 {g}" for g in dropped]
-    rw = xg.grant_growth(st, doc, stone_rolls=1 + stone_finds)
+    rw = xg.grant_growth(doc, stone_rolls=1 + stone_finds)
     loot_lines.append(f"💰 源石 +{rw['source_stone']:,}（暂存秘境背包）")
 
     # 搜魂窗口
