@@ -253,6 +253,13 @@ def main() -> int:
                    "handle_xgm_move", "handle_xgm_scan", "handle_xgm_bag",
                    "handle_xgm_goal", "handle_xgm_findnpc", "handle_xgm_view_seeds",
                    "handle_xgm_leave", "handle_xgm_emergency", "handle_xgm_confirm")),
+        ("仙古秘境·NPC与阵营", ("handle_xgn_talk", "handle_xgn_trade", "handle_xgn_attack",
+                        "handle_xgn_soul", "handle_xgn_rel", "handle_xgn_team",
+                        "handle_xgn_team_leave", "handle_xgn_fac", "handle_xgn_fq",
+                        "handle_xgn_frank", "handle_xgn_offer", "handle_xgm_arena",
+                        "handle_xgm_arena_join", "handle_xgm_pvp", "handle_xgm_infamy",
+                        "handle_xgm_bounty", "handle_xgm_krank", "handle_xgn_mercy",
+                        "handle_xgn_fish")),
         ("帮助", ("handle_help",)),
     ]
     grouped = {}

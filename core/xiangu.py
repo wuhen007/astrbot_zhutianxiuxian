@@ -244,6 +244,7 @@ def evac_config() -> dict[str, Any]:
 def marrow_config() -> dict[str, Any]:
     cfg = load_config().get("机缘宝池") or {}
     return {"chance": float(cfg.get("探索概率", 0.03) or 0.03),
+            "npc_invite": float(cfg.get("NPC邀请概率", 0.18) or 0.18),
             "potential": int(cfg.get("仙道潜力", 50) or 50),
             "mult": float(cfg.get("修血倍率", 5) or 5)}
 
@@ -1984,7 +1985,6 @@ def move(doc: Any, st: dict, key: str, steps: int, cfg: Mapping,
                 reveal(map_st, map_st["pos"], 1)
             if claims is not None:
                 sync_shared_claims(st, claims)
-            bind_map_npcs(doc, st, rng)
             map_st["steps"] = int(map_st.get("steps", 0) or 0) + 1
             st["location"] = FRAGMENTS[target]["zone"]
             events["transition"] = target

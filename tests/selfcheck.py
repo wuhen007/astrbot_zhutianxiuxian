@@ -9375,6 +9375,176 @@ async def main():
     assert "仙古秘境" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
     print("W25 xiangu 网格引擎 ok")
 
+    # ========================================================= W26：仙古秘境 NPC 交互 + 阵营 + 擂台
+    from core import xiangu_npc as xnk270, xiangu_camp as xkc270
+
+    d270 = PlayerDoc(uid="u270", name="天骄", realm_index=20, stones=50_000,
+                     ext={"xueqi": 1000, "potential": 0, "hp": 500_000, "hp_max": 500_000})
+    st270 = xgm260.state_of(d270)
+    st270["active"] = True
+    st270["map"] = xgm260.new_run_map("seed-N")
+    world270: dict = {}
+    rng270 = xgm260.seeded_rng("npc-270")
+
+    # —— 绑定：所有 NPC 格均有实体
+    xnk270.ensure_bindings(d270, st270, rng270)
+    spots270 = st270["map"]["npc_locations"]
+    assert spots270 and all(s.get("npc") for s in spots270), "绑定后 NPC 格全实体"
+
+    # —— 交谈：好感/对话/机缘名额
+    spot270 = spots270[0]
+    st270["map"]["pos"] = {"x": spot270["x"], "y": spot270["y"]}
+    npc270 = spot270["npc"]
+    txt270, _ = xnk270.talk(d270, st270, world270, rng270, 1000.0, {"npcInviteChance": 0.18})
+    assert "NPC遭遇" in txt270, txt270[:40]
+    assert "可交互操作" in txt270
+    # 距离过远
+    st270["map"]["pos"] = {"x": 5, "y": 5}
+    if not xnk270.npc_at(st270):
+        txt270, _ = xnk270.talk(d270, st270, world270, rng270, 1100.0, {"npcInviteChance": 0.18})
+        assert "距离过远" in txt270
+
+    # —— 攻击：善良普通 NPC 走警告；其他走战斗
+    st270["map"]["pos"] = {"x": spot270["x"], "y": spot270["y"]}
+    is_good_plain = (npc270.get("faction") == "good" and not npc270.get("hostile")
+                     and not npc270.get("is_canon") and not npc270.get("personality"))
+    won270 = []
+    def _win270(enemy, btype):
+        won270.append(enemy["name"])
+        return True, [f"第1回合：{d270.name} 击溃 {enemy['name']}"]
+    infamy_before270 = int(st270["infamy"])
+    txt270, _ = xnk270.attack(d270, st270, world270, rng270, 2000.0, _win270)
+    if is_good_plain:
+        assert "道德警告" in txt270 and int(st270["infamy"]) == infamy_before270 + 15
+    else:
+        assert won270 and "击杀NPC" in txt270, txt270[:60]
+        assert st270.get("soul_target"), "击杀后挂搜魂窗口"
+        # 搜魂
+        txt270, _ = xnk270.soul_search(d270, st270, xgm260.seeded_rng("soul-270"), 3000.0)
+        assert "搜魂" in txt270
+        assert not st270.get("soul_target"), "搜魂后窗口消费"
+    # 死亡幂等：同 seed 同 NPC 再攻击 → 已陨
+    if not is_good_plain:
+        # 重新绑定同 NPC 名额（模拟另一修士再打）
+        st270["map"]["npc_locations"].append({**spot270, "npc": {**spot270["npc"], "inventory": []}})
+        st270["map"]["grid"][spot270["y"]][spot270["x"]] = xgm260.CELL_NPC
+        st270["map"]["pos"] = {"x": spot270["x"], "y": spot270["y"]}
+        txt270, _ = xnk270.attack(d270, st270, world270, rng270, 2600.0, _win270)
+        assert "已陨" in txt270, txt270[:60]
+
+    # —— 阵营：声望面板 / 任务接取与推进 / 献祭
+    txt270 = xkc270.faction_text(d270, st270)
+    assert "善良阵营" in txt270 and "邪恶阵营" in txt270
+    txt270 = xkc270.faction_quest(d270, st270, xgm260.seeded_rng("fq-270"), 3000.0)
+    assert "已接取" in txt270, txt270[:40]
+    quest270 = st270["quest"]
+    qb270 = xkc270.quest_bump(d270, st270, str(quest270["target"]), int(quest270["max"]))
+    if qb270:
+        assert "完成" in qb270
+    xgm260.bag_add_seed(st270["bag"], {"名称": "青鸾焰", "品质": "稀有"})
+    ok270, txt270, _ = xkc270.offer_seed(d270, st270, "青鸾焰", rng270)
+    assert ok270 and "献祭" in txt270
+    assert int((st270["faction_rep"] or {}).get("good", 0)) >= 35, "稀有道种献祭 +35 声望"
+    ok270, txt270, _ = xkc270.offer_seed(d270, st270, "不存在的", rng270)
+    assert not ok270 and ("未找到" in txt270 or "无道种" in txt270)
+
+    # —— 擂台全周期：开擂 → 报名 → 胜场 → 到期懒结算 → 冠冕
+    round270 = "xiangu-3001"
+    st270["map"]["fragment_id"] = xgm260.ARENA_FRAGMENT
+    txt270, ev270 = xkc270.arena_text(d270, st270, world270, round270, 5000.0,
+                                      xkc270.arena_settle_if_due)
+    assert "开启" in txt270 and ev270.get("broadcast")
+    assert xkc270.arena_join(d270, st270, world270, round270, 5100.0)
+    frag_keep270 = st270["map"]["fragment_id"]
+    st270["map"]["fragment_id"] = "edge_camp"
+    txt270 = xkc270.arena_join(d270, st270, world270, round270, 5200.0)
+    assert "只有身处仙古擂台" in txt270, "擂台外不可报名"
+    st270["map"]["fragment_id"] = frag_keep270
+    txt270, ev270 = xkc270.arena_pvp(d270, st270, world270, round270, "无此人", 5300.0,
+                                     rng270, None)
+    assert "无此对手" in txt270
+    txt270, _ = xkc270.arena_pvp_apply(d270, st270, d270, st270, world270, round270,
+                                       True, ["第1回合：胜"], rng270)
+    assert "擂台对决·胜" in txt270
+    def _crown270(uid, name, now):
+        st270["crowned"] = round270
+        return f"👑 {name} 晋为「本轮仙古第一」！"
+    world270["arena"][round270]["state"]["ends_at"] = 1000.0
+    msg270 = xkc270.arena_settle_if_due(world270, round270, 6000.0, _crown270)
+    assert msg270 and "尘埃落定" in msg270
+    assert st270["crowned"] == round270
+    assert xgm260.fragment_entry_block(d270, xgm260.ULTIMATE_FRAGMENT, crowned=True) is None
+
+    # —— 凶名 / 悬赏 / 杀戮榜
+    txt270 = xkc270.infamy_text(d270, st270)
+    assert "凶名簿" in txt270 and "凶名值" in txt270
+    xkc270.register_infamy(world270, d270, st270)
+    txt270 = xkc270.bounty_text(world270, d270, st270)
+    assert "悬赏榜" in txt270
+    xkc270.record_kill(world270, d270, 2)
+    txt270 = xkc270.kill_rank_text(world270)
+    assert "杀戮榜" in txt270 and "天骄" in txt270
+
+    # —— 战败抉择（求饶善/恶 分支 + 任凭鱼肉）
+    st270b = xgm260.state_of(d270)
+    st270b["bag"] = xgm260.bag_new()
+    xgm260.bag_add_item(st270b["bag"], {"name": "源石矿髓", "type": "材料", "quantity": 1})
+    st270b["pending_defeat"] = {"npc": "堕落修士", "faction": "evil",
+                                "expires_at": 10**13, "source": "attack"}
+    txt270 = xgm260.settle_defeat_choice(d270, st270b, "mercy", 4000.0)
+    assert "仍遭毒手" in txt270, txt270[:40]
+    assert xgm260.bag_summary(st270b["bag"])["item_count"] == 0, "邪恶存在劫掠全部收获"
+    st270b["pending_defeat"] = {"npc": "古仙引路者", "faction": "good",
+                                "expires_at": 10**13, "source": "attack"}
+    txt270 = xgm260.settle_defeat_choice(d270, st270b, "mercy", 4100.0)
+    assert "幸免" in txt270
+    st270b["pending_defeat"] = {"npc": "堕落修士", "faction": "evil",
+                                "expires_at": 10**13, "source": "attack"}
+    txt270 = xgm260.settle_defeat_choice(d270, st270b, "slaughter", 4200.0)
+    assert "任凭鱼肉" in txt270
+
+    # —— 组队
+    st270c = xgm260.state_of(d270)
+    st270c["active"] = True
+    st270c["map"] = xgm260.new_run_map("seed-T")
+    xnk270.ensure_bindings(d270, st270c, xgm260.seeded_rng("team-270"))
+    team_spot = next((s for s in st270c["map"]["npc_locations"]
+                      if (s.get("npc") or {}).get("faction") != "evil"), None)
+    assert team_spot, "非邪恶 NPC 必然存在"
+    st270c["map"]["pos"] = {"x": team_spot["x"], "y": team_spot["y"]}
+    txt270 = xnk270.team(d270, st270c, rng270, 5000.0)
+    team_npc = team_spot["npc"]
+    if not (team_npc.get("is_canon") or team_npc.get("personality")):
+        assert "无合适NPC" in txt270, "静态NPC不可组队（原版同规则）"
+        # 升格为随机修士（有 personality）再测好感门
+        team_npc["personality"] = "proud"
+        txt270 = xnk270.team(d270, st270c, rng270, 5100.0)
+    if team_npc.get("personality") == "friendly" or \
+            int((st270c.get("npc_relations") or {}).get(str(team_npc.get("id")), 0)) >= 50:
+        assert "组队成功" in txt270, txt270[:40]
+        assert st270c.get("teammate")
+        assert "解除组队" in xnk270.team_leave(d270, st270c)
+        assert not st270c.get("teammate")
+    else:
+        assert "好感不足" in txt270, txt270[:40]
+
+    # main.py 接线
+    src270 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    names270w = ["CMD_XGN_TALK", "CMD_XGN_TRADE", "CMD_XGN_ATTACK", "CMD_XGN_SOUL",
+                 "CMD_XGN_REL", "CMD_XGN_TEAM", "CMD_XGN_TEAM_LEAVE", "CMD_XGN_FAC",
+                 "CMD_XGN_FQ", "CMD_XGN_FRANK", "CMD_XGN_OFFER", "CMD_XGM_ARENA",
+                 "CMD_XGM_ARENA_JOIN", "CMD_XGM_PVP", "CMD_XGM_INFAMY", "CMD_XGM_BOUNTY",
+                 "CMD_XGM_KRANK", "CMD_XGN_MERCY", "CMD_XGN_FISH"]
+    miss270 = [c for c in names270w if f"@filter.command({c}" not in src270]
+    assert miss270 == [], f"漏注册：{miss270}"
+    assert "xn_mod.talk(" in src270 and "xc_mod.arena_text(" in src270
+    assert "xn_mod.ecology_step(" in src270, "移动/探索需挂生态遭遇"
+    assert "xgm_mod.settle_defeat_choice(" in src270
+    help270b = _json60.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
+    assert any(g["group"] == "仙古秘境 · NPC与阵营" for g in help270b)
+    assert "仙古秘境·NPC与阵营" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
+    print("W26 xiangu NPC+阵营+擂台 ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

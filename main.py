@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_story as rs_mod, plane_events as pe_mod, games_mini as gm_mod, xtzb_birth as xb_mod, auto_task as at_mod, easter_eggs as eg_mod, plane_relay as pr_mod, sect_extra as se_mod, assistant as as_mod, bounty as bt_mod, xiangu as xgm_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_story as rs_mod, plane_events as pe_mod, games_mini as gm_mod, xtzb_birth as xb_mod, auto_task as at_mod, easter_eggs as eg_mod, plane_relay as pr_mod, sect_extra as se_mod, assistant as as_mod, bounty as bt_mod, xiangu as xgm_mod, xiangu_npc as xn_mod, xiangu_camp as xc_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -900,6 +900,25 @@ CMD_XGM_LEAVE = "#离开仙古秘境"
 CMD_XGM_EMERGENCY = "#紧急撤离"
 CMD_XGM_CONFIRM = "#确认撤离"
 CMD_XGM_VIEW_SEEDS = "#查看道种"
+CMD_XGN_TALK = "#与NPC交谈"
+CMD_XGN_TRADE = "#向NPC购买"
+CMD_XGN_ATTACK = "#攻击NPC"
+CMD_XGN_SOUL = "#搜魂NPC"
+CMD_XGN_REL = "#查看NPC好感"
+CMD_XGN_TEAM = "#NPC组队"
+CMD_XGN_TEAM_LEAVE = "#解除组队"
+CMD_XGN_FAC = "#查看阵营"
+CMD_XGN_FQ = "#阵营任务"
+CMD_XGN_FRANK = "#阵营排行"
+CMD_XGN_OFFER = "#献祭道种"
+CMD_XGM_ARENA = "#仙古擂台"
+CMD_XGM_ARENA_JOIN = "#参与仙古擂台"
+CMD_XGM_PVP = "#秘境攻击"
+CMD_XGM_INFAMY = "#查看凶名"
+CMD_XGM_BOUNTY = "#秘境悬赏"
+CMD_XGM_KRANK = "#秘境杀戮榜"
+CMD_XGN_MERCY = "#求饶"
+CMD_XGN_FISH = "#任凭鱼肉"
 # W18-F1：金银坊（媚娘的赌坊）
 CMD_GMF = "#金银坊"
 # W8-B1b：至尊线（至尊骨 / 斩骨涅槃 / 舍骨入血 / 试炼 / 仙骨 / 重瞳 / 瞳骨合一）
@@ -23819,7 +23838,7 @@ class ZhutianPlugin(Star):
             seed = str(lc.get("session") or f"xiangu-{int(now_ms)}")
             rng = random.Random(f"{doc.uid}:xgm:enter:{now_ms}")
             xgm_mod.begin_run(st, seed, now_ms, rng)
-            xgm_mod.bind_map_npcs(doc, st, rng)
+            xn_mod.ensure_bindings(doc, st, rng)
             ecfg = xgm_mod.evac_config()
             st.setdefault("cd", {})["enter_until"] = now_ms + ecfg["cooldown_h"] * 3600 * 1000
             await self._pe_save(doc, {}, cal)
@@ -23891,6 +23910,12 @@ class ZhutianPlugin(Star):
         cal, world, _note = await self._xg_world(advance=False)
         rng = random.Random(f"{doc.uid}:xgm:explore:{now_ms}")
         text, _ev = xgm_mod.explore_turn(doc, st, rng, now_ms, world)
+        eco_lines = xn_mod.ecology_step(doc, st, rng, now_ms, self._xg_battle_fn(doc))
+        if eco_lines:
+            text += "\n\n【秘境动态】\n" + "\n".join(eco_lines)
+        qb = xc_mod.quest_bump(doc, st, "explore")
+        if qb:
+            text += "\n\n" + qb
         await self._pe_save(doc, {}, cal)
         async for r in self._smart(event, text, "秘境探索"):
             yield r
@@ -23949,6 +23974,11 @@ class ZhutianPlugin(Star):
         rng = random.Random(f"{doc.uid}:xgm:move:{now_ms}")
         text, _ev = xgm_mod.move(doc, st, key, steps, xgm_mod.load_config(), rng, now_ms,
                                  self._xg_battle_fn(doc), world)
+        if _ev.get("transition"):
+            xn_mod.ensure_bindings(doc, st, rng)
+        eco_lines = xn_mod.ecology_step(doc, st, rng, now_ms, self._xg_battle_fn(doc))
+        if eco_lines:
+            text += "\n\n【秘境动态】\n" + "\n".join(eco_lines)
         xgm_mod._cd_set(st, "move", now_ms + xgm_mod.MOVE_CD_MS)
         await self._pe_save(doc, {}, cal)
         async for r in self._smart(event, text, "秘境移动"):
@@ -24174,3 +24204,386 @@ class ZhutianPlugin(Star):
             "",
             f"秘境背包已完成结算。冷却 {ecfg['cooldown_h']} 小时。"]
         yield event.plain_result("\n".join(lines))
+
+
+    # ================================================================ W26：仙古秘境 NPC 交互 + 阵营 + 擂台
+
+    def _xg_crown_cb(self, doc: PlayerDoc, st: dict, round_id: str):
+        """擂台结算冠冕回调：登记本轮仙古第一（解锁终极造化地）。"""
+        def cb(uid: str, name: str, now: float) -> str | None:
+            if str(uid) == str(doc.uid):
+                st["crowned"] = round_id
+            return f"👑 {name} 晋为「本轮仙古第一」！终极造化地已向其敞开。"
+        return cb
+
+    @filter.command(CMD_XGN_TALK, "与NPC交谈（好感+5~8，隐秘邀请）")
+    async def handle_xgn_talk(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        if not st.get("active"):
+            yield event.plain_result("需先进入仙古秘境！")
+            return
+        now_ms = time.time() * 1000
+        cal, world, _note = await self._xg_world(advance=False)
+        rng = random.Random(f"{doc.uid}:xgn:talk:{now_ms}")
+        text, _ev = xn_mod.talk(doc, st, world, rng, now_ms, xgm_mod.marrow_config())
+        qb = xc_mod.quest_bump(doc, st, "npc_talk")
+        if qb:
+            text += "\n\n" + qb
+        xc_mod.sync_rep_board(world, doc, st)
+        await self._pe_save(doc, {}, cal)
+        yield event.plain_result(text)
+
+    @filter.command(CMD_XGN_TRADE, "向NPC购买 [物品名]（无参看商店）")
+    async def handle_xgn_trade(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        if not st.get("active"):
+            yield event.plain_result("需先进入仙古秘境！")
+            return
+        ok, text, stone_delta = xn_mod.buy(doc, st, name.strip(),
+                                           random.Random(f"{doc.uid}:xgn:buy:{time.time()}"))
+        if ok:
+            async with self.db.transaction():
+                await self.db.save_player(doc.model_dump())
+        yield event.plain_result(text)
+
+    @filter.command(CMD_XGN_ATTACK, "攻击NPC（胜得掉落+搜魂窗口，败入生死抉择）")
+    async def handle_xgn_attack(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        if not st.get("active"):
+            yield event.plain_result("需先进入仙古秘境！")
+            return
+        now_ms = time.time() * 1000
+        cal, world, _note = await self._xg_world(advance=False)
+        rng = random.Random(f"{doc.uid}:xgn:atk:{now_ms}")
+        text, ev = xn_mod.attack(doc, st, world, rng, now_ms, self._xg_battle_fn(doc))
+        if ev.get("npc_killed"):
+            qb = xc_mod.quest_bump(doc, st, "npc_kill")
+            if qb:
+                text += "\n\n" + qb
+            goal_note = xn_mod.bump_goal(doc, st, "npc_kill")
+            if goal_note:
+                text += "\n" + goal_note
+        xc_mod.sync_rep_board(world, doc, st)
+        await self._pe_save(doc, {}, cal)
+        async for r in self._smart(event, text, "攻击NPC"):
+            yield r
+
+    @filter.command(CMD_XGN_SOUL, "搜魂NPC（击败后 5 分钟内，掠功法，业力）")
+    async def handle_xgn_soul(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        if not st.get("active"):
+            yield event.plain_result("需先进入仙古秘境！")
+            return
+        text, _ev = xn_mod.soul_search(doc, st,
+                                       random.Random(f"{doc.uid}:xgn:soul:{time.time()}"),
+                                       time.time() * 1000)
+        qb = xc_mod.quest_bump(doc, st, "soul_search")
+        if qb:
+            text += "\n\n" + qb
+        await self._pe_save(doc, {})
+        yield event.plain_result(text)
+
+    @filter.command(CMD_XGN_REL, "查看NPC好感（原著天骄关系 + 组队）")
+    async def handle_xgn_rel(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result(xn_mod.relation_text(doc, xgm_mod.state_of(doc)))
+
+    @filter.command(CMD_XGN_TEAM, "NPC组队（好感≥50，战斗助战）")
+    async def handle_xgn_team(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        if not st.get("active"):
+            yield event.plain_result("需先进入仙古秘境！")
+            return
+        text = xn_mod.team(doc, st, random.Random(f"{doc.uid}:xgn:team:{time.time()}"),
+                           time.time() * 1000)
+        await self._pe_save(doc, {})
+        yield event.plain_result(text)
+
+    @filter.command(CMD_XGN_TEAM_LEAVE, "解除组队")
+    async def handle_xgn_team_leave(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        text = xn_mod.team_leave(doc, st)
+        await self._pe_save(doc, {})
+        yield event.plain_result(text)
+
+    @filter.command(CMD_XGN_FAC, "查看阵营（三系声望与效果）")
+    async def handle_xgn_fac(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result(xc_mod.faction_text(doc, xgm_mod.state_of(doc)))
+
+    @filter.command(CMD_XGN_FQ, "阵营任务（按最高声望阵营接取）")
+    async def handle_xgn_fq(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        text = xc_mod.faction_quest(doc, st, random.Random(f"{doc.uid}:xgn:fq:{time.time()}"),
+                                    time.time() * 1000)
+        await self._pe_save(doc, {})
+        yield event.plain_result(text)
+
+    @filter.command(CMD_XGN_FRANK, "阵营排行（全服三系声望 Top5）")
+    async def handle_xgn_frank(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        cal, world, _note = await self._xg_world(advance=False)
+        st = xgm_mod.state_of(doc)
+        xc_mod.sync_rep_board(world, doc, st)
+        await self.db.save_calamity(cal)
+        yield event.plain_result(xc_mod.faction_rank_text(world))
+
+    @filter.command(CMD_XGN_OFFER, "献祭道种 [名]（换善良声望+道韵+源石）")
+    async def handle_xgn_offer(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        if not st.get("active"):
+            yield event.plain_result("需先进入仙古秘境！")
+            return
+        ok, text, _d = xc_mod.offer_seed(doc, st, name.strip(),
+                                         random.Random(f"{doc.uid}:xgn:offer:{time.time()}"))
+        if ok:
+            qb = xc_mod.quest_bump(doc, st, "offer_seed")
+            if qb:
+                text += "\n\n" + qb
+            await self._pe_save(doc, {})
+        yield event.plain_result(text)
+
+    @filter.command(CMD_XGM_ARENA, "仙古擂台（擂台碎片开擂，30 分钟一场）")
+    async def handle_xgm_arena(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        if not st.get("active"):
+            yield event.plain_result("需先进入仙古秘境！")
+            return
+        now_ms = time.time() * 1000
+        cal, world, _note = await self._xg_world(advance=False)
+        round_id = str((st.get("world_seed") or "round"))
+        text, ev = xc_mod.arena_text(doc, st, world, round_id, now_ms,
+                                     self._xg_crown_cb(doc, st, round_id))
+        await self._pe_save(doc, {}, cal)
+        if ev.get("broadcast"):
+            yield event.plain_result(ev["broadcast"])
+            return
+        yield event.plain_result(text)
+
+    @filter.command(CMD_XGM_ARENA_JOIN, "参与仙古擂台（亲临擂台碎片报名）")
+    async def handle_xgm_arena_join(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        if not st.get("active"):
+            yield event.plain_result("需先进入仙古秘境！")
+            return
+        cal, world, _note = await self._xg_world(advance=False)
+        round_id = str((st.get("world_seed") or "round"))
+        text = xc_mod.arena_join(doc, st, world, round_id, time.time() * 1000)
+        await self._pe_save(doc, {}, cal)
+        yield event.plain_result(text)
+
+    @filter.command(CMD_XGM_PVP, "秘境攻击 [名字]（擂台报名者之间的对决）")
+    async def handle_xgm_pvp(self, event: AstrMessageEvent, name: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        me_st = xgm_mod.state_of(doc)
+        if not me_st.get("active"):
+            yield event.plain_result("需先进入仙古秘境！")
+            return
+        now_ms = time.time() * 1000
+        cal, world, _note = await self._xg_world(advance=False)
+        round_id = str((me_st.get("world_seed") or "round"))
+        text, ev = xc_mod.arena_pvp(doc, me_st, world, round_id, name.strip(),
+                                    now_ms, random.Random(f"{doc.uid}:pvp:{now_ms}"), None)
+        if text:
+            await self._pe_save(doc, {}, cal)
+            yield event.plain_result(text)
+            return
+        rival_uid = str(ev.get("rival_uid") or "")
+        rival_row = next((p for p in world["arena"].get(round_id, {}).get("participants", ())
+                          if str(p.get("uid")) == rival_uid), None)
+        if not rival_row:
+            yield event.plain_result("【秘境攻击】对手已离开擂台。")
+            return
+        uid_a, uid_b = sorted([str(doc.uid), rival_uid])
+        async with self._pl_lock(uid_a):
+            async with self._pl_lock(uid_b):
+                rival_dict = await self.db.get_player(rival_uid)
+                if not rival_dict:
+                    yield event.plain_result("【秘境攻击】对手档案不存在。")
+                    return
+                rival_doc = PlayerDoc(**rival_dict)
+                rival_st = xgm_mod.state_of(rival_doc)
+                # 双方战斗（玩家先手）
+                sa = self._stats(doc)
+                hp_a, _ = self._hp_pair(doc)
+                sb = self._stats(rival_doc)
+                hp_b, _ = self._hp_pair(rival_doc)
+                fa = build_fighter(doc, doc.name or "道友", sa.atk, sa.defense, max(1, int(hp_a)),
+                                   sa.bao, self.item_index.get)
+                fb = build_fighter(rival_doc, rival_doc.name or "对手", sb.atk, sb.defense,
+                                   max(1, int(hp_b)), sb.bao, self.item_index.get)
+                winner, log, a_hp, b_hp = run_1v1(fa, fb, random.Random(f"{doc.uid}:pvpf:{now_ms}"))
+                won = winner == 0
+                doc.ext["hp"] = max(1, int(a_hp))
+                rival_doc.ext["hp"] = max(1, int(b_hp))
+                if won:
+                    text, _ev2 = xc_mod.arena_pvp_apply(doc, me_st, rival_doc, rival_st, world,
+                                                        round_id, True, log,
+                                                        random.Random(f"{doc.uid}:pvpr:{now_ms}"))
+                    text += "\n\n【对方】" + rival_doc.name + " 败退擂台（血量 -30%）。"
+                    r_hp_loss = max(1, int(xgm_mod._hp_of(rival_doc) * 0.3))
+                    xgm_mod._set_hp(rival_doc, max(1, xgm_mod._hp_of(rival_doc) - r_hp_loss))
+                    rival_st["infamy"] = int(rival_st.get("infamy", 0) or 0) + 5
+                else:
+                    text, _ev2 = xc_mod.arena_pvp_apply(doc, me_st, rival_doc, rival_st, world,
+                                                        round_id, False, log,
+                                                        random.Random(f"{doc.uid}:pvpr:{now_ms}"))
+                async with self.db.transaction():
+                    await self.db.save_player(doc.model_dump())
+                    await self.db.save_player(rival_doc.model_dump())
+                    await self.db.save_calamity(cal)
+        async for r in self._smart(event, text, "秘境对决"):
+            yield r
+
+    @filter.command(CMD_XGM_INFAMY, "查看凶名（等级/影响/悬赏线）")
+    async def handle_xgm_infamy(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        cal, world, _note = await self._xg_world(advance=False)
+        xc_mod.register_infamy(world, doc, st)
+        await self.db.save_calamity(cal)
+        yield event.plain_result(xc_mod.infamy_text(doc, st))
+
+    @filter.command(CMD_XGM_BOUNTY, "秘境悬赏榜（凶名≥50 登榜）")
+    async def handle_xgm_bounty(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        cal, world, _note = await self._xg_world(advance=False)
+        xc_mod.register_infamy(world, doc, st)
+        await self.db.save_calamity(cal)
+        yield event.plain_result(xc_mod.bounty_text(world, doc, st))
+
+    @filter.command(CMD_XGM_KRANK, "秘境杀戮榜（全服击杀 Top10）")
+    async def handle_xgm_krank(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        cal, world, _note = await self._xg_world(advance=False)
+        yield event.plain_result(xc_mod.kill_rank_text(world))
+
+    @filter.command(CMD_XGN_MERCY, "求饶（战败抉择：善良放行/邪恶仍下杀手）")
+    async def handle_xgn_mercy(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        if not st.get("pending_defeat"):
+            yield event.plain_result("【无生死抉择】当前没有未决的战败抉择。")
+            return
+        now_ms = time.time() * 1000
+        text = xgm_mod.settle_defeat_choice(doc, st, "mercy", now_ms)
+        if "仍遭毒手" in text:
+            xgm_mod.eject_after_defeat(doc, st, now_ms)
+            text += "\n\n【你已被击杀逐出秘境】12 小时冷却后可再入。"
+        await self._pe_save(doc, {})
+        yield event.plain_result(text)
+
+    @filter.command(CMD_XGN_FISH, "任凭鱼肉（放弃挣扎：失去全部秘境收获）")
+    async def handle_xgn_fish(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        if not st.get("pending_defeat"):
+            yield event.plain_result("【无生死抉择】当前没有未决的战败抉择。")
+            return
+        now_ms = time.time() * 1000
+        text = xgm_mod.settle_defeat_choice(doc, st, "slaughter", now_ms)
+        xgm_mod.eject_after_defeat(doc, st, now_ms)
+        await self._pe_save(doc, {})
+        yield event.plain_result(text)
