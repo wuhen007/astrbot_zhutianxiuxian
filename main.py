@@ -38,6 +38,8 @@ CMD_HELP = "#修仙帮助"
 CMD_SIGN = "#修仙签到"
 CMD_CLOSED = "#闭关"
 CMD_OPEN = "#出关"
+CMD_WORK = "#降妖"
+CMD_WORK_END = "#降妖归来"
 CMD_BREAK = "#突破"
 CMD_BREAK_LUCK = "#幸运突破"
 CMD_ONEKEY_BREAK = "#一键突破"
@@ -1639,6 +1641,18 @@ class ZhutianPlugin(Star):
             note += f"，现在出关可得修为 {int(floored * eff_rate)}）"
             lines.append("状态：" + note)
             state_note = note
+        elif doc.state == "降妖中":
+            period = cultivate.WORK_PERIOD
+            planned = doc.ext.get("work_minutes")
+            elapsed = max(0.0, (time.time() - doc.state_start) / 60)
+            counted = min(elapsed, float(planned) if planned else float(period * cultivate.WORK_CYCLES),
+                          float(period * cultivate.WORK_CYCLES))
+            floored = int(counted // period) * period
+            note = f"降妖中（已 {int(elapsed)} 分钟"
+            note += f"，计划 {planned} 分钟" if planned else ""
+            note += f"，现在归来可得灵石 {int(floored * self._work_stones_per_min(doc)):,}）"
+            lines.append("状态：" + note)
+            state_note = note
         elif doc.state == "秘境中":
             note = f"正在【{(doc.ext.get('explore') or {}).get('place', '?')}】探索"
             lines.append("状态：" + note)
@@ -1654,6 +1668,8 @@ class ZhutianPlugin(Star):
                 (CMD_SIGN, "每日签到领灵石"),
                 (f"{CMD_CLOSED} 120分钟", "闭关修炼（时长可省略）"),
                 (CMD_OPEN, "出关结算（×灵根效率）"),
+                (f"{CMD_WORK} 120分钟", "降妖赚灵石（时长可省略，气血 200+）"),
+                (CMD_WORK_END, "降妖归来结算（×灵根效率）"),
                 (CMD_BREAK, "境界突破"),
                 (CMD_BODY_BREAK, "炼体突破（血气支付，失败气血逆冲）"),
                 (CMD_BODY_MY, "炼体境界与肉身属性"),
@@ -2664,6 +2680,77 @@ class ZhutianPlugin(Star):
         )
         if ok:
             self._wxl_track(d, "seclusion")  # 问仙令每日任务
+            await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    def _work_stones_per_min(self, doc: PlayerDoc) -> int:
+        """原版 dagong_jiesuan：每分钟灵石 = work.size(15) × 境界id × 效率乘区 × 0.5。"""
+        gongfa_bonus = 0
+        for gname in (doc.ext.get("gongfa") or []):
+            g = self.item_index.get(gname) or {}
+            try:
+                gongfa_bonus += float(g.get("修炼加成") or 0)
+            except (TypeError, ValueError):
+                pass
+        buffs = doc.ext.get("buffs") or {}
+        big = buffs.get("biguan") if isinstance(buffs.get("biguan"), dict) else {}
+        biguan_bonus = float(big.get("bonus", 0) or 0)
+        base_per_min = int(self._val("WORK_STONES_PER_REALM", 15)) * (max(0, doc.realm_index) + 1)
+        return max(1, int(base_per_min * (1 + linggen.eff_of(doc) + gongfa_bonus + biguan_bonus) * 0.5))
+
+    async def _work_run(self, event: AstrMessageEvent, planned: int | None):
+        """降妖开始（原版 PlayerControl.Dagong）：封印/气血校验 + 15 分钟档定时动作。"""
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        blocked = era_mod.seal_block(doc, await self._era_state(), "降妖")
+        if blocked:
+            yield event.plain_result(blocked)
+            return
+        hp_cur, _hp_max = self._hp_pair(doc)
+        if hp_cur < cultivate.WORK_MIN_HP:
+            yield event.plain_result("你都伤成这样了，先去疗伤吧。")
+            return
+        ok, msg, d = cultivate.start_work(doc, planned)
+        if ok:
+            await self.db.save_player(d.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_WORK, "降妖赚灵石")
+    async def handle_work(self, event: AstrMessageEvent, minutes: str = ""):
+        if not self._allowed(event):
+            return
+        arg = (minutes or "").strip()
+        digits = "".join(ch for ch in arg if ch.isdigit())
+        async for r in self._work_run(event, int(digits) if digits else None):
+            yield r
+
+    @filter.regex(r"^#降妖(\d+)分?钟?$")
+    async def handle_work_attached(self, event: AstrMessageEvent):
+        """兼容原版写法 #降妖30分钟（AstrBot 命令匹配要求空格，故单列 regex 入口）。"""
+        import re as _re
+        if not self._allowed(event):
+            return
+        m = _re.match(r"^#降妖(\d+)分?钟?$", (event.get_message_str() or "").strip())
+        async for r in self._work_run(event, int(m.group(1)) if m else None):
+            yield r
+
+    @filter.command(CMD_WORK_END, "降妖归来结算")
+    async def handle_work_end(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        # 魔头禁术：魂印缠身 → 降妖效率同步受抑（对齐出关处理）
+        brand_mult = motou.brand_penalty(motou.state_of(doc), time.time())
+        spm = self._work_stones_per_min(doc)
+        if brand_mult < 1.0:
+            spm = max(1, int(spm * brand_mult))
+        ok, msg, d = cultivate.end_work(doc, time.time(), spm)
+        if ok:
             await self.db.save_player(d.model_dump())
         yield event.plain_result(msg)
 

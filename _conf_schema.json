@@ -43,6 +43,12 @@
         "default": 7200,
         "hint": "闭关时长超过该值时按上限计算并提示"
       },
+      "WORK_STONES_PER_REALM": {
+        "description": "降妖每分钟基础灵石×境界id（对齐原版 work.size=15）",
+        "type": "int",
+        "default": 15,
+        "hint": "降妖灵石 = 该值 × 0.5 × 境界id × 效率乘区 × 结算分钟（15 分钟周期取整，上限 720 分钟）"
+      },
       "BREAKTHROUGH_SUCCESS_RATE": {
         "description": "突破成功率",
         "type": "float",
