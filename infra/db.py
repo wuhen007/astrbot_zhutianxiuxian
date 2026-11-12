@@ -177,6 +177,17 @@ class DataBase:
 
     # ---- 玩家文档 ----
 
+    async def delete_player_bundle(self, uid: str) -> None:
+        """W33c：再入仙途——删除玩家全部档案行（players/inventory/daily_tasks/
+        boss_ledger/dark_ledger/raid_member）。全局单例与队伍表不动。"""
+        assert self.conn is not None
+        owned = not self.conn.in_transaction
+        for table in ("players", "inventory", "daily_tasks", "boss_ledger",
+                      "dark_ledger", "raid_member"):
+            await self.conn.execute(f"DELETE FROM {table} WHERE uid = ?", (uid,))
+        if owned:
+            await self.conn.commit()
+
     async def get_player(self, uid: str) -> Optional[dict[str, Any]]:
         assert self.conn is not None
         async with self.conn.execute("SELECT doc FROM players WHERE uid = ?", (uid,)) as cur:

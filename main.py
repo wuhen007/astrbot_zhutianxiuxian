@@ -14,7 +14,7 @@ from astrbot.api.star import Context, Star, StarTools, register
 from .ui_kit import btn as _uk_btn, row as _uk_row, kb_result as _uk_kb, own as _uk_own, data_ok as _uk_data, encode_size_ok as _uk_size, available as _uk_avail
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_story as rs_mod, plane_events as pe_mod, games_mini as gm_mod, xtzb_birth as xb_mod, auto_task as at_mod, easter_eggs as eg_mod, plane_relay as pr_mod, sect_extra as se_mod, assistant as as_mod, bounty as bt_mod, xiangu as xgm_mod, xiangu_npc as xn_mod, xiangu_camp as xc_mod, xiangu_dao as xdd_mod, xiangu_baodi as xbd_mod, academy as acd_mod, social as soc_mod, abilities as ab_mod, tianji as tjge_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_story as rs_mod, plane_events as pe_mod, games_mini as gm_mod, xtzb_birth as xb_mod, auto_task as at_mod, easter_eggs as eg_mod, plane_relay as pr_mod, sect_extra as se_mod, assistant as as_mod, bounty as bt_mod, xiangu as xgm_mod, xiangu_npc as xn_mod, xiangu_camp as xc_mod, xiangu_dao as xdd_mod, xiangu_baodi as xbd_mod, academy as acd_mod, social as soc_mod, abilities as ab_mod, tianji as tjge_mod, sellall as sa_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -932,6 +932,11 @@ CMD_BATCH_HEAL = "#一键回血"
 CMD_SUBLIME = "#极尽升华"
 CMD_EMP_TITLE = "#自封帝号"
 CMD_MOJIE = "#堕入魔界"
+# W33c：原版 replyOfficialMessage 玩法对齐——剑云海机缘/一键出售/再入仙途
+CMD_JYH_VISIT = "#造访剑云海"
+CMD_JYH_RULES = "#剑云海规则"
+CMD_SELL_ALL = "#一键出售"
+CMD_REBIRTH = "#再入仙途"
 # W29 深度核查补漏 II：天机阁代币商店 + 轮回命签批量重抽
 CMD_TJGE_PANEL = "#天机阁"
 CMD_TJGE_EXCHANGE = "#天机阁兑换"
@@ -2617,6 +2622,10 @@ class ZhutianPlugin(Star):
                 await self.db.save_player(d.model_dump())
                 await self.db.add_items(doc.uid, items)
         yield event.plain_result(msg)
+        # W33：原版 DAILY_SIGN_BUTTONS
+        res = self._kb(event, "", self._daily_sign_rows())
+        if res:
+            yield res
 
     async def _lottery_run(self, event, count: int):
         doc, err = await self._require_player(event)
@@ -9633,15 +9642,21 @@ class ZhutianPlugin(Star):
         yield event.plain_result(prefix + msg)
 
     @filter.command(CMD_PUP_DESTROY, "毁去人傀（需「确认」）")
-    async def handle_pup_destroy(self, event: AstrMessageEvent):
+    async def handle_pup_destroy(self, event: AstrMessageEvent, arg: str = ""):
         if not self._allowed(event):
             return
         doc, s, prefix, err = await self._pup_open(event)
         if err:
             yield event.plain_result(err)
             return
-        if self._adm_tail(event).strip() != "确认":
+        if (arg or self._adm_tail(event)).strip() != "确认":
             yield event.plain_result(prefix + "销毁后不返还材料。确认请发送「#毁去人傀 确认」。")
+            r_ = _uk_row([_uk_btn("pup.destroy", "✅确认销毁", uid=doc.uid, style="danger"),
+                          _uk_btn("pup.keep", "保留人傀", uid=doc.uid)],
+                         fallback="#毁去人傀 确认", timeout=120)
+            res = self._kb(event, "**毁去人傀**\n\n> 人傀将被彻底销毁，已消耗的材料不会返还。", r_)
+            if res:
+                yield res
             return
         ok, msg = pup_mod.destroy(s)
         if ok:
@@ -10993,6 +11008,16 @@ class ZhutianPlugin(Star):
             f"队长开战：{CMD_TR_START}｜查看：{CMD_TR_INFO}"
             + (f"\n（已消耗【{gate}】×1）" if gate else "")
         )
+        # W33：原版 tuanben L885 队伍面板按钮
+        r1_ = _uk_row([_uk_btn("tr.join", "🤝加入队伍", a1=code),
+                       _uk_btn("tb.info", "📋查看队伍")],
+                      fallback=f"{CMD_TR_JOIN} {code}", timeout=3600)
+        r2_ = _uk_row([_uk_btn("tr.start", "⚔️发起讨伐", uid=doc.uid, style="danger")],
+                      fallback=CMD_TR_START, timeout=3600)
+        res = self._kb(event, f"**{name}讨伐队伍**\n\n**队伍：** {code}\n"
+                         f"**成员：** 1 / {raid.MAX_MEMBERS}\n**状态：** 招募中", r1_, r2_)
+        if res:
+            yield res
 
     @filter.command(CMD_TR_JOIN, "加入讨伐队伍")
     async def handle_team_join(self, event: AstrMessageEvent, code: str = ""):
@@ -11035,6 +11060,13 @@ class ZhutianPlugin(Star):
             f"已加入【{team['boss']}】讨伐队（{count + 1}/{raid.MAX_MEMBERS}）。\n"
             f"等待队长 {CMD_TR_START}，开战后发 {CMD_TR_HIT} 出手。"
         )
+        # W33：原版 tuanben L1026 队伍面板按钮
+        r_ = _uk_row([_uk_btn("tb.info", "📋查看队伍"),
+                      _uk_btn("tb.leave", "🚪离开队伍", uid=doc.uid)],
+                     fallback=f"{CMD_TR_INFO} / {CMD_TB_LEAVE}", timeout=3600)
+        res = self._kb(event, f"**已加入{team['boss']}讨伐队伍**", r_)
+        if res:
+            yield res
 
     @filter.command(CMD_TR_START, "发起讨伐")
     async def handle_team_start(self, event: AstrMessageEvent):
@@ -11899,6 +11931,14 @@ class ZhutianPlugin(Star):
             f"重置万劫道碑将清空全部节点与流派，返还 80% 道痕（{refund:,}）。\n"
             f"确认请发送「{CMD_ENDLESS_META_RESET_YES}」。"
         )
+        # W33：原版 EndlessRealm L1131 确认按钮
+        r_ = _uk_row([_uk_btn("endless.meta_yes", "✅确认重置", uid=doc.uid, style="danger"),
+                      _uk_btn("endless.meta_no", "保留道碑", uid=doc.uid)],
+                     fallback=f"{CMD_ENDLESS_META_RESET_YES}", timeout=60)
+        res = self._kb(event, f"**重置万劫道碑**\n\n**预计返还：** {refund:,} 劫境道痕\n\n"
+                         "> 将清空全部节点与流派，仅返还已消耗道痕的 80%。", r_)
+        if res:
+            yield res
 
     @filter.command(CMD_ENDLESS_META_RESET_YES, "确认重置万劫道碑")
     async def handle_endless_meta_reset_yes(self, event: AstrMessageEvent):
@@ -13793,6 +13833,28 @@ class ZhutianPlugin(Star):
         if err:
             yield event.plain_result(err)
             return
+        # W33：原版 shili L184 两步确认——首次只发确认面板
+        f_st = faction.state_of(doc)
+        fkey = str(f_st.get("faction") or "")
+        if not fkey:
+            yield event.plain_result("你尚未加入任何势力。")
+            return
+        r_ = _uk_row([_uk_btn("faction.quit_yes", "✅确认脱离", uid=doc.uid, style="danger"),
+                      _uk_btn("faction.quit_no", "取消", uid=doc.uid)],
+                     fallback="#确认脱离势力", timeout=60)
+        res = self._kb(event, f"**脱离势力确认**\n\n**当前身份：** {fkey} 弟子\n"
+                         "> 脱离后职位归零，晋升消耗不予返还。", r_)
+        if res:
+            yield res
+
+    async def handle_faction_quit_yes(self, event: AstrMessageEvent):
+        """W33：脱离势力确认（按钮/指令双入口）。"""
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
         state = await self._faction_state()
         ok, msg = faction.leave(state, doc.uid)
         if not ok:
@@ -13800,6 +13862,9 @@ class ZhutianPlugin(Star):
             return
         await self.db.save_faction(state)
         yield event.plain_result(msg)
+
+    async def handle_faction_quit_no(self, event: AstrMessageEvent):
+        yield event.plain_result("已取消脱离，江湖再见。")
 
     @filter.command(CMD_FACTION_CONTRIB, "势力贡献")
     async def handle_faction_contrib(self, event: AstrMessageEvent, amount: int = 0):
@@ -14199,6 +14264,10 @@ class ZhutianPlugin(Star):
             await self.db.add_items(doc.uid, items)
         async for r in self._smart(event, msg, "垂纶签到"):
             yield r
+        # W33：原版 DAILY_SIGN_BUTTONS
+        res = self._kb(event, "", self._daily_sign_rows())
+        if res:
+            yield res
 
     @filter.command(CMD_FISH_CAST, alias={"#垂钓众生"})
     async def handle_fish_cast(self, event: AstrMessageEvent, arg: str = ""):
@@ -17412,6 +17481,13 @@ class ZhutianPlugin(Star):
             f"每步完成得 修为/血气/灵石×{quest.step_reward(rec['level'], realm)}；"
             f"发「{CMD_TASK_MY}」看进度，完成后「{CMD_TASK_SUBMIT}」结算。"
         )
+        # W33：原版 DAILY_TASK_BUTTONS
+        res = self._kb(event, "", _uk_row(
+            [_uk_btn("page.cmd", "📋查看任务", a1=CMD_TASK_MY),
+             _uk_btn("page.cmd", "📥提交任务", a1=CMD_TASK_SUBMIT)],
+            fallback=f"{CMD_TASK_MY} / {CMD_TASK_SUBMIT}", timeout=86400))
+        if res:
+            yield res
 
     @filter.command(CMD_TASK_MY, "查看每日任务")
     async def handle_task_my(self, event: AstrMessageEvent):
@@ -17455,6 +17531,13 @@ class ZhutianPlugin(Star):
         if new_rec.get("renwu") == 1:
             extra = "\n今日任务全部完成！发「#领取每日奖励」领取终极奖励。"
         yield event.plain_result("\n".join(msgs) + extra)
+        # W33：原版 DAILY_TASK_BUTTONS
+        res = self._kb(event, "", _uk_row(
+            [_uk_btn("page.cmd", "📋查看任务", a1=CMD_TASK_MY),
+             _uk_btn("page.cmd", "📥提交任务", a1=CMD_TASK_SUBMIT)],
+            fallback=f"{CMD_TASK_MY} / {CMD_TASK_SUBMIT}", timeout=86400))
+        if res:
+            yield res
 
     @filter.command(CMD_TASK_CLAIM, "领取每日奖励")
     async def handle_task_claim(self, event: AstrMessageEvent):
@@ -17491,6 +17574,13 @@ class ZhutianPlugin(Star):
             f"修为 +{fr['amount']}，血气 +{fr['amount']}，灵石 +{fr['amount']}，秘境之匙 ×{fr['keys']}"
             f"，抽奖次数 +{blessing.TICKETS_PER_CLAIM}（#每日抽奖 使用）"
         )
+        # W33：原版 DAILY_REWARD_CLAIMED 按钮
+        res = self._kb(event, "", _uk_row(
+            [_uk_btn("page.cmd", "🎁每日抽奖", a1=CMD_LOTTERY),
+             _uk_btn("page.cmd", "📋查看任务", a1=CMD_TASK_MY)],
+            fallback=f"{CMD_LOTTERY} / {CMD_TASK_MY}", timeout=86400))
+        if res:
+            yield res
 
     async def _recipe_overview(self, event: AstrMessageEvent, title: str, recipes: list, mode_map: dict | None, cmd: str, note: str = ""):
         """配方总览（对齐原版 #丹药配方/#符道配方 出图）。"""
@@ -20630,6 +20720,10 @@ class ZhutianPlugin(Star):
         async with self.db.transaction():
             await self.db.save_player(doc.model_dump())
         yield event.plain_result(msg)
+        # W33：原版 DAILY_SIGN_BUTTONS
+        res = self._kb(event, "", self._daily_sign_rows())
+        if res:
+            yield res
 
     @filter.command(CMD_AC_ZN, "周年签到")
     async def handle_ac_zn(self, event: AstrMessageEvent):
@@ -20785,6 +20879,14 @@ class ZhutianPlugin(Star):
         """按钮点击事件带合成指令串（分发器注入），文本消息原样返回。"""
         injected = self._BTN_MSGS.get(id(event))
         return str(injected) if injected else str(getattr(event, "message_str", "") or "")
+
+    def _daily_sign_rows(self):
+        """W33：原版 DAILY_SIGN_BUTTONS（去巡界——port 无该指令）。"""
+        acts = [("修仙签到", CMD_SIGN), ("天道赐福", CMD_TIANDAO),
+                ("道法赐福", CMD_DAOFA_GIFT), ("垂纶", CMD_FISH_SIGN),
+                ("星海之缘", CMD_AC_XH), ("每日抽奖", CMD_LOTTERY)]
+        return _uk_row([_uk_btn("page.cmd", name, a1=cmd) for name, cmd in acts],
+                       fallback=" / ".join(cmd for _, cmd in acts), timeout=86400)
 
     def _kb(self, event: AstrMessageEvent, text: str, *rows):
         """W30：构造「短文本 + 按钮」结果（组件不可用自动降级纯文本）。"""
@@ -21130,6 +21232,14 @@ class ZhutianPlugin(Star):
                 await self.db.save_player(doc.model_dump())
                 await self.db.save_player(foe.model_dump())
         yield event.plain_result(msg)
+        # W33：原版 SecretPlace L189 接引确认按钮（目标玩家点击）
+        if "接引" in msg or "送往" in msg:
+            r_ = _uk_row([_uk_btn("pr.yes", "✅同意接引", style="success"),
+                          _uk_btn("pr.no", "❌拒绝接引", style="danger")],
+                         fallback="#同意接引 或 #拒绝接引（60 秒内）", timeout=60)
+            res = self._kb(event, "**仙王神通·接引道友**\n\n> 请目标玩家在 60 秒内确认。", r_)
+            if res:
+                yield res
 
     @filter.command(CMD_PR_JY_YES, "同意接引（60 秒内）")
     async def handle_pr_jy_yes(self, event: AstrMessageEvent):
@@ -23329,6 +23439,16 @@ class ZhutianPlugin(Star):
             f"队长开战：{CMD_TB_START}（一次结算，无奖励、不占 CD）\n"
             f"查看：{CMD_TR_INFO}｜规则：{CMD_TB_RULES}"
         )
+        # W33：原版 tuanben L408 队伍面板按钮
+        r1_ = _uk_row([_uk_btn("tb.join", "🤝加入队伍", a1=code),
+                       _uk_btn("tb.info", "📋查看队伍")],
+                      fallback=f"{CMD_TB_JOIN} {code}", timeout=3600)
+        r2_ = _uk_row([_uk_btn("tb.start", "⚔️迎战帝尊", uid=doc.uid, style="danger")],
+                      fallback=CMD_TB_START, timeout=3600)
+        res = self._kb(event, f"**帝尊讨伐队伍**\n\n**队伍：** {code}\n**队长：** "
+                         f"{doc.name or doc.uid[:8]}\n**成员：** 1 / {tb_mod.MAX_MEMBERS}", r1_, r2_)
+        if res:
+            yield res
 
     @filter.command(CMD_TB_JOIN, "加入迎战帝尊队伍")
     async def handle_tb_join(self, event: AstrMessageEvent, code: str = ""):
@@ -24815,6 +24935,14 @@ class ZhutianPlugin(Star):
         if st.get("fusion"):
             await self._pe_save(doc, {})
         yield event.plain_result(text)
+        # W33：原版 xianguPlace L4897 确认按钮
+        if st.get("fusion"):
+            r_ = _uk_row([_uk_btn("xgd.confirm", "✅确认融合", uid=doc.uid, style="primary"),
+                          _uk_btn("xgd.cancel", "取消", uid=doc.uid)],
+                         fallback="#确认融合道种 或 #取消融合道种", timeout=60)
+            res = self._kb(event, "60 秒内点击确认（失败道种损毁）：", r_)
+            if res:
+                yield res
 
     @filter.command(CMD_XGD_CONFIRM, "确认融合道种（60 秒窗口内）")
     async def handle_xgd_confirm(self, event: AstrMessageEvent):
@@ -25332,9 +25460,39 @@ class ZhutianPlugin(Star):
         if gate:
             yield event.plain_result(gate)
             return
+        # W33：原版两步确认——首次只发确认面板
+        st["sublime_pending"] = True
+        r_ = _uk_row([_uk_btn("sublime.yes", "✅确认升华", uid=doc.uid, style="danger"),
+                      _uk_btn("sublime.no", "取消", uid=doc.uid)],
+                     fallback="回复 1 确认 / 0 取消", timeout=60)
+        res = self._kb(event, "**极尽升华·终极一跃**\n\n"
+                       "- 攻击、防御、生命值提升至巅峰（×4）\n"
+                       "- 效果持续 10 分钟\n\n"
+                       "> 代价：主轨境界将永久下降 1 级。", r_)
+        if res:
+            yield res
+
+    async def handle_sublime_yes(self, event: AstrMessageEvent):
+        """W33：极尽升华确认。"""
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        st = xgm_mod.state_of(doc)
+        gate = ab_mod.sublime_gate(doc)
+        if gate:
+            yield event.plain_result(gate)
+            return
         msg = ab_mod.sublime_apply(doc, st, time.time())
         await self._pe_save(doc, {})
         yield event.plain_result(msg)
+
+    async def handle_sublime_no(self, event: AstrMessageEvent):
+        st = xgm_mod.state_of(event and self._find_player_sync(event) or {})
+        st.pop("sublime_pending", None)
+        yield event.plain_result("已取消极尽升华。")
 
     @filter.command(CMD_EMP_TITLE, "自封帝号 帝号（证道成帝者）")
     async def handle_emp_title(self, event: AstrMessageEvent, arg: str = ""):
@@ -25571,6 +25729,46 @@ class ZhutianPlugin(Star):
     # ==============================================================
     # W30：MD 消息与按钮通用分发器
 
+    async def handle_page_cmd(self, event: AstrMessageEvent, cmd: str = ""):
+        """W33：通用指令按钮——把按钮 command 当作一次文本指令执行。"""
+        cmd = str(cmd or "").strip()
+        if not cmd:
+            return
+        self._BTN_MSGS[id(event)] = cmd
+        try:
+            inner = self._cmd_route(event, cmd)
+            if inner is not None:
+                async for r in inner:
+                    yield r
+        finally:
+            self._BTN_MSGS.pop(id(event), None)
+
+    def _cmd_route(self, event: AstrMessageEvent, cmd: str):
+        """把按钮 command 路由到对应指令 handler（仅白名单指令）。"""
+        cmd = str(cmd or "").strip()
+        table = {
+            CMD_TASK_MY: ("handle_task_my", ""),
+            CMD_TASK_SUBMIT: ("handle_task_submit", ""),
+            CMD_SIGN: ("handle_sign", ""),
+            CMD_TIANDAO: ("handle_tiandao", ""),
+            CMD_DAOFA_GIFT: ("handle_daofa_gift", ""),
+            CMD_FISH_SIGN: ("handle_fish_sign", ""),
+            CMD_AC_XH: ("handle_ac_xh", ""),
+            CMD_LOTTERY: ("handle_lottery", ""),
+            CMD_TR_INFO: ("handle_tr_info", ""),
+            CMD_PUP_MY: ("handle_pup_my", ""),
+        }
+        hit = table.get(cmd)
+        if not hit:
+            yield event.plain_result("该按钮对应的指令暂不可用，请直接发送指令。")
+            return
+        hname, arg = hit
+        handler = getattr(self, hname, None)
+        if handler is None:
+            yield event.plain_result("该按钮已失效，请直接发送指令。")
+            return
+        return handler(event, arg) if arg else handler(event)
+
     @filter.button_action()
     async def handle_btn_dispatch(self, event: AstrMessageEvent):
         """按钮点击 → 校验发起者 → 路由到既有 handler（零业务改动）。"""
@@ -25582,7 +25780,10 @@ class ZhutianPlugin(Star):
         a1 = data.get("a1")
         uid = str(data.get("uid") or "")
         me = str(event.get_sender_id() or "")
-        public = {"hb.grab", "xg.status"}          # 公开按钮不绑发起者
+        public = {"hb.grab", "xg.status", "tb.join", "tr.join", "tb.info",
+                  "page.cmd", "pr.yes", "pr.no", "tb.leave",
+                  "endless.meta_no", "faction.quit_no", "sublime.no",
+                  "xgd.cancel", "mg.keep", "pup.keep"}          # 公开/无参按钮
         if uid and act not in public and uid != me:
             yield event.plain_result("该按钮只属于发起者，请自行进入对应玩法操作。")
             return
@@ -25605,6 +25806,33 @@ class ZhutianPlugin(Star):
             "xb.t4": ("handle_xb_t4", str(a1 or "")),
             "xb.vow": ("handle_xb_vow", str(a1 or "")),
             "hb.grab": ("handle_hb_grab", str(a1 or "")),
+            # W33：原版 replyOfficialMessage 全量对齐路由
+            "jyh.c1": ("handle_jyh_choose", "1"),
+            "jyh.c2": ("handle_jyh_choose", "2"),
+            "jyh.c3": ("handle_jyh_choose", "3"),
+            "sell.yes": ("handle_sell_yes", ""),
+            "sell.no": ("handle_sell_no", ""),
+            "rebirth.yes": ("handle_rebirth_yes", ""),
+            "rebirth.no": ("handle_rebirth_no", ""),
+            "endless.meta_yes": ("handle_endless_meta_reset_yes", ""),
+            "endless.meta_no": ("handle_endless_meta_no", ""),
+            "faction.quit_yes": ("handle_faction_quit_yes", ""),
+            "faction.quit_no": ("handle_faction_quit_no", ""),
+            "pup.destroy": ("handle_pup_destroy", "确认"),
+            "pup.keep": ("page.cmd", CMD_PUP_MY),
+            "sublime.yes": ("handle_sublime_yes", ""),
+            "sublime.no": ("handle_sublime_no", ""),
+            "xgd.confirm": ("handle_xgd_confirm", ""),
+            "xgd.cancel": ("handle_xgd_cancel", ""),
+            "tb.join": ("handle_tb_join", str(a1 or "")),
+            "tb.info": ("page.cmd", CMD_TR_INFO),
+            "tb.start": ("handle_tb_start", ""),
+            "tb.leave": ("handle_tb_leave", ""),
+            "tr.join": ("handle_team_join", str(a1 or "")),
+            "tr.start": ("handle_team_start", ""),
+            "pr.yes": ("handle_pr_jy_yes", ""),
+            "pr.no": ("handle_pr_jy_no", ""),
+            "page.cmd": ("handle_page_cmd", str(a1 or "")),
         }
         if act not in routes:
             yield event.plain_result("该按钮已失效（版本更新或会话过期），请直接发送对应指令。")
@@ -25615,7 +25843,8 @@ class ZhutianPlugin(Star):
         try:
             handler = getattr(self, hname)
             if act in ("tj.accept", "tj.reject", "xb.t1", "xb.t2", "xb.t3",
-                       "xb.t4", "xb.vow", "hb.grab"):
+                       "xb.t4", "xb.vow", "hb.grab", "pup.destroy", "tb.join",
+                       "tr.join", "page.cmd", "jyh.c1", "jyh.c2", "jyh.c3"):
                 async for r in handler(event, str(a1 or "")):
                     got = True
                     yield r
@@ -25630,3 +25859,164 @@ class ZhutianPlugin(Star):
             # 避免 QQ 端只显示"已操作"而无任何消息。
             yield event.plain_result(
                 "【按钮操作无效果】该操作的上下文可能已过期，请重新发起对应玩法后再点击。")
+
+
+
+    # ==============================================================
+    # W33c：剑云海机缘 / 一键出售 / 再入仙途
+
+    @filter.command(CMD_JYH_VISIT, "造访剑云海（成仙+令牌，三选机缘）")
+    async def handle_jyh_visit(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        ok, msg, cost = faction.jyh_visit(doc, inv, int(doc.realm_index), int(doc.stones or 0))
+        if ok and cost:
+            async with self.db.transaction():
+                await self.db.remove_item(doc.uid, faction.JYH_ITEM, cost)
+        yield event.plain_result(msg)
+        # W33：原版 shili L1227 三选按钮
+        if ok:
+            r_ = _uk_row([
+                _uk_btn("jyh.c1", "💎修炼资源", a1=1, uid=doc.uid, style="primary"),
+                _uk_btn("jyh.c2", "⚔️拜师传人", a1=2, uid=doc.uid, style="primary"),
+                _uk_btn("jyh.c3", "🛡帝主庇护", a1=3, uid=doc.uid, style="primary")],
+                fallback="#剑云海选择1/2/3（仅一次）", timeout=600)
+            res = self._kb(event, "请择机缘（仅一次，不可重选）：", r_)
+            if res:
+                yield res
+
+    @filter.command(CMD_JYH_RULES, "剑云海机缘规则")
+    async def handle_jyh_rules(self, event: AstrMessageEvent):
+        yield event.plain_result(faction.jyh_rules())
+
+    async def handle_jyh_choose(self, event: AstrMessageEvent, choice: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        ok, msg, delta, stones = faction.jyh_choose(
+            doc, int(choice or 0),
+            lambda name, qty: int((inv or {}).get(name, 0) or 0) >= qty)
+        if ok:
+            async with self.db.transaction():
+                await self.db.save_player(doc.model_dump())
+                for n, q in (delta or {}).items():
+                    if q > 0:
+                        await self.db.add_items(doc.uid, {n: q})
+                    elif q < 0:
+                        await self.db.remove_item(doc.uid, n, -q)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_SELL_ALL, "一键出售（清点可售物品，按钮确认）")
+    async def handle_sell_all(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        list_text, total, sellable = sa_mod.preview(doc, inv, self.item_index.get)
+        if not sellable:
+            yield event.plain_result("纳戒里没有可出售的物品（关键道具与不可交易物除外）。")
+            return
+        doc.ext["sellall_pending"] = sellable
+        await self._pe_save(doc, {})
+        head = (f"【一键出售确认】物品 {sum(sellable.values())} 件｜预估总价 {total:,} 灵石。\n"
+                + "> 会出售清单内全部物品。\n" + list_text)
+        yield event.plain_result(head)
+        # W33：原版 UserSellAll L1619 确认按钮
+        r_ = _uk_row([_uk_btn("sell.yes", "✅确认出售", uid=doc.uid, style="danger"),
+                      _uk_btn("sell.no", "❌取消", uid=doc.uid)],
+                     fallback="回复 1 确认 / 0 取消", timeout=120)
+        res = self._kb(event, "请确认出售：", r_)
+        if res:
+            yield res
+
+    async def handle_sell_yes(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        sellable = doc.ext.pop("sellall_pending", None)
+        if not isinstance(sellable, dict) or not sellable:
+            yield event.plain_result("当前没有待确认的一键出售，请先 #一键出售。")
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        msg, stones, delta = sa_mod.execute(doc, inv, sellable, self.item_index.get)
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            for n, q in (delta or {}).items():
+                await self.db.remove_item(doc.uid, n, -q)
+        yield event.plain_result(msg)
+
+    async def handle_sell_no(self, event: AstrMessageEvent):
+        doc = await self._find_player(event)
+        if doc:
+            doc.ext.pop("sellall_pending", None)
+            await self._pe_save(doc, {})
+        yield event.plain_result("已取消出售。")
+
+    @filter.command(CMD_REBIRTH, "再入仙途（断绝此生，清档重开，按钮确认）")
+    async def handle_rebirth(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        count = int(float((doc.ext or {}).get("rebirth_count", 0) or 0))
+        if count >= 3:
+            yield event.plain_result("你已断绝此生 3 次，此路已到尽头。")
+            return
+        doc.ext["rebirth_pending"] = True
+        await self._pe_save(doc, {})
+        yield event.plain_result(
+            f"【转世重生确认】一旦转世，当世一切与你无缘（已断绝 {count}/3 次）。\n")
+        # W33：原版 UserStart L81 确认按钮
+        r_ = _uk_row([_uk_btn("rebirth.yes", "☠断绝此生", uid=doc.uid, style="danger"),
+                      _uk_btn("rebirth.no", "🌸再继仙缘", uid=doc.uid, style="success")],
+                     fallback="断绝此生 / 再继仙缘", timeout=120)
+        res = self._kb(event, "请抉择（120 秒内）：", r_)
+        if res:
+            yield res
+
+    async def handle_rebirth_yes(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        if not (doc.ext or {}).pop("rebirth_pending", None):
+            yield event.plain_result("请先发送 #再入仙途 发起转世。")
+            return
+        count = int(float((doc.ext or {}).get("rebirth_count", 0) or 0)) + 1
+        old_name = doc.name
+        from .core.cultivate import create_player as _cp
+        table = self.content.table(doc.realm_table)
+        fresh = _cp(doc.uid, old_name or "无名修士", table)
+        fresh.ext["rebirth_count"] = count
+        async with self.db.transaction():
+            await self.db.delete_player_bundle(doc.uid)
+            await self.db.save_player(fresh.model_dump())
+        yield event.plain_result(
+            f"【断绝此生·第 {count} 次】前尘尽散，新生已启——{old_name or '无名修士'} 重入凡尘。\n")
+        yield event.plain_result("发送 #状态 开启新的仙途。（存档已重置）")
+
+    async def handle_rebirth_no(self, event: AstrMessageEvent):
+        doc = await self._find_player(event)
+        if doc:
+            doc.ext.pop("rebirth_pending", None)
+            await self._pe_save(doc, {})
+        yield event.plain_result("再继仙缘——当前存档已保留。")

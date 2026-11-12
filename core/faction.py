@@ -14,6 +14,7 @@ shortcut：职位（记名弟子→圣女）与势力专属法宝 / 秘库 / 地
 from __future__ import annotations
 
 from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 LEVEL_MAX = 9
@@ -229,3 +230,85 @@ def status_text(state: Mapping, uid: str) -> str:
             f"基金 {int(row.get('fund', 0)):,}\n"
             f"你的贡献：{int(m.get('contrib', 0) or 0):,}｜每日俸禄 {amount:,} 灵石\n"
             f"{progress}")
+
+
+# ---------------------------------------------------------- 剑云海机缘（W33c：原版 shili.js L1227）
+
+JYH_ITEM = "剑云海令牌"
+JYH_FLAG = "jyh_chosen"
+JYH_STONES = 1_500_000        # 原版 1.5 亿 ÷1000
+JYH_PILL = "剑云海圣药"
+JYH_SWORD = "永恒终极剑道"
+JYH_SHIELD = "帝主庇护"
+
+
+def jyh_done(doc: Any) -> bool:
+    ext = getattr(doc, "ext", {}) or {}
+    return bool(ext.get(JYH_FLAG))
+
+
+def jyh_visit(doc: Any, inv: Mapping[str, int], realm_index: int,
+              stones_have: int) -> tuple[bool, str, int]:
+    """#造访剑云海：成仙 + 令牌×1。返回 (ok, text, 令牌消耗)。"""
+    if jyh_done(doc):
+        return False, "剑云海的机缘你早已做出抉择，万顷剑海再无你的涟漪。", 0
+    if realm_index < 41:
+        return False, "造访剑云海需成仙（主轨第 42 境）方可承受剑魔帝主之威。", 0
+    if int((inv or {}).get(JYH_ITEM, 0) or 0) < 1:
+        return False, f"需持【{JYH_ITEM}】×1 方可入海（诸天掉落）。", 0
+    nl = chr(10)
+    return True, nl.join([
+        "**剑云海机缘**",
+        "",
+        "剑魔帝主负手立于万顷剑海之前，静候你的选择。",
+        "",
+        "- **修炼资源：** 灵石与剑云海圣药",
+        "- **拜师传人：** 继承《永恒终极剑道》",
+        "- **帝主庇护：** 黑暗牢笼豁免与副本增益",
+        "",
+        "> 此次机缘仅可选择一次。（点击或 #剑云海选择1/2/3）"]), 1
+
+
+def jyh_choose(doc: Any, choice: int,
+               consume_token: Callable[[str, int], bool]) -> tuple[bool, str, dict[str, int], int]:
+    """#剑云海选择1/2/3。返回 (ok, text, 库存变动, 灵石)。"""
+    if jyh_done(doc):
+        return False, "机缘已做出抉择，不可重选。", {}, 0
+    if choice not in (1, 2, 3):
+        return False, "请选择 1/2/3。", {}, 0
+    if not consume_token(JYH_ITEM, 1):
+        return False, f"【{JYH_ITEM}】已不在纳戒，机缘作废。", {}, 0
+    ext = getattr(doc, "ext", None)
+    if isinstance(ext, dict):
+        ext[JYH_FLAG] = True
+    delta: dict[str, int] = {}
+    if choice == 1:
+        stones = JYH_STONES
+        delta[JYH_PILL] = 3
+        doc.stones = int(getattr(doc, "stones", 0) or 0) + stones
+        text = ("你选了**修炼资源**——灵石 {stones:,} 与剑云海圣药 ×3 归入纳戒，"
+                .format(stones=stones) + "剑海之水滋养道基。")
+        return True, text, delta, stones
+    if choice == 2:
+        delta[JYH_SWORD] = 1
+        text = ("剑魔帝主抬手认你为**传人**——《永恒终极剑道》化为剑印落入识海，"
+                "万剑齐鸣，自此你的剑即是剑海之剑。")
+        return True, text, delta, 0
+    delta[JYH_SHIELD] = 1
+    text = ("帝主垂眸一顾——**帝主庇护**印记烙入命轮，"
+            "黑暗牢笼亦不敢轻易困你（印记留待对应领域生效）。")
+    return True, text, delta, 0
+
+
+def jyh_rules() -> str:
+    nl = chr(10)
+    return nl.join([
+        "【剑云海机缘·规则】",
+        "「成仙修士持剑云海令牌造访剑海，剑魔帝主予你一次三选机缘，永不可重选。」",
+        "",
+        "· 修炼资源：灵石 150 万 + 剑云海圣药 ×3",
+        "· 拜师传人：《永恒终极剑道》功法",
+        "· 帝主庇护：【帝主庇护】印记（留待黑暗牢笼领域）",
+        "",
+        "触发：#造访剑云海（需主轨 42 境 + 剑云海令牌 ×1）",
+    ])

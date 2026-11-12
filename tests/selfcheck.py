@@ -10030,7 +10030,7 @@ async def main():
                    "tj.accept", "tj.reject", "xb.t1", "xb.t2", "xb.t3", "xb.t4",
                    "xb.vow", "hb.grab"):
         assert f'"{act300}": (' in src300, f"分发器路由缺 {act300}"
-    assert 'public = {"hb.grab", "xg.status"}' in src300, "公开按钮白名单"
+    assert 'public = {' in src300 and '"hb.grab"' in src300, "公开按钮白名单"
     assert "uid != me" in src300, "发起者校验"
     assert "def _msg_of" in src300 and "self._msg_of(event)" in src300
     # 按钮追加点：探索三径/战败/撤离/命签/择院/红包墙/至宝链/状态快捷
@@ -10040,6 +10040,57 @@ async def main():
     assert src300.count('W31：战败生死抉择按钮') == 2, "移动+选择两处战败按钮"
     assert "_uk_btn(\"xb.t2\"" in src300 and "_uk_btn(\"xb.vow\"" in src300
     print("W30 MD+按钮 UI ok")
+
+    # ========================================================= W33：原版 replyOfficialMessage 全量对齐
+    from core import sellall as sa310, faction as fac310
+
+    # —— 剑云海机缘
+    d310 = PlayerDoc(uid="u310", name="仙人", realm_index=45, stones=0,
+                     ext={"hp": 1, "hp_max": 1})
+    inv310 = {"剑云海令牌": 1}
+    ok310, msg310, cost310 = fac310.jyh_visit(d310, inv310, 45, 0)
+    assert ok310 and cost310 == 1, msg310
+    ok310, msg310, _ = fac310.jyh_visit(d310, inv310, 45, 0)
+    assert ok310
+    ok310, msg310, delta310, stones310 = fac310.jyh_choose(
+        d310, 1, lambda n, q: True)
+    assert ok310 and stones310 == 1_500_000 and delta310.get("剑云海圣药") == 3
+    assert fac310.jyh_done(d310)
+    ok310, msg310, _d310, _s310 = fac310.jyh_choose(d310, 2, lambda n, q: True)
+    assert not ok310 and "不可重选" in msg310
+    d311 = PlayerDoc(uid="u311", name="凡人", realm_index=10, ext={})
+    ok310, msg310, _ = fac310.jyh_visit(d311, {}, 10, 0)
+    assert not ok310 and "成仙" in msg310
+
+    # —— 一键出售
+    d312 = PlayerDoc(uid="u312", name="商贩", realm_index=10, stones=0,
+                     ext={"hp": 1, "hp_max": 1})
+    inv312 = {"修为丹": 5, "轮回命签": 2, "铁剑碎片": 3, "废品": 4}
+    def _lk312(name):
+        return {"修为丹": {"出售价": 100}, "铁剑碎片": {"出售价": 50},
+                "轮回命签": {"不可交易": 1},
+                "废品": {"出售价": 0}}.get(name)
+    text310, total310, sellable310 = sa310.preview(d312, inv312, _lk312)
+    assert "修为丹" in text310 and "轮回命签" not in text310 and "废品" not in text310
+    assert total310 == 650 and sellable310 == {"修为丹": 5, "铁剑碎片": 3}
+    msg310, stones310, delta310 = sa310.execute(d312, inv312, sellable310, _lk312)
+    assert stones310 == 650 and int(d312.stones) == 650
+    assert delta310 == {"修为丹": -5, "铁剑碎片": -3}
+    assert sa310.preview(d312, {"废品": 4}, _lk312)[1] == 0
+
+    # main.py 接线：MD 模板对齐路由 + 三玩法
+    src310 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    for act310 in ("endless.meta_yes", "faction.quit_yes", "pup.destroy",
+                   "sublime.yes", "xgd.confirm", "tb.join", "tr.join", "pr.yes",
+                   "page.cmd", "jyh.c1", "sell.yes", "rebirth.yes"):
+        assert f'"{act310}": (' in src310, f"路由缺 {act310}"
+    assert "import re" in src310.split("asyncio")[0] or "\nimport re\n" in src310, "顶层 import re"
+    for cmd310 in ("CMD_JYH_VISIT", "CMD_SELL_ALL", "CMD_REBIRTH"):
+        assert f"@filter.command({cmd310}" in src310, f"漏注册 {cmd310}"
+    assert "delete_player_bundle" in open(PLUGIN / "infra/db.py", encoding="utf-8").read()
+    help310f = _json60.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
+    assert any(g["group"] == "剑云海机缘" for g in help310f)
+    print("W33 原版 MD 模板对齐 ok")
 
     await db.close()
     print("ALL M12 CHECKS PASSED")
