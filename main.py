@@ -12,7 +12,7 @@ from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_story as rs_mod, plane_events as pe_mod, games_mini as gm_mod, xtzb_birth as xb_mod, auto_task as at_mod, easter_eggs as eg_mod, plane_relay as pr_mod, sect_extra as se_mod, assistant as as_mod, bounty as bt_mod, xiangu as xgm_mod, xiangu_npc as xn_mod, xiangu_camp as xc_mod, xiangu_dao as xdd_mod, xiangu_baodi as xbd_mod, academy as acd_mod, social as soc_mod, abilities as ab_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_story as rs_mod, plane_events as pe_mod, games_mini as gm_mod, xtzb_birth as xb_mod, auto_task as at_mod, easter_eggs as eg_mod, plane_relay as pr_mod, sect_extra as se_mod, assistant as as_mod, bounty as bt_mod, xiangu as xgm_mod, xiangu_npc as xn_mod, xiangu_camp as xc_mod, xiangu_dao as xdd_mod, xiangu_baodi as xbd_mod, academy as acd_mod, social as soc_mod, abilities as ab_mod, tianji as tjge_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -930,6 +930,16 @@ CMD_BATCH_HEAL = "#一键回血"
 CMD_SUBLIME = "#极尽升华"
 CMD_EMP_TITLE = "#自封帝号"
 CMD_MOJIE = "#堕入魔界"
+# W29 深度核查补漏 II：天机阁代币商店 + 轮回命签批量重抽
+CMD_TJGE_PANEL = "#天机阁"
+CMD_TJGE_EXCHANGE = "#天机阁兑换"
+CMD_TJGE_WHEEL = "#创造命运仙轮"
+CMD_TJFL_PANEL = "#天机符楼"
+CMD_TJFL_EXCHANGE = "#天机符楼兑换"
+CMD_MG_BATCH = "#消耗轮回命签"
+CMD_MG_CHOOSE = "#选择轮回命签"
+CMD_MG_KEEP = "#保留轮回命签"
+CMD_MG_SWITCH = "#切换重抽命格"
 CMD_XGN_TALK = "#与NPC交谈"
 CMD_XGN_TRADE = "#向NPC购买"
 CMD_XGN_ATTACK = "#攻击NPC"
@@ -25238,3 +25248,183 @@ class ZhutianPlugin(Star):
         async with self.db.transaction():
             await self.db.save_player(d.model_dump())
         yield event.plain_result(msg)
+
+
+    # ================================================================ W29 深度核查补漏 II：天机阁代币商店 + 轮回命签批量重抽
+
+    @filter.command(CMD_TJGE_PANEL, "天机阁（仙兽玉/命运仙轮代币商店）")
+    async def handle_tjge_panel(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        yield event.plain_result(tjge_mod.list_text())
+
+    @filter.command(CMD_TJGE_EXCHANGE, "天机阁兑换 物品*数量")
+    async def handle_tjge_exchange(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        m = re.match(r"^(.+?)\s*[*xX×]\s*(\d+)$", (arg or "").strip())
+        name, qty = (m.group(1).strip(), int(m.group(2))) if m else ((arg or "").strip(), 1)
+        if not name:
+            yield event.plain_result("用法：#天机阁兑换 物品*数量（先 #天机阁 看商品）")
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        ok, msg, delta = tjge_mod.exchange_ge(doc, inv, name, qty)
+        if ok and delta:
+            async with self.db.transaction():
+                for n, q in delta.items():
+                    if q > 0:
+                        await self.db.add_items(doc.uid, {n: q})
+                    elif q < 0:
+                        await self.db.remove_item(doc.uid, n, -q)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_TJGE_WHEEL, "创造命运仙轮*N（三种材料各 N）")
+    async def handle_tjge_wheel(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        qty = int(arg.strip()) if (arg or "").strip().isdigit() else 1
+        inv = await self.db.get_inventory(doc.uid)
+        ok, msg, delta = tjge_mod.craft_wheel(inv, qty)
+        if ok:
+            async with self.db.transaction():
+                for n, q in delta.items():
+                    if q > 0:
+                        await self.db.add_items(doc.uid, {n: q})
+                    elif q < 0:
+                        await self.db.remove_item(doc.uid, n, -q)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_TJFL_PANEL, "天机符楼（邀请函准入·全服日限购）")
+    async def handle_tjfl_panel(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        async with self.db.calamity_lock:
+            cal = await self.db.get_calamity()
+            world = xgm_mod.world_state(cal)
+            yield event.plain_result(tjge_mod.fulou_text(world))
+            cal["xiangu"] = world
+            await self.db.save_calamity(cal)
+
+    @filter.command(CMD_TJFL_EXCHANGE, "天机符楼兑换 物品*数量")
+    async def handle_tjfl_exchange(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        m = re.match(r"^(.+?)\s*[*xX×]\s*(\d+)$", (arg or "").strip())
+        name, qty = (m.group(1).strip(), int(m.group(2))) if m else ((arg or "").strip(), 1)
+        if not name:
+            yield event.plain_result("用法：#天机符楼兑换 物品*数量（先 #天机符楼 看商品）")
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        if int((inv or {}).get(tjge_mod.FULOU_PASS, 0) or 0) < 1:
+            yield event.plain_result("【天机符楼·禁制】「非持函者不得窥视楼内天机！」\n"
+                                     "获取方式：#天机阁兑换 天机符楼邀请函")
+            return
+        now_ms = time.time() * 1000
+        async with self.db.calamity_lock:
+            cal = await self.db.get_calamity()
+            world = xgm_mod.world_state(cal)
+            ok, msg, delta, stones_cost = tjge_mod.exchange_fulou(
+                doc, inv, int(doc.stones or 0), name, qty, world)
+            if ok:
+                doc.stones = int(doc.stones or 0) - stones_cost
+                cal["xiangu"] = world
+                async with self.db.transaction():
+                    await self.db.save_player(doc.model_dump())
+                    await self.db.save_calamity(cal)
+                    for n, q in (delta or {}).items():
+                        if q > 0:
+                            await self.db.add_items(doc.uid, {n: q})
+                        elif q < 0:
+                            await self.db.remove_item(doc.uid, n, -q)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_MG_BATCH, "消耗轮回命签*序号*次数（批量重抽统计分布）")
+    async def handle_mg_batch(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        nums = re.findall(r"\d+", (arg or "").strip())
+        inv = await self.db.get_inventory(doc.uid)
+        have = int((inv or {}).get(mingge.EXTRACT_ITEM, 0) or 0)
+        if len(nums) >= 2:
+            seq, count = int(nums[0]), int(nums[1])
+        elif len(nums) == 1:
+            # 单参：#切换重抽命格 已设目标 → 视作次数；否则视作序号（次数 1）
+            seq_default = int(doc.ext.get("mingge_reroll_seq", 0) or 0)
+            if seq_default:
+                seq, count = seq_default, int(nums[0])
+            else:
+                seq, count = int(nums[0]), 1
+        else:
+            seq_default = int(doc.ext.get("mingge_reroll_seq", 0) or 0)
+            if not seq_default:
+                yield event.plain_result(
+                    "用法：#消耗轮回命签*序号*次数（如 #消耗轮回命签*1*50）；"
+                    "或先用 #切换重抽命格 序号 设默认目标。")
+                return
+            seq, count = seq_default, 1
+        if have < count:
+            yield event.plain_result(f"你的【轮回命签】不足，需要 {count} 枚，当前仅 {have} 枚。")
+            return
+        import random as _random
+        ok, msg = mingge.batch_reroll(doc, self.content,
+                                      _random.Random(f"{doc.uid}:mgbr:{time.time()}"),
+                                      seq, count)
+        if ok:
+            async with self.db.transaction():
+                await self.db.save_player(doc.model_dump())
+                await self.db.remove_item(doc.uid, mingge.EXTRACT_ITEM, count)
+        yield event.plain_result(msg)
+
+    @filter.regex(r"^#选择轮回命签\*(\d+)$")
+    async def handle_mg_choose(self, event: AstrMessageEvent):
+        """#选择轮回命签*N：择优保留（命签已在批量重抽时消耗）。"""
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        m = re.match(r"^#选择轮回命签\*(\d+)$", str(event.message_str).strip())
+        if not m:
+            return
+        ok, msg = mingge.choose_batch(doc, self.content, int(m.group(1)))
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_MG_KEEP, "保留轮回命签（弃重抽结果）")
+    async def handle_mg_keep(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result(mingge.keep_batch(doc))
+
+    @filter.command(CMD_MG_SWITCH, "切换重抽命格 序号（设默认目标）")
+    async def handle_mg_switch(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        seq = int(arg.strip()) if (arg or "").strip().isdigit() else None
+        yield event.plain_result(mingge.switch_reroll(doc, seq))

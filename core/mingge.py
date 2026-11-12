@@ -201,3 +201,135 @@ def text(doc: PlayerDoc) -> str:
     lines.append(f"改命：#改命（{REROLL_COST:,} 灵石）｜拓碑：#命宫拓碑（{SLOT_ITEM}×1）"
                  f"｜抽词条：#抽取命格词条（{EXTRACT_ITEM}×1）")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------- 轮回命签·批量重抽（W29 补漏：原版 UserHome.js batchRerollFate）
+
+REROLL_MAX_COUNT = 999
+
+
+def _fates_of(doc: PlayerDoc) -> list[dict]:
+    """[主命格, *附加命格] 统一序号视图（原版 fates 数组）。"""
+    return [identity_of(doc), *extra_of(doc)] if identity_of(doc) else extra_of(doc)
+
+
+def _fmt_effects(m: Mapping) -> str:
+    return "，".join(f"{k}+{v:g}" if not isinstance(v, bool) else k
+                     for k, v in (m.get("effects") or {}).items())
+
+
+def batch_reroll(doc: PlayerDoc, content: Any, rng: random.Random,
+                 requested: int, count: int) -> tuple[bool, str]:
+    """#消耗轮回命签*序号*次数：批量重抽只统计分布、不改动命格；
+    结果暂存 ext["mingge_pending"]，待 #选择轮回命签 / #保留轮回命签 抉择。
+    消耗道具由 handler 扣。"""
+    count = max(1, min(REROLL_MAX_COUNT, int(count or 1)))
+    fates = _fates_of(doc)
+    if not fates:
+        return False, "你尚无命格（开仙途后自动判定）。"
+    if not 1 <= requested <= len(fates):
+        return False, f"命格词条序号应为 1 至 {len(fates)}。"
+    pool_table = _table(content)
+    if not pool_table:
+        return False, "命格天机暂不可测（词条表缺失）。"
+    # 与单抽一致：排除其它已占用命格与自身，避免重抽回同一条
+    occupied = {str(f.get("id") or f.get("name"))
+                for i, f in enumerate(fates) if i != requested - 1}
+    occupied.add(str(fates[requested - 1].get("id") or fates[requested - 1].get("name")))
+    pool = [e for e in pool_table
+            if str(e.get("id") or e.get("name")) not in occupied] or pool_table
+    # 批量重抽，只统计每种命格出现次数
+    tally: dict[str, dict] = {}
+    for _ in range(count):
+        got = roll(content, rng)
+        key = str(got.get("id") or got.get("name"))
+        entry = tally.setdefault(key, {"mingge": got, "count": 0})
+        entry["count"] += 1
+    candidates = sorted(tally.values(),
+                        key=lambda c: (-int(c["mingge"].get("rarity", 1) or 1),
+                                       -c["count"]))
+    doc.ext["mingge_pending"] = {
+        "seq": requested, "count": count,
+        "candidates": [{"name": c["mingge"].get("name"),
+                        "id": c["mingge"].get("id"),
+                        "count": c["count"],
+                        "isNegative": bool(c["mingge"].get("isNegative")),
+                        "rarity": int(c["mingge"].get("rarity", 1) or 1)}
+                       for c in candidates],
+        "old_name": str(fates[requested - 1].get("name") or "无名命格"),
+        "old_id": fates[requested - 1].get("id"),
+    }
+    list_text = "\n".join(
+        f"{i}. {c['mingge'].get('name')}"
+        f"（{'稀有度' + str(c['mingge'].get('rarity', 1))}"
+        f"{'·厄' if c['mingge'].get('isNegative') else ''}）×{c['count']}"
+        + (f"\n    {_fmt_effects(c['mingge'])}" if c["mingge"].get("effects") else "")
+        for i, c in enumerate(candidates, 1))
+    return True, ("\n".join([
+        "【轮回命签·批量重抽】",
+        f"对第{requested}命格【{fates[requested - 1].get('name')}】重抽了 {count} 次"
+        f"（消耗轮回命签 {count} 枚）。", "",
+        "本次抽中命格分布：",
+        list_text, "",
+        "请抉择（命签已消耗，二选一）：",
+        "· #选择轮回命签*序号 保留重抽结果中你想要的那条",
+        "· #保留轮回命签 保留现有命格不变"]))
+
+
+def choose_batch(doc: PlayerDoc, content: Any, pick: int) -> tuple[bool, str]:
+    """#选择轮回命签*N：从分布中择一条替换该命格（旧初始效果即词条快照整体
+    替换，端口 effects 全部读快照、无一次性「获得时」副作用，无需回滚）。"""
+    pending = doc.ext.get("mingge_pending")
+    if not isinstance(pending, dict):
+        return False, "当前没有待抉择的轮回命签重抽结果，请先 #消耗轮回命签*序号*次数 批量重抽。"
+    cands = pending.get("candidates") or []
+    if not 1 <= pick <= len(cands):
+        return False, f"请发送 #选择轮回命签*序号（1 至 {len(cands)}），或 #保留轮回命签 保留现有。"
+    chosen = cands[pick - 1]
+    table = _table(content)
+    mingge = next((e for e in table
+                   if str(e.get("id") or e.get("name")) == str(chosen.get("id") or chosen.get("name"))),
+                  None)
+    seq = int(pending.get("seq", 1) or 1)
+    old_name = str(pending.get("old_name") or "无名命格")
+    doc.ext.pop("mingge_pending", None)
+    if not mingge:
+        return False, "所选命格已不在命盘之中，暂存已清除。"
+    stored = dict(mingge)
+    if seq == 1:
+        doc.ext["mingge"] = stored
+    else:
+        rows = list(extra_of(doc))
+        while len(rows) < seq - 1:
+            rows.append({})
+        rows[seq - 2] = stored
+        doc.ext["mingge_extra"] = rows[:max(0, slots_of(doc) - 1)]
+    neg = "（此命有缺，多劫多磨）" if mingge.get("isNegative") else ""
+    return True, ("\n".join([
+        "【轮回命签·重定命数】",
+        f"第{seq}命格：{old_name} → 【{mingge.get('name')}】{neg}",
+        str(mingge.get("desc") or ""),
+        f"效果：{_fmt_effects(mingge) or '无'}"]))
+
+
+def keep_batch(doc: PlayerDoc) -> str:
+    """#保留轮回命签：弃结果保现状（命签已由批量重抽时消耗）。"""
+    pending = doc.ext.pop("mingge_pending", None)
+    if not isinstance(pending, dict):
+        return "当前没有待抉择的轮回命签重抽结果。"
+    return (f"【轮回命签·纹丝不动】你选择保留现有第{pending.get('seq')}命格"
+            f"【{pending.get('old_name')}】，重抽结果已舍弃（命签已消耗）。")
+
+
+def switch_reroll(doc: PlayerDoc, seq: int | None) -> str:
+    """#切换重抽命格 序号：设默认重抽目标（#消耗轮回命签 不带序号时用）。"""
+    fates = _fates_of(doc)
+    if seq is None:
+        cur = doc.ext.get("mingge_reroll_seq")
+        return (f"当前默认重抽目标：第 {cur} 命格【{_fates_of(doc)[int(cur) - 1].get('name') if cur and _fates_of(doc) and int(cur) <= len(_fates_of(doc)) else '?'}】"
+                if cur else "尚未设置默认重抽目标（#切换重抽命格 序号）。")
+    if not fates or not 1 <= seq <= len(fates):
+        return f"命格词条序号应为 1 至 {len(fates)}。"
+    doc.ext["mingge_reroll_seq"] = int(seq)
+    return (f"默认重抽目标已切换为第 {seq} 命格【{fates[seq - 1].get('name')}】。\n"
+            f"发送 #消耗轮回命签*次数 即可对其批量重抽。")

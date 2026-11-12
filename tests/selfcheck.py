@@ -9920,6 +9920,85 @@ async def main():
     assert "天神书院" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
     print("W28 深度核查补漏 ok")
 
+    # ========================================================= W29：天机阁代币商店 + 轮回命签批量重抽
+    from core import tianji as tj300, mingge as mg300
+
+    # —— 天机阁兑换：仙兽玉优先 / 命运仙轮回落 / 未收录
+    ok300, msg300, delta300 = tj300.exchange_ge(None, {"仙兽玉": 50, "命运仙轮": 10},
+                                                "一大袋洗根水", 1)
+    assert ok300 and delta300.get("仙兽玉") == -2 and delta300.get("一大袋洗根水") == 1
+    ok300, msg300, delta300 = tj300.exchange_ge(None, {"命运仙轮": 10}, "一大袋洗根水", 1)
+    assert ok300 and delta300.get("命运仙轮") == -2, "仙兽玉不足回落仙轮"
+    ok300, msg300, _ = tj300.exchange_ge(None, {}, "不存在的", 1)
+    assert not ok300 and "没有" in msg300
+
+    # —— 符楼：灵石价 ÷1000 / 顶级灵石代币 / 全服日限购
+    world300: dict = {}
+    ok300, msg300, d300, sc300 = tj300.exchange_fulou(None, {}, 1_000_000, "顶级灵石", 1, world300)
+    assert ok300 and sc300 == 200_000, (ok300, sc300, msg300)
+    ok300, msg300, d300, sc300 = tj300.exchange_fulou(None, {"顶级灵石": 1}, 0, "定魂草", 1, world300)
+    assert ok300 and d300.get("顶级灵石") == -1 and sc300 == 0
+    last300 = None
+    for _ in range(60):
+        last300 = tj300.exchange_fulou(None, {}, 999_999_999_999, "顶级灵石", 1, world300)
+    assert not last300[0] and "限购" in last300[1], "日限购 50 生效"
+
+    # —— 创造命运仙轮
+    ok300, msg300, delta300 = tj300.craft_wheel({"旧神印章": 2, "仙王残魂": 2, "轮回印": 2}, 2)
+    assert ok300 and delta300.get("命运仙轮") == 2 and delta300.get("旧神印章") == -2
+    ok300, msg300, _ = tj300.craft_wheel({"旧神印章": 1}, 2)
+    assert not ok300 and "缺少" in msg300
+
+    # —— 轮回命签批量重抽全链
+    class _Content300:
+        def table(self, name):
+            return [{"id": "m%d" % i, "name": "命%d" % i, "rarity": (i % 3) + 1,
+                     "isNegative": i == 7, "effects": {"攻击加成": 0.1 * i},
+                     "desc": "t"} for i in range(1, 25)]
+    d301 = PlayerDoc(uid="u301", name="改命", realm_index=20, stones=0,
+                     ext={"mingge": {"id": "m1", "name": "旧命", "rarity": 1, "effects": {}}})
+    class _Rng300:
+        """mingge.roll 用 rng.choice（老实现），stub 需带 choice。"""
+        def __init__(self):
+            import random as _random300
+            self._r = _random300.Random(300)
+        def random(self):
+            return self._r.random()
+        def uniform(self, a, b):
+            return self._r.uniform(a, b)
+        def choice(self, seq):
+            return seq[int(self._r.random() * len(seq)) % len(seq)]
+    ok300, msg300 = mg300.batch_reroll(d301, _Content300(), _Rng300(), 1, 30)
+    assert ok300 and (d301.ext.get("mingge_pending") or {}).get("candidates"), msg300[:60]
+    old_name300 = str(d301.ext["mingge"]["name"])
+    ok300, msg300 = mg300.choose_batch(d301, _Content300(), 1)
+    assert ok300 and str(d301.ext["mingge"]["name"]) != old_name300, msg300[:60]
+    # 保留 / 切换
+    d301.ext["mingge_pending"] = {"seq": 1, "count": 5,
+                                  "candidates": [{"id": "m2", "name": "命2"}],
+                                  "old_name": "x", "old_id": None}
+    msg300 = mg300.keep_batch(d301)
+    assert "纹丝不动" in msg300 and "mingge_pending" not in d301.ext
+    msg300 = mg300.switch_reroll(d301, 1)
+    assert "切换" in msg300 and int(d301.ext["mingge_reroll_seq"]) == 1
+
+    # main.py 接线
+    src300 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    names300w = ["CMD_TJGE_PANEL", "CMD_TJGE_EXCHANGE", "CMD_TJGE_WHEEL",
+                 "CMD_TJFL_PANEL", "CMD_TJFL_EXCHANGE", "CMD_MG_BATCH",
+                 "CMD_MG_CHOOSE", "CMD_MG_KEEP", "CMD_MG_SWITCH"]
+    # CMD_MG_CHOOSE 带 *N 后缀参数，走 regex 注册（同 #借助道种 点燃神火）
+    miss300 = [c for c in names300w
+               if (f"@filter.command({c}" not in src300
+                   and not (c == "CMD_MG_CHOOSE" and 'regex(r"^#选择轮回命签' in src300))]
+    assert miss300 == [], f"漏注册：{miss300}"
+    assert 'regex(r"^#选择轮回命签' in src300
+    assert "tjge_mod.exchange_fulou(" in src300 and "mingge.batch_reroll(" in src300
+    help300b = _json60.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
+    assert any(g["group"] == "天机阁与轮回命签" for g in help300b)
+    assert "天机阁与命签" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
+    print("W29 天机阁+轮回命签 ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 

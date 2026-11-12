@@ -273,6 +273,9 @@ def main() -> int:
                     "handle_gift")),
         ("一键与特技", ("handle_batch_use", "handle_batch_heal", "handle_sublime",
                     "handle_emp_title", "handle_mojie")),
+        ("天机阁与命签", ("handle_tjge_panel", "handle_tjge_exchange", "handle_tjge_wheel",
+                     "handle_tjfl_panel", "handle_tjfl_exchange", "handle_mg_batch",
+                     "handle_mg_choose", "handle_mg_keep", "handle_mg_switch")),
         ("帮助", ("handle_help",)),
     ]
     grouped = {}
