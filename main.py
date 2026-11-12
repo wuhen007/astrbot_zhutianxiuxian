@@ -10,6 +10,7 @@ from pathlib import Path
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, StarTools, register
+from .ui_kit import btn as _uk_btn, row as _uk_row, kb_result as _uk_kb, own as _uk_own, data_ok as _uk_data, encode_size_ok as _uk_size, available as _uk_avail
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
 from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_story as rs_mod, plane_events as pe_mod, games_mini as gm_mod, xtzb_birth as xb_mod, auto_task as at_mod, easter_eggs as eg_mod, plane_relay as pr_mod, sect_extra as se_mod, assistant as as_mod, bounty as bt_mod, xiangu as xgm_mod, xiangu_npc as xn_mod, xiangu_camp as xc_mod, xiangu_dao as xdd_mod, xiangu_baodi as xbd_mod, academy as acd_mod, social as soc_mod, abilities as ab_mod, tianji as tjge_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
@@ -20777,6 +20778,19 @@ class ZhutianPlugin(Star):
             if calamity is not None:
                 await self.db.save_calamity(calamity)
 
+    _BTN_MSGS: dict = {}          # 按钮点击事件的合成指令串（id(event) → str）
+
+    def _msg_of(self, event: AstrMessageEvent) -> str:
+        """按钮点击事件带合成指令串（分发器注入），文本消息原样返回。"""
+        injected = self._BTN_MSGS.get(id(event))
+        return str(injected) if injected else str(getattr(event, "message_str", "") or "")
+
+    def _kb(self, event: AstrMessageEvent, text: str, *rows):
+        """W30：构造「短文本 + 按钮」结果（组件不可用自动降级纯文本）。"""
+        if not _uk_avail():
+            return None
+        return _uk_kb(event, text, *rows)
+
     def _pl_lock(self, uid: str) -> asyncio.Lock:
         """审计修复6：per-uid 玩家档锁——读档→改→存的跨度内串行，防整档覆盖。"""
         locks = getattr(self, "_player_locks", None)
@@ -21013,30 +21027,66 @@ class ZhutianPlugin(Star):
         ok, out = await self._xb_span(event, arg, "守护灵")
         if out:
             yield event.plain_result(out)
+        if out and _uk_avail():
+            _btns = [_uk_btn("xb.t2", "▶第二试炼", a1=arg,
+                             uid=str(event.get_sender_id() or ""))]
+            r_ = _uk_row(_btns, fallback="#至宝试炼2", timeout=600)
+            res = self._kb(event, "下一步：", r_)
+            if res:
+                yield res
 
     @filter.command(CMD_XB_T2, "参悟先天禁制 至宝名（试炼二）")
     async def handle_xb_t2(self, event: AstrMessageEvent, arg: str = ""):
         ok, out = await self._xb_span(event, arg, "先天禁制")
         if out:
             yield event.plain_result(out)
+        if out and _uk_avail():
+            _btns = [_uk_btn("xb.t3", "▶第三试炼", a1=arg,
+                             uid=str(event.get_sender_id() or ""))]
+            r_ = _uk_row(_btns, fallback="#至宝试炼3", timeout=600)
+            res = self._kb(event, "下一步：", r_)
+            if res:
+                yield res
 
     @filter.command(CMD_XB_T3, "护持天地灵脉 至宝名（试炼三）")
     async def handle_xb_t3(self, event: AstrMessageEvent, arg: str = ""):
         ok, out = await self._xb_span(event, arg, "天地灵脉")
         if out:
             yield event.plain_result(out)
+        if out and _uk_avail():
+            _btns = [_uk_btn("xb.vow", "✍立道心", a1=arg,
+                             uid=str(event.get_sender_id() or ""))]
+            _btns.append(_uk_btn("xb.t4", "🎲命运乱流", a1=arg, uid=str(event.get_sender_id() or ""), style="danger"))
+            r_ = _uk_row(_btns, fallback="#至宝立道心", timeout=600)
+            res = self._kb(event, "下一步：", r_)
+            if res:
+                yield res
 
     @filter.command(CMD_XB_T4, "跃入命运乱流 至宝名（高风险高收益）")
     async def handle_xb_t4(self, event: AstrMessageEvent, arg: str = ""):
         ok, out = await self._xb_span(event, arg, "命运乱流")
         if out:
             yield event.plain_result(out)
+        if out and _uk_avail():
+            _btns = [_uk_btn("xb.vow", "✍立道心", a1=arg,
+                             uid=str(event.get_sender_id() or ""))]
+            r_ = _uk_row(_btns, fallback="#至宝立道心", timeout=600)
+            res = self._kb(event, "下一步：", r_)
+            if res:
+                yield res
 
     @filter.command(CMD_XB_VOW, "立下道心 至宝名 道心（契合者结算+150）")
     async def handle_xb_vow(self, event: AstrMessageEvent, arg: str = ""):
         ok, out = await self._xb_span(event, arg or "", "vow")
         if out:
             yield event.plain_result(out)
+        if out and _uk_avail():
+            _btns = [_uk_btn("xg.status", "📊查看状态", a1=arg,
+                             uid=str(event.get_sender_id() or ""))]
+            r_ = _uk_row(_btns, fallback="#至宝榜", timeout=600)
+            res = self._kb(event, "下一步：", r_)
+            if res:
+                yield res
 
     @filter.command(CMD_XB_BOARD, "灵宝择主榜（进行中的出世之争）")
     async def handle_xb_board(self, event: AstrMessageEvent):
@@ -23963,6 +24013,13 @@ class ZhutianPlugin(Star):
         text = xgm_mod.status_text(doc, st, lc, int(era_st.get("years_total", 0) or 0))
         async for r in self._smart(event, text, "秘境状态"):
             yield r
+        # W31：状态页快捷按钮
+        r_ = _uk_row([_uk_btn("xg.status", "🔄刷新", uid=doc.uid),
+                      _uk_btn("xg.choice", "🧭去探索", a1=0, uid=doc.uid)],
+                     fallback="#秘境状态 / #秘境探索", timeout=300)
+        res = self._kb(event, "快捷操作：", r_)
+        if res:
+            yield res
 
     @filter.command(CMD_XGM_MAP, "秘境地图（迷雾网格）")
     async def handle_xgm_map(self, event: AstrMessageEvent):
@@ -24013,6 +24070,15 @@ class ZhutianPlugin(Star):
         await self._pe_save(doc, {}, cal)
         async for r in self._smart(event, text, "秘境探索"):
             yield r
+        # W31：探索三径按钮（60 秒对齐选项过期）
+        opts = (st.get("options") or {}).get("list") or []
+        btns = [_uk_btn("xg.choice", o.get("label", "?")[:14], a1=i,
+                        uid=doc.uid, style="primary") for i, o in enumerate(opts, 1)]
+        r_ = _uk_row([b for b in btns if b is not None],
+                     fallback="回复 1/2/3 选择探索方向", timeout=60)
+        res = self._kb(event, "请选择本次探索方向（60 秒内）：", r_)
+        if res:
+            yield res
 
     @filter.regex(r"^([123])$")
     async def handle_xgm_choice(self, event: AstrMessageEvent):
@@ -24026,7 +24092,7 @@ class ZhutianPlugin(Star):
         if not st.get("active") or not (st.get("options") or {}).get("list"):
             return
         try:
-            idx = int(str(event.message_str).strip())
+            idx = int(self._msg_of(event).strip())
         except ValueError:
             return
         now_ms = time.time() * 1000
@@ -24039,6 +24105,15 @@ class ZhutianPlugin(Star):
         await self._pe_save(doc, {}, cal)
         async for r in self._smart(event, text, "秘境探索"):
             yield r
+        # W31：战败生死抉择按钮
+        if st.get("pending_defeat"):
+            r_ = _uk_row([_uk_btn("xg.mercy", "🙏求饶", uid=doc.uid),
+                          _uk_btn("xg.slaughter", "🩸任凭鱼肉", uid=doc.uid,
+                                  style="danger")],
+                         fallback="#求饶 或 #任凭鱼肉（60 秒内）", timeout=65)
+            res = self._kb(event, "【生死抉择】点击选择（60 秒内）：", r_)
+            if res:
+                yield res
 
     @filter.regex(r"^#(上|下|左|右|左上|右上|左下|右下)(\d*)$")
     async def handle_xgm_move(self, event: AstrMessageEvent):
@@ -24081,6 +24156,15 @@ class ZhutianPlugin(Star):
         await self._pe_save(doc, {}, cal)
         async for r in self._smart(event, text, "秘境移动"):
             yield r
+        # W31：战败生死抉择按钮
+        if st.get("pending_defeat"):
+            r_ = _uk_row([_uk_btn("xg.mercy", "🙏求饶", uid=doc.uid),
+                          _uk_btn("xg.slaughter", "🩸任凭鱼肉", uid=doc.uid,
+                                  style="danger")],
+                         fallback="#求饶 或 #任凭鱼肉（60 秒内）", timeout=65)
+            res = self._kb(event, "【生死抉择】点击选择（60 秒内）：", r_)
+            if res:
+                yield res
 
     @filter.command(CMD_XGM_SCAN, "秘境推演：5 道韵窥探 4 格天机")
     async def handle_xgm_scan(self, event: AstrMessageEvent):
@@ -24208,6 +24292,12 @@ class ZhutianPlugin(Star):
             "",
             f"等待结束后再次发送 {cmd} 或 #确认撤离。",
             "移动、探索、主动交战或受到伤害都会中断撤离。"]))
+        r_ = _uk_row([_uk_btn("xg.evac", "✅确认撤离", uid=doc.uid, style="success"),
+                      _uk_btn("xg.status", "📊查看状态", uid=doc.uid)],
+                     fallback="#确认撤离 或 #秘境状态", timeout=(duration + 130))
+        res = self._kb(event, "读条完毕后点击确认（也可再次发送指令）：", r_)
+        if res:
+            yield res
 
     @filter.command(CMD_XGM_CONFIRM, "确认撤离（读条完毕后结算收获）")
     async def handle_xgm_confirm(self, event: AstrMessageEvent):
@@ -24956,6 +25046,14 @@ class ZhutianPlugin(Star):
         if ok:
             await self._pe_save(doc, {})
         yield event.plain_result(msg)
+        # W31：择院按钮（一次性，10 分钟内点击）
+        if ok:
+            r_ = _uk_row([_uk_btn("tssy.good", "✦选仙院", uid=doc.uid, style="success"),
+                          _uk_btn("tssy.holy", "▼选圣院", uid=doc.uid, style="primary")],
+                         fallback="#选择仙院 或 #选择圣院", timeout=600)
+            res = self._kb(event, "请择院（选择后不可更改）：", r_)
+            if res:
+                yield res
 
     @filter.command(CMD_TSSY_MY, "我的院籍")
     async def handle_tssy_my(self, event: AstrMessageEvent):
@@ -25057,14 +25155,14 @@ class ZhutianPlugin(Star):
         yield event.plain_result(msg)
 
     @filter.command(CMD_HB_GRAB, "抢红包 @发送者")
-    async def handle_hb_grab(self, event: AstrMessageEvent):
+    async def handle_hb_grab(self, event: AstrMessageEvent, arg: str = ""):
         if not self._allowed(event):
             return
         doc, err = await self._require_player(event)
         if err:
             yield event.plain_result(err)
             return
-        target = self._at_target(event)
+        target = self._at_target(event) or (arg or "").strip()
         if not target:
             yield event.plain_result("用法：#抢红包 @发送红包的道友")
             return
@@ -25102,9 +25200,23 @@ class ZhutianPlugin(Star):
             cal = await self.db.get_calamity()
             world = xgm_mod.world_state(cal)
             text = soc_mod.wall_text(world, time.time() * 1000)
+            wall_now = (world.get("hongbao") or {})
             cal["xiangu"] = world
             await self.db.save_calamity(cal)
         yield event.plain_result(text)
+        # W31/W32：每红包一个「抢」按钮（公开玩法不绑 uid），上限 25
+        btns = []
+        for s_uid, rec in list(wall_now.items())[:25]:
+            if int(rec.get("left", 0) or 0) > 0:
+                btns.append(_uk_btn("hb.grab", f"抢 {rec.get('name', '?')} {int(rec['left'])}份",
+                                    a1=str(s_uid)))
+        if btns:
+            rows_ = [_uk_row(btns[i:i + 5], fallback="#抢红包 @发送者", timeout=300)
+                     for i in range(0, len(btns), 5)][:5]
+            res = self._kb(event, "点击抢红包（30 分钟内有效）：",
+                           *[r for r in rows_ if r is not None])
+            if res:
+                yield res
 
     @filter.command(CMD_GIFT, "赠送 @对方 物品*数量")
     async def handle_gift(self, event: AstrMessageEvent, arg: str = ""):
@@ -25256,7 +25368,10 @@ class ZhutianPlugin(Star):
     async def handle_tjge_panel(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
-        yield event.plain_result(tjge_mod.list_text())
+        res = self._kb(event, tjge_mod.list_text())
+        if res is not None and _uk_avail():
+            res.use_markdown(True)
+        yield res if res is not None else event.plain_result(tjge_mod.list_text())
 
     @filter.command(CMD_TJGE_EXCHANGE, "天机阁兑换 物品*数量")
     async def handle_tjge_exchange(self, event: AstrMessageEvent, arg: str = ""):
@@ -25390,6 +25505,20 @@ class ZhutianPlugin(Star):
                 await self.db.save_player(doc.model_dump())
                 await self.db.remove_item(doc.uid, mingge.EXTRACT_ITEM, count)
         yield event.plain_result(msg)
+        # W31：命签候选按钮（前 5 + 保留）
+        pend = st.get("mingge_pending") or {}
+        cands = (pend.get("candidates") or [])[:5]
+        if ok and cands:
+            btns = [_uk_btn("mg.pick", f"{i}.{c.get('name')}", a1=i, uid=doc.uid)
+                    for i, c in enumerate(cands, 1)]
+            btns.append(_uk_btn("mg.keep", "🚫保留现有", uid=doc.uid, style="danger"))
+            rows_ = [_uk_row(btns[:5], fallback="#选择轮回命签*序号", timeout=600)]
+            if btns[5:]:
+                rows_.append(_uk_row(btns[5:], fallback="#保留轮回命签", timeout=600))
+            res = self._kb(event, "择优保留（10 分钟内点击）：",
+                           *[r for r in rows_ if r is not None])
+            if res:
+                yield res
 
     @filter.regex(r"^#选择轮回命签\*(\d+)$")
     async def handle_mg_choose(self, event: AstrMessageEvent):
@@ -25400,7 +25529,7 @@ class ZhutianPlugin(Star):
         if err:
             yield event.plain_result(err)
             return
-        m = re.match(r"^#选择轮回命签\*(\d+)$", str(event.message_str).strip())
+        m = re.match(r"^#选择轮回命签\*(\d+)$", self._msg_of(event).strip())
         if not m:
             return
         ok, msg = mingge.choose_batch(doc, self.content, int(m.group(1)))
@@ -25428,3 +25557,59 @@ class ZhutianPlugin(Star):
             return
         seq = int(arg.strip()) if (arg or "").strip().isdigit() else None
         yield event.plain_result(mingge.switch_reroll(doc, seq))
+
+
+    # ==============================================================
+    # W30：MD 消息与按钮通用分发器
+
+    @filter.button_action()
+    async def handle_btn_dispatch(self, event: AstrMessageEvent):
+        """按钮点击 → 校验发起者 → 路由到既有 handler（零业务改动）。"""
+        inter = event.get_button_interaction()
+        if not inter:
+            return
+        data = _uk_data(inter.data)
+        act = str(data.get("act") or "")
+        a1 = data.get("a1")
+        uid = str(data.get("uid") or "")
+        me = str(event.get_sender_id() or "")
+        public = {"hb.grab", "xg.status"}          # 公开按钮不绑发起者
+        if uid and act not in public and uid != me:
+            yield event.plain_result("该按钮只属于发起者，请自行进入对应玩法操作。")
+            return
+        routes = {
+            "xg.choice": ("handle_xgm_choice", f"{a1}"),
+            "xg.explore": ("handle_xgm_explore", ""),
+            "xg.mercy": ("handle_xgn_mercy", ""),
+            "xg.slaughter": ("handle_xgn_fish", ""),
+            "xg.evac": ("handle_xgm_confirm", ""),
+            "xg.status": ("handle_xgm_status", ""),
+            "mg.pick": ("handle_mg_choose", f"#选择轮回命签*{a1}"),
+            "mg.keep": ("handle_mg_keep", ""),
+            "tssy.good": ("handle_tssy_good", ""),
+            "tssy.holy": ("handle_tssy_holy", ""),
+            "tj.accept": ("handle_tj_accept", str(a1 or "")),
+            "tj.reject": ("handle_tj_reject", str(a1 or "")),
+            "xb.t1": ("handle_xb_t1", str(a1 or "")),
+            "xb.t2": ("handle_xb_t2", str(a1 or "")),
+            "xb.t3": ("handle_xb_t3", str(a1 or "")),
+            "xb.t4": ("handle_xb_t4", str(a1 or "")),
+            "xb.vow": ("handle_xb_vow", str(a1 or "")),
+            "hb.grab": ("handle_hb_grab", str(a1 or "")),
+        }
+        if act not in routes:
+            yield event.plain_result("该按钮已失效（版本更新或会话过期），请直接发送对应指令。")
+            return
+        hname, msg = routes[act]
+        self._BTN_MSGS[id(event)] = msg
+        try:
+            handler = getattr(self, hname)
+            if act in ("tj.accept", "tj.reject", "xb.t1", "xb.t2", "xb.t3",
+                       "xb.t4", "xb.vow", "hb.grab"):
+                async for r in handler(event, str(a1 or "")):
+                    yield r
+            else:
+                async for r in handler(event):
+                    yield r
+        finally:
+            self._BTN_MSGS.pop(id(event), None)

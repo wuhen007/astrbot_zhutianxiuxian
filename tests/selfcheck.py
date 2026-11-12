@@ -9999,6 +9999,48 @@ async def main():
     assert "天机阁与命签" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
     print("W29 天机阁+轮回命签 ok")
 
+    # ========================================================= W30：MD 消息与按钮 UI
+    import ui_kit as uk300
+
+    # —— 降级探测与纯函数
+    assert isinstance(uk300.AVAILABLE, bool)
+    d300a = uk300.own({"act": "xg.choice", "a1": 2}, "u300")
+    assert d300a["uid"] == "u300" and d300a["act"] == "xg.choice"
+    assert uk300.data_ok(None) == {} and uk300.data_ok("x") == {}
+    assert uk300.encode_size_ok({"act": "a"}) and not uk300.encode_size_ok({"k": "x" * 2000})
+
+    # —— 组件构造（astrbot 可导入时正路径；否则降级 None）
+    if uk300.AVAILABLE:
+        b300 = uk300.btn("xg.choice", "🌊道韵", a1=1, uid="u300", style="primary")
+        assert b300 is not None and b300.label.startswith("🌊") and b300.id.startswith("xg.choice|")
+        assert b300.action.data["uid"] == "u300"
+        r300 = uk300.row([b300], fallback="回复 1/2/3", timeout=60)
+        assert r300 is not None and r300.action_timeout == 60
+        assert len(r300.fallback_text) > 0
+        assert uk300.row([]) is None, "空按钮行返回 None"
+        # 5×5 约束由适配器抛 ValueError，ui_kit 不拦截但 data 大小拦截
+        assert uk300.encode_size_ok(uk300.btn("a", "b").action.data)
+
+    # —— main.py 接线：分发器 + 路由表覆盖 + uid 校验
+    src300 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    assert "@filter.button_action()" in src300, "按钮分发器未注册"
+    assert "def handle_btn_dispatch" in src300
+    for act300 in ("xg.choice", "xg.explore", "xg.mercy", "xg.slaughter", "xg.evac",
+                   "xg.status", "mg.pick", "mg.keep", "tssy.good", "tssy.holy",
+                   "tj.accept", "tj.reject", "xb.t1", "xb.t2", "xb.t3", "xb.t4",
+                   "xb.vow", "hb.grab"):
+        assert f'"{act300}": (' in src300, f"分发器路由缺 {act300}"
+    assert 'public = {"hb.grab", "xg.status"}' in src300, "公开按钮白名单"
+    assert "uid != me" in src300, "发起者校验"
+    assert "def _msg_of" in src300 and "self._msg_of(event)" in src300
+    # 按钮追加点：探索三径/战败/撤离/命签/择院/红包墙/至宝链/状态快捷
+    for frag300 in ("W31：探索三径按钮", "W31：战败生死抉择按钮", "W31：命签候选按钮",
+                    "W31：择院按钮", "点击抢红包（30 分钟内有效）"):
+        assert frag300 in src300, f"按钮追加点缺失：{frag300}"
+    assert src300.count('W31：战败生死抉择按钮') == 2, "移动+选择两处战败按钮"
+    assert "_uk_btn(\"xb.t2\"" in src300 and "_uk_btn(\"xb.vow\"" in src300
+    print("W30 MD+按钮 UI ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 
