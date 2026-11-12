@@ -24088,13 +24088,21 @@ class ZhutianPlugin(Star):
             return
         doc = await self._find_player(event)
         if not doc:
+            yield event.plain_result("道友尚未踏入仙途，请发送 #开始 开启修仙之路。")
             return
         st = xgm_mod.state_of(doc)
         if not st.get("active") or not (st.get("options") or {}).get("list"):
+            yield event.plain_result(
+                "【选项已消散】当前没有待选择的探索方向（超时或已选择）。\n"
+                "请重新发送 #秘境探索 生成新选项，再点击按钮。")
             return
         try:
             idx = int(self._msg_of(event).strip())
         except ValueError:
+            yield event.plain_result("【无效选择】请点击按钮或回复 1/2/3。")
+            return
+        if not 1 <= idx <= 3:
+            yield event.plain_result(f"【无效选择】探索方向只有 1-3（收到 {idx}）。")
             return
         now_ms = time.time() * 1000
         _hp_cur_ch, _hp_max_ch = self._hp_pair(doc)
@@ -25603,14 +25611,22 @@ class ZhutianPlugin(Star):
             return
         hname, msg = routes[act]
         self._BTN_MSGS[id(event)] = msg
+        got = False
         try:
             handler = getattr(self, hname)
             if act in ("tj.accept", "tj.reject", "xb.t1", "xb.t2", "xb.t3",
                        "xb.t4", "xb.vow", "hb.grab"):
                 async for r in handler(event, str(a1 or "")):
+                    got = True
                     yield r
             else:
                 async for r in handler(event):
+                    got = True
                     yield r
         finally:
             self._BTN_MSGS.pop(id(event), None)
+        if not got:
+            # 兜底：路由的 handler 因上下文过期等原因静默返回时，也给出反馈，
+            # 避免 QQ 端只显示"已操作"而无任何消息。
+            yield event.plain_result(
+                "【按钮操作无效果】该操作的上下文可能已过期，请重新发起对应玩法后再点击。")
