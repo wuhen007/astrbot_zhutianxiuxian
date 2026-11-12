@@ -11558,10 +11558,22 @@ class ZhutianPlugin(Star):
             for i, c in enumerate(endless.CHECKPOINT_CHOICES, 1):
                 lines.append(f"{i}. {c['name']}——{c['desc']}")
             lines.append(f"选择：{CMD_ENDLESS_CHECKPOINT} 1-3")
+            # W33-final：劫后问道按钮（原版 EndlessRealm 星图面板）
+            self._endless_ckpt_btns = [_uk_btn("endless.ckpt", f"{i}.{c['name'][:8]}",
+                                               a1=i, uid=doc.uid, style="primary")
+                                       for i, c in enumerate(endless.CHECKPOINT_CHOICES, 1)]
         if res.get("clear"):
             lines.append(f"下一档：#无尽难度 A{min(10, int(st2.get('tier', 1)) + 1)}")
         async for r in self._smart(event, "\n".join(x for x in lines if x), "无尽劫境"):
             yield r
+        # W33-final：劫后问道按钮
+        btns = getattr(self, "_endless_ckpt_btns", None)
+        if btns and res.get("checkpoint"):
+            r_ = _uk_row(btns[:5], fallback=f"{CMD_ENDLESS_CHECKPOINT} 1-3", timeout=3600)
+            res_ = self._kb(event, "【劫后问道·抉择】点击选择（或回复指令）：", r_)
+            if res_:
+                yield res_
+        self._endless_ckpt_btns = None
 
     @filter.command(CMD_ENDLESS_PICK, "无尽选择")
     async def handle_endless_pick(self, event: AstrMessageEvent, idx: str = ""):
@@ -21357,6 +21369,17 @@ class ZhutianPlugin(Star):
         async with self.db.transaction():
             await self.db.save_player(doc.model_dump())
         yield event.plain_result(msg)
+        # W33-final：原版 BOSS4 L756 拒降·魔念横生处置按钮
+        if ok and (name or "").strip():
+            nm = (name or "").strip()
+            r_ = _uk_row([_uk_btn("tj.soul", "👻搜魂", a1=nm, uid=doc.uid, style="primary"),
+                          _uk_btn("tj.slay", "☠直接灭杀", a1=nm, uid=doc.uid, style="danger")],
+                         fallback=f"#天骄搜魂 {nm} / #天骄灭杀 {nm}", timeout=300)
+            res = self._kb(event, "**拒降·魔念横生**\n\n"
+                           f"{nm}已被镇压，神魂正在剧烈挣扎。\n\n"
+                           "> 对方可能自爆神魂，选择保留 5 分钟。", r_)
+            if res:
+                yield res
 
     @filter.command(CMD_TJ_SOUL, "搜魂天骄 名：搜功法（反噬20%）")
     async def handle_tj_soul(self, event: AstrMessageEvent, name: str = ""):
@@ -23945,6 +23968,14 @@ class ZhutianPlugin(Star):
         """原版 rule 里 `#剑与魔法帮助` 是无空格连写形态。"""
         async for r in self._sm_dispatch(event, "帮助"):
             yield r
+        # W33-final：原版 SwordMagic L22 菜单按钮
+        r_ = _uk_row([_uk_btn("sjm.sub", "📖世界观", a1="世界观", style="primary"),
+                      _uk_btn("sjm.sub", "📊我的状态", a1="状态", style="primary"),
+                      _uk_btn("sjm.sub", "🗺地图", a1="地图", style="primary")],
+                     fallback="#剑与魔法 世界观 / 状态 / 地图", timeout=3600)
+        res = self._kb(event, "剑与魔法 · 快捷入口：", r_)
+        if res:
+            yield res
 
     # ---- 原版通用别名：按当前平行开局路由（此前未注册，导致 #我 / #背包 无回复）----
 
@@ -25769,6 +25800,12 @@ class ZhutianPlugin(Star):
             return
         return handler(event, arg) if arg else handler(event)
 
+    async def handle_sjm_sub(self, event: AstrMessageEvent, sub: str = ""):
+        """W33-final：剑与魔法子页按钮（世界观/状态/地图）。"""
+        sub = str(sub or "帮助").strip()
+        async for r in self._sm_dispatch(event, sub):
+            yield r
+
     @filter.button_action()
     async def handle_btn_dispatch(self, event: AstrMessageEvent):
         """按钮点击 → 校验发起者 → 路由到既有 handler（零业务改动）。"""
@@ -25833,6 +25870,11 @@ class ZhutianPlugin(Star):
             "pr.yes": ("handle_pr_jy_yes", ""),
             "pr.no": ("handle_pr_jy_no", ""),
             "page.cmd": ("handle_page_cmd", str(a1 or "")),
+            # W33-final：拒降处置 / 剑与魔法子页 / 劫后问道
+            "tj.soul": ("handle_tj_soul", str(a1 or "")),
+            "tj.slay": ("handle_tj_slay", str(a1 or "")),
+            "sjm.sub": ("handle_sjm_sub", str(a1 or "")),
+            "endless.ckpt": ("handle_endless_checkpoint", str(a1 or "")),
         }
         if act not in routes:
             yield event.plain_result("该按钮已失效（版本更新或会话过期），请直接发送对应指令。")
@@ -25844,7 +25886,8 @@ class ZhutianPlugin(Star):
             handler = getattr(self, hname)
             if act in ("tj.accept", "tj.reject", "xb.t1", "xb.t2", "xb.t3",
                        "xb.t4", "xb.vow", "hb.grab", "pup.destroy", "tb.join",
-                       "tr.join", "page.cmd", "jyh.c1", "jyh.c2", "jyh.c3"):
+                       "tr.join", "page.cmd", "jyh.c1", "jyh.c2", "jyh.c3",
+                       "tj.soul", "tj.slay", "sjm.sub", "endless.ckpt"):
                 async for r in handler(event, str(a1 or "")):
                     got = True
                     yield r
