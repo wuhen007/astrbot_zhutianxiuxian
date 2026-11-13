@@ -10177,6 +10177,16 @@ async def main():
     for act340c in ("tjge.buy", "tjge.wheel", "tjge.view", "tjfl.view"):
         assert f'"{act340c}": (' in src340, f"W34 批三路由缺 {act340c}"
     assert 'a1="天机符楼邀请函"' in src340, "邀请函按钮"
+    # W34 批四：按钮气泡带内容（_kb_next）+ 剑与魔法帮助正文/按钮回复修复
+    assert "def _kb_next" in src340, "_kb_next 助手"
+    assert len([1 for i, l in enumerate(src340.splitlines())
+                if "yield self._kb_next(event" in l]) >= 26, "气泡应走 _kb_next"
+    assert "·下一步】, row)" not in src340 and "·下一步】\", row)" not in src340, "下一步气泡应全走 _kb_next"
+    _sm_help340 = src340.split("async def handle_sm_help_bare")[1][:900]
+    assert "sm_mod.help_text()" in _sm_help340, "帮助正文直接取 help_text"
+    assert "chr(10).join" not in _sm_help340, "不再从 _smart 输出收集正文"
+    assert "render: bool = True" in src340.split("async def _sm_dispatch")[1][:200], "render 开关"
+    assert "self._sm_dispatch(event, sub, render=False)" in src340, "子页按钮走纯文本"
     print("W34 时代推送+按钮铺开A类 ok")
 
     await db.close()

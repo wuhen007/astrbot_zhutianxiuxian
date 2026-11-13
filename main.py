@@ -1591,6 +1591,15 @@ class ZhutianPlugin(Star):
                 return
         yield event.plain_result(text)
 
+    def _kb_next(self, event: AstrMessageEvent, title: str, row, plain: str):
+        """按钮气泡带内容：标题 + 回退指令；无组件时回退纯文本（W34 排版修复）。"""
+        fb = str(getattr(row, "fallback_text", "") or "")
+        text = f"{title}点击直达（或回复：{fb}）" if fb else title
+        res = self._kb(event, text, row)
+        if res is not None and _uk_avail():
+            res.use_markdown(True)
+        return res if res is not None else event.plain_result(plain)
+
     # ---- 指令 ----
 
     @filter.command(CMD_START, "踏入仙途，创建角色")
@@ -4008,10 +4017,7 @@ class ZhutianPlugin(Star):
             _uk_btn("ls.tip", "🍵 江湖打听", uid=doc.uid, style="primary"),
             _uk_btn("ls.rank", "📈 灵市收益榜", uid=doc.uid),
         ], fallback=f"{CMD_LS_TIP} / {CMD_LS_RANK}", timeout=600)
-        res = self._kb(event, "【万界灵市·下一步】", row)
-        if res is not None and _uk_avail():
-            res.use_markdown(True)
-        yield res if res is not None else event.plain_result(f"下一步：{CMD_LS_TIP} / {CMD_LS_RANK}")
+        yield self._kb_next(event, "【万界灵市·下一步】", row, f"下一步：{CMD_LS_TIP} / {CMD_LS_RANK}")
 
     async def _market_trade(self, event, side: str, target: str):
         doc, err = await self._require_player(event)
@@ -5133,11 +5139,8 @@ class ZhutianPlugin(Star):
             _uk_btn("wb.water", "⏳ 岁月流金沙", a1="岁月流金沙", uid=doc.uid),
             _uk_btn("wb.water", "🌀 掌天灵液", a1="掌天灵液", uid=doc.uid),
         ], fallback="#一键浇灌草木精华露/岁月流金沙/掌天灵液", timeout=600)
-        res = self._kb(event, "【小世界·一键浇灌】", row)
-        if res is not None and _uk_avail():
-            res.use_markdown(True)
-        yield res if res is not None else event.plain_result(
-            "一键浇灌：#一键浇灌草木精华露 / #一键浇灌岁月流金沙 / #一键浇灌掌天灵液")
+        yield self._kb_next(event, "【小世界·一键浇灌】", row,
+                            "一键浇灌：#一键浇灌草木精华露 / #一键浇灌岁月流金沙 / #一键浇灌掌天灵液")
 
     @filter.command(CMD_WORLD_AVATAR, "分身化入小世界")
     async def handle_world_avatar(self, event: AstrMessageEvent):
@@ -6914,10 +6917,7 @@ class ZhutianPlugin(Star):
             _uk_btn("wl.take", "📜 可支取古史线", uid=doc.uid, style="primary"),
             _uk_btn("wl.reduce", "🕰 纪元消债", uid=doc.uid),
         ], fallback=f"{CMD_WL_TAKE} / {CMD_WL_REDUCE}", timeout=600)
-        res = self._kb(event, "【时间线权能·下一步】", row)
-        if res is not None and _uk_avail():
-            res.use_markdown(True)
-        yield res if res is not None else event.plain_result(f"下一步：{CMD_WL_TAKE} / {CMD_WL_REDUCE}")
+        yield self._kb_next(event, "【时间线权能·下一步】", row, f"下一步：{CMD_WL_TAKE} / {CMD_WL_REDUCE}")
 
     @filter.command(CMD_WL_TAKE, "支取时间线：列出可支取的古史线")
     async def handle_wl_take(self, event: AstrMessageEvent, arg: str = ""):
@@ -7709,11 +7709,8 @@ class ZhutianPlugin(Star):
             row = _uk_row([
                 _uk_btn("sc.addict", "🔥 沉迷连探", uid=doc.uid, style="primary"),
             ], fallback=CMD_SC_ADDICT, timeout=600)
-            res = self._kb(event, "【上苍之上·下一步】", row)
-            if res is not None and _uk_avail():
-                res.use_markdown(True)
-            yield res if res is not None else event.plain_result(
-                f"下一步：{CMD_SC_ADDICT}")
+            yield self._kb_next(event, "【上苍之上·下一步】", row,
+                                f"下一步：{CMD_SC_ADDICT}")
             return
         row = sc_mod.find_place(rows, name)
         if not row:
@@ -9613,10 +9610,7 @@ class ZhutianPlugin(Star):
             _uk_btn("pup.summon", "🤖 驱使人傀", uid=_doc.uid, style="primary"),
             _uk_btn("pup.repair", "🛠 修复人傀", uid=_doc.uid),
         ], fallback=f"{CMD_PUP_SUMMON} / {CMD_PUP_REPAIR}", timeout=600)
-        res = self._kb(event, "【人傀·下一步】", row)
-        if res is not None and _uk_avail():
-            res.use_markdown(True)
-        yield res if res is not None else event.plain_result(f"下一步：{CMD_PUP_SUMMON} / {CMD_PUP_REPAIR}")
+        yield self._kb_next(event, "【人傀·下一步】", row, f"下一步：{CMD_PUP_SUMMON} / {CMD_PUP_REPAIR}")
 
     @filter.command(CMD_PUP_SUMMON, "驱使人傀")
     async def handle_pup_summon(self, event: AstrMessageEvent):
@@ -9867,10 +9861,7 @@ class ZhutianPlugin(Star):
             _uk_btn("sec.beast", "🐉 召唤神兽", uid=doc.uid, style="primary"),
             _uk_btn("sec.bless", "✨ 神兽赐福", uid=doc.uid),
         ], fallback=f"{CMD_SEC_BEAST} / {CMD_SEC_BLESS}", timeout=600)
-        res = self._kb(event, "【宗门运营·下一步】", row)
-        if res is not None and _uk_avail():
-            res.use_markdown(True)
-        yield res if res is not None else event.plain_result(f"下一步：{CMD_SEC_BEAST} / {CMD_SEC_BLESS}")
+        yield self._kb_next(event, "【宗门运营·下一步】", row, f"下一步：{CMD_SEC_BEAST} / {CMD_SEC_BLESS}")
 
     @filter.command(CMD_SEC_GATE, "设置门槛")
     async def handle_sec_gate(self, event: AstrMessageEvent):
@@ -10385,10 +10376,7 @@ class ZhutianPlugin(Star):
             _uk_btn("ip.sortie", "⚔️ 出关迎战", uid=uid, style="primary"),
             _uk_btn("ip.rank", "🏆 帝关威名榜", uid="", style="secondary"),
         ], fallback=f"{CMD_IP_SORTIE} / {CMD_IP_RANK}", timeout=600)
-        res = self._kb(event, "【帝关·下一步】", row)
-        if res is not None and _uk_avail():
-            res.use_markdown(True)
-        yield res if res is not None else event.plain_result(f"下一步：{CMD_IP_SORTIE} / {CMD_IP_RANK}")
+        yield self._kb_next(event, "【帝关·下一步】", row, f"下一步：{CMD_IP_SORTIE} / {CMD_IP_RANK}")
 
     @filter.command(CMD_IP_RANK, "帝关威名榜")
     async def handle_ip_rank(self, event: AstrMessageEvent):
@@ -11283,10 +11271,7 @@ class ZhutianPlugin(Star):
             row = _uk_row([
                 _uk_btn("tr.create", "🐉 创建讨伐队伍", a1="若陀龙王", uid=doc.uid, style="primary"),
             ], fallback=f"{CMD_TR_CREATE} 若陀龙王", timeout=600)
-            res = self._kb(event, "【团本·下一步】", row)
-            if res is not None and _uk_avail():
-                res.use_markdown(True)
-            yield res if res is not None else event.plain_result(f"开团：{CMD_TR_CREATE} 若陀龙王")
+            yield self._kb_next(event, "【团本·下一步】", row, f"开团：{CMD_TR_CREATE} 若陀龙王")
 
     @filter.command(CMD_TR_DISMISS, "解散队伍")
     async def handle_team_dismiss(self, event: AstrMessageEvent):
@@ -12427,11 +12412,8 @@ class ZhutianPlugin(Star):
             btns = [_uk_btn("pl.go", f"✈️ {p}", a1=p, uid=doc.uid)
                     for p in known[:5]]
             row = _uk_row(btns, fallback=f"{CMD_PLANE_TRAVEL} 位面名", timeout=600)
-            res = self._kb(event, "【诸天星路·穿梭已记忆位面】", row)
-            if res is not None and _uk_avail():
-                res.use_markdown(True)
-            yield res if res is not None else event.plain_result(
-                f"穿梭：{CMD_PLANE_TRAVEL} 位面名")
+            yield self._kb_next(event, "【诸天星路·穿梭已记忆位面】", row,
+                                f"穿梭：{CMD_PLANE_TRAVEL} 位面名")
 
     @filter.command(CMD_PLANE_CLUE, "求购位面线索")
     async def handle_plane_clue(self, event: AstrMessageEvent, name: str = ""):
@@ -15026,10 +15008,7 @@ class ZhutianPlugin(Star):
             _uk_btn("mem.advance", "🚶 命途行进", uid=doc.uid, style="primary"),
             _uk_btn("mem.sim", "🎲 命途模拟", uid=doc.uid),
         ], fallback=f"{CMD_MEM_ADV} / {CMD_MEM_SIM}", timeout=600)
-        res = self._kb(event, "【记忆命途·下一步】", row)
-        if res is not None and _uk_avail():
-            res.use_markdown(True)
-        yield res if res is not None else event.plain_result(f"下一步：{CMD_MEM_ADV} / {CMD_MEM_SIM}")
+        yield self._kb_next(event, "【记忆命途·下一步】", row, f"下一步：{CMD_MEM_ADV} / {CMD_MEM_SIM}")
 
     @filter.command(CMD_MEM_FACTORS, "记忆因子")
     async def handle_mem_factors(self, event: AstrMessageEvent):
@@ -15156,10 +15135,7 @@ class ZhutianPlugin(Star):
             _uk_btn("iw.upgrade", "🏗 升级空间", uid=doc.uid, style="primary"),
             _uk_btn("iw.put_all", "📦 一键存入", uid=doc.uid),
         ], fallback=f"{CMD_IW_UPGRADE} / {CMD_IW_PUT_ALL}", timeout=600)
-        res = self._kb(event, "【内景地·下一步】", row)
-        if res is not None and _uk_avail():
-            res.use_markdown(True)
-        yield res if res is not None else event.plain_result(f"下一步：{CMD_IW_UPGRADE} / {CMD_IW_PUT_ALL}")
+        yield self._kb_next(event, "【内景地·下一步】", row, f"下一步：{CMD_IW_UPGRADE} / {CMD_IW_PUT_ALL}")
 
     @filter.command(CMD_IW_UPGRADE, alias={"#升级内景地空间"})
     async def handle_iw_upgrade(self, event: AstrMessageEvent):
@@ -15343,10 +15319,7 @@ class ZhutianPlugin(Star):
             _uk_btn("ys.consolidate", "🧠 凝练元神", uid=doc.uid, style="primary"),
             _uk_btn("ys.enter", "🌌 神游", uid=doc.uid),
         ], fallback=f"{CMD_YS_CONSOLIDATE} / {CMD_YS_ENTER}", timeout=600)
-        res = self._kb(event, "【元神·下一步】", row)
-        if res is not None and _uk_avail():
-            res.use_markdown(True)
-        yield res if res is not None else event.plain_result(f"下一步：{CMD_YS_CONSOLIDATE} / {CMD_YS_ENTER}")
+        yield self._kb_next(event, "【元神·下一步】", row, f"下一步：{CMD_YS_CONSOLIDATE} / {CMD_YS_ENTER}")
 
     @filter.command(CMD_YS_PILL, "服食天药")
     async def handle_ys_pill(self, event: AstrMessageEvent, arg: str = ""):
@@ -15862,11 +15835,8 @@ class ZhutianPlugin(Star):
                 _uk_btn("osw.observe", "🔭 观测彼岸星图", uid=doc.uid, style="primary"),
                 _uk_btn("osw.nearest", "🧭 最近星辰", uid=doc.uid),
             ], fallback=f"{CMD_OSW_OBSERVE} / {CMD_OSW_NEAREST}", timeout=600)
-            res = self._kb(event, "【彼岸世界·下一步】", row)
-            if res is not None and _uk_avail():
-                res.use_markdown(True)
-            yield res if res is not None else event.plain_result(
-                f"下一步：{CMD_OSW_OBSERVE} / {CMD_OSW_NEAREST}")
+            yield self._kb_next(event, "【彼岸世界·下一步】", row,
+                                f"下一步：{CMD_OSW_OBSERVE} / {CMD_OSW_NEAREST}")
 
     @filter.command(CMD_OSW_COORD, "彼岸坐标")
     async def handle_other_shore_coord(self, event: AstrMessageEvent):
@@ -19154,10 +19124,7 @@ class ZhutianPlugin(Star):
             _uk_btn("fl.sense", "🌸 感应异变", uid=doc.uid, style="primary"),
             _uk_btn("fl.evolve", "🧬 进化", uid=doc.uid),
         ], fallback=f"{CMD_FL_SENSE} / {CMD_FL_EVOLVE}", timeout=600)
-        res = self._kb(event, "【花粉路·下一步】", row)
-        if res is not None and _uk_avail():
-            res.use_markdown(True)
-        yield res if res is not None else event.plain_result(f"下一步：{CMD_FL_SENSE} / {CMD_FL_EVOLVE}")
+        yield self._kb_next(event, "【花粉路·下一步】", row, f"下一步：{CMD_FL_SENSE} / {CMD_FL_EVOLVE}")
 
     @filter.command(CMD_FL_LEVELS, "花粉境界")
     async def handle_fl_levels(self, event: AstrMessageEvent):
@@ -19487,10 +19454,7 @@ class ZhutianPlugin(Star):
             _uk_btn("sy.seek", "🌙 感应岁云", uid=doc.uid, style="primary"),
             _uk_btn("sy.cultivate", "☁️ 云月修炼", uid=doc.uid),
         ], fallback=f"{CMD_SY_SEEK} / {CMD_SY_CULTIVATE}", timeout=600)
-        res = self._kb(event, "【岁云·下一步】", row)
-        if res is not None and _uk_avail():
-            res.use_markdown(True)
-        yield res if res is not None else event.plain_result(f"下一步：{CMD_SY_SEEK} / {CMD_SY_CULTIVATE}")
+        yield self._kb_next(event, "【岁云·下一步】", row, f"下一步：{CMD_SY_SEEK} / {CMD_SY_CULTIVATE}")
 
     @filter.command(CMD_SY_STAGES, "岁云五阶")
     async def handle_sy_stages(self, event: AstrMessageEvent):
@@ -19872,10 +19836,7 @@ class ZhutianPlugin(Star):
             _uk_btn("dz.charge", "⚡ 冲关", uid=doc.uid, style="primary"),
             _uk_btn("dz.prove", "👑 证道成帝", uid=doc.uid),
         ], fallback=f"{CMD_DZ_CHARGE} / {CMD_DZ_PROVE}", timeout=600)
-        res = self._kb(event, "【证道·下一步】", row)
-        if res is not None and _uk_avail():
-            res.use_markdown(True)
-        yield res if res is not None else event.plain_result(f"下一步：{CMD_DZ_CHARGE} / {CMD_DZ_PROVE}")
+        yield self._kb_next(event, "【证道·下一步】", row, f"下一步：{CMD_DZ_CHARGE} / {CMD_DZ_PROVE}")
 
     @filter.command(CMD_DZ_RULES, "道伤规则")
     async def handle_dz_rules(self, event: AstrMessageEvent):
@@ -20345,10 +20306,7 @@ class ZhutianPlugin(Star):
             _uk_btn("ow.attempt", "🧘 参悟节点", uid=doc.uid, style="primary"),
             _uk_btn("ow.break", "⚡ 突破段位", uid=doc.uid),
         ], fallback=f"{CMD_WD_ATTEMPT} / {CMD_OW_BREAK}", timeout=600)
-        res = self._kb(event, "【自身之道·下一步】", row)
-        if res is not None and _uk_avail():
-            res.use_markdown(True)
-        yield res if res is not None else event.plain_result(f"下一步：{CMD_WD_ATTEMPT} / {CMD_OW_BREAK}")
+        yield self._kb_next(event, "【自身之道·下一步】", row, f"下一步：{CMD_WD_ATTEMPT} / {CMD_OW_BREAK}")
 
     # ------------------------------------------------ W12-F1/F2：体质进阶
 
@@ -20714,10 +20672,7 @@ class ZhutianPlugin(Star):
             _uk_btn("mg.purify", "💙 净化灵魂宝石", uid=doc.uid, style="primary"),
             _uk_btn("mg.adv", "🌟 魔法少女进阶", uid=doc.uid),
         ], fallback=f"{CMD_MG_PURIFY} / {CMD_MG_ADV}", timeout=600)
-        res = self._kb(event, "【诸天镜补充·下一步】", row)
-        if res is not None and _uk_avail():
-            res.use_markdown(True)
-        yield res if res is not None else event.plain_result(f"下一步：{CMD_MG_PURIFY} / {CMD_MG_ADV}")
+        yield self._kb_next(event, "【诸天镜补充·下一步】", row, f"下一步：{CMD_MG_PURIFY} / {CMD_MG_ADV}")
 
     # ------------------------------------------------ W15-F1：职业补全
 
@@ -22009,10 +21964,7 @@ class ZhutianPlugin(Star):
             _uk_btn("sp.chop", "🔪 斩骨", uid=doc.uid, style="primary"),
             _uk_btn("sp.trial", "⚡ 至尊试炼", uid=doc.uid),
         ], fallback=f"{CMD_SP_CHOP} / {CMD_SP_TRIAL}", timeout=600)
-        res = self._kb(event, "【至尊之路·下一步】", row)
-        if res is not None and _uk_avail():
-            res.use_markdown(True)
-        yield res if res is not None else event.plain_result(f"下一步：{CMD_SP_CHOP} / {CMD_SP_TRIAL}")
+        yield self._kb_next(event, "【至尊之路·下一步】", row, f"下一步：{CMD_SP_CHOP} / {CMD_SP_TRIAL}")
 
     @filter.command(CMD_SP_RULES, "至尊规则")
     async def handle_sp_rules(self, event: AstrMessageEvent):
@@ -22194,11 +22146,8 @@ class ZhutianPlugin(Star):
             _uk_btn("bm.st", "💎 召唤宝灵", uid=doc.uid),
             _uk_btn("bm.embed", "🔮 一键镶嵌", uid=doc.uid),
         ], fallback=f"{CMD_BM_SUMMON_W} / {CMD_BM_SUMMON_A} / {CMD_BM_SUMMON_T} / {CMD_BM_EMBED_ALL}", timeout=600)
-        res = self._kb(event, "【本命法宝·下一步】", row)
-        if res is not None and _uk_avail():
-            res.use_markdown(True)
-        yield res if res is not None else event.plain_result(
-            f"下一步：{CMD_BM_SUMMON_W} / {CMD_BM_SUMMON_A} / {CMD_BM_SUMMON_T} / {CMD_BM_EMBED_ALL}")
+        yield self._kb_next(event, "【本命法宝·下一步】", row,
+                            f"下一步：{CMD_BM_SUMMON_W} / {CMD_BM_SUMMON_A} / {CMD_BM_SUMMON_T} / {CMD_BM_EMBED_ALL}")
 
     @filter.command(CMD_BM_RULES, "本命规则")
     async def handle_bm_rules(self, event: AstrMessageEvent):
@@ -22485,10 +22434,7 @@ class ZhutianPlugin(Star):
             _uk_btn("xt.claim", "🏆 领取至宝", uid=doc.uid, style="primary"),
             _uk_btn("xt.help", "📜 至宝指令一览", uid=doc.uid),
         ], fallback=f"{CMD_XT_CLAIM} / {CMD_XT_HELP}", timeout=600)
-        res = self._kb(event, "【先天至宝·下一步】", row)
-        if res is not None and _uk_avail():
-            res.use_markdown(True)
-        yield res if res is not None else event.plain_result(f"下一步：{CMD_XT_CLAIM} / {CMD_XT_HELP}")
+        yield self._kb_next(event, "【先天至宝·下一步】", row, f"下一步：{CMD_XT_CLAIM} / {CMD_XT_HELP}")
 
     @filter.command(CMD_XT_HELP, "先天至宝全部指令一览")
     async def handle_xt_help(self, event: AstrMessageEvent):
@@ -22814,10 +22760,7 @@ class ZhutianPlugin(Star):
             _uk_btn("dt.my", "🏛 领取成器", uid=doc.uid, style="primary"),
             _uk_btn("dt.mats", "🪵 文明燃料途径", uid=doc.uid),
         ], fallback=f"{CMD_DT_MY} / {CMD_DT_MATS}", timeout=600)
-        res = self._kb(event, "【大道熔炉·下一步】", row)
-        if res is not None and _uk_avail():
-            res.use_markdown(True)
-        yield res if res is not None else event.plain_result(f"下一步：{CMD_DT_MY} / {CMD_DT_MATS}")
+        yield self._kb_next(event, "【大道熔炉·下一步】", row, f"下一步：{CMD_DT_MY} / {CMD_DT_MATS}")
 
     @filter.command(CMD_DT_OPEN, "炼器师立全服唯一大道炉（1-10 字器名）")
     async def handle_dt_open(self, event: AstrMessageEvent, arg: str = ""):
@@ -23080,10 +23023,7 @@ class ZhutianPlugin(Star):
             _uk_btn("furn.open", "🔥 出炉", uid=doc.uid, style="primary"),
             _uk_btn("furn.oneclick", "⚡ 一键开炉（时光令）", uid=doc.uid),
         ], fallback=f"{CMD_FURN_OPEN} / {CMD_FURN_ONECLICK}", timeout=600)
-        res = self._kb(event, "【锻炉·下一步】", row)
-        if res is not None and _uk_avail():
-            res.use_markdown(True)
-        yield res if res is not None else event.plain_result(f"下一步：{CMD_FURN_OPEN} / {CMD_FURN_ONECLICK}")
+        yield self._kb_next(event, "【锻炉·下一步】", row, f"下一步：{CMD_FURN_OPEN} / {CMD_FURN_ONECLICK}")
 
     @filter.command(CMD_FURN_NAME, "赋名：原神兵名*新名（8 字、全服唯一、一件一次）")
     async def handle_furn_name(self, event: AstrMessageEvent, arg: str = ""):
@@ -23202,10 +23142,7 @@ class ZhutianPlugin(Star):
             _uk_btn("xg.show", "🔨 查看当前拍卖", uid=doc.uid, style="primary"),
             _uk_btn("xg.rules", "📖 星阁规则", uid=doc.uid),
         ], fallback=f"{CMD_XG_SHOW} / {CMD_XG_RULES}", timeout=600)
-        res = self._kb(event, "【星阁·下一步】", row)
-        if res is not None and _uk_avail():
-            res.use_markdown(True)
-        yield res if res is not None else event.plain_result(f"下一步：{CMD_XG_SHOW} / {CMD_XG_RULES}")
+        yield self._kb_next(event, "【星阁·下一步】", row, f"下一步：{CMD_XG_SHOW} / {CMD_XG_RULES}")
 
     @filter.command(CMD_XG_RULES, "星阁竞价与结算规则")
     async def handle_xg_rules(self, event: AstrMessageEvent):
@@ -23390,10 +23327,7 @@ class ZhutianPlugin(Star):
             _uk_btn("ss.small", "🩸 迎战诡异小祭", uid="", style="primary"),
             _uk_btn("ss.big", "💀 迎战诡异大祭", uid="", style="danger"),
         ], fallback=f"{CMD_SS_FIGHT_SMALL} / {CMD_SS_FIGHT_BIG}", timeout=600)
-        res = self._kb(event, "【诡异祭礼·迎战】", row)
-        if res is not None and _uk_avail():
-            res.use_markdown(True)
-        yield res if res is not None else event.plain_result(f"迎战：{CMD_SS_FIGHT_SMALL} / {CMD_SS_FIGHT_BIG}")
+        yield self._kb_next(event, "【诡异祭礼·迎战】", row, f"迎战：{CMD_SS_FIGHT_SMALL} / {CMD_SS_FIGHT_BIG}")
 
     @filter.command(CMD_SS_SLASH, "天意一刀状态")
     async def handle_ss_slash(self, event: AstrMessageEvent):
@@ -24020,10 +23954,7 @@ class ZhutianPlugin(Star):
             _uk_btn("dr.join", "🐲 加入讨伐", uid="", style="primary"),
             _uk_btn("dr.fight", "⚔️ 讨伐龙王", uid=""),
         ], fallback=f"{CMD_DR_JOIN} / {CMD_DR_FIGHT}", timeout=600)
-        res = self._kb(event, "【若陀龙王·下一步】", row)
-        if res is not None and _uk_avail():
-            res.use_markdown(True)
-        yield res if res is not None else event.plain_result(f"下一步：{CMD_DR_JOIN} / {CMD_DR_FIGHT}")
+        yield self._kb_next(event, "【若陀龙王·下一步】", row, f"下一步：{CMD_DR_JOIN} / {CMD_DR_FIGHT}")
 
     @filter.command(CMD_DR_RANK, "龙王榜：累计伤害前 20 与占比")
     async def handle_dr_rank(self, event: AstrMessageEvent):
@@ -24171,10 +24102,7 @@ class ZhutianPlugin(Star):
                 _uk_btn("rv.sub", "🧭 外勤", a1="外勤", uid=doc.uid),
                 _uk_btn("rv.sub", "📖 帮助", a1="帮助", uid=doc.uid),
             ], fallback="#复活地球 入界确认 / 状态 / 外勤", timeout=600)
-            res = self._kb(event, "【复活地球·下一步】", row)
-            if res is not None and _uk_avail():
-                res.use_markdown(True)
-            yield res if res is not None else event.plain_result("下一步：#复活地球 入界 确认")
+            yield self._kb_next(event, "【复活地球·下一步】", row, "下一步：#复活地球 入界 确认")
 
     @filter.command("#复活地球子页", "复活地球子页按钮路由")
     async def handle_rv_sub(self, event: AstrMessageEvent, sub: str = ""):
@@ -24205,7 +24133,7 @@ class ZhutianPlugin(Star):
         return [dict(x) for x in rows if isinstance(x, dict) and x.get("id") in want]
 
     async def _sm_dispatch(self, event: AstrMessageEvent, rest: str,
-                           doc: PlayerDoc | None = None):
+                           doc: PlayerDoc | None = None, render: bool = True):
         # doc 由别名路由传入时不再重复 _require_player（0.5s 节流会误拦）
         if doc is None:
             if not self._allowed(event):
@@ -24224,6 +24152,13 @@ class ZhutianPlugin(Star):
         for op in ops:
             if op[0] == "items":
                 await self.db.add_items(doc.uid, {k: int(v) for k, v in op[1].items()})
+        if not render:
+            # W34-fix：按钮回调回复走纯文本 MD（QQ 交互事件的图片被动回复会被拒）
+            res = self._kb(event, msg)
+            if res is not None and _uk_avail():
+                res.use_markdown(True)
+            yield res if res is not None else event.plain_result(msg)
+            return
         async for r in self._smart(event, msg, "剑与魔法"):
             yield r
 
@@ -24242,10 +24177,7 @@ class ZhutianPlugin(Star):
                 _uk_btn("sjm.sub", "📊 状态", a1="状态", uid=doc.uid),
                 _uk_btn("sjm.sub", "📖 帮助", a1="帮助", uid=doc.uid),
             ], fallback=f"{CMD_SM_DRAW}（详见 {CMD_SM}帮助）", timeout=600)
-            res = self._kb(event, "【剑与魔法·下一步】", row)
-            if res is not None and _uk_avail():
-                res.use_markdown(True)
-            yield res if res is not None else event.plain_result(f"下一步：{CMD_SM_DRAW}")
+            yield self._kb_next(event, "【剑与魔法·下一步】", row, f"下一步：{CMD_SM_DRAW}")
 
     @filter.command(CMD_SM_DRAW, "抽取异界双天赋（等价 #剑与魔法 抽取词条）", alias={CMD_SM_DRAW_ALIAS})
     async def handle_sm_draw(self, event: AstrMessageEvent):
@@ -24255,17 +24187,12 @@ class ZhutianPlugin(Star):
     @filter.regex(r"^#剑与魔法帮助$")
     async def handle_sm_help_bare(self, event: AstrMessageEvent):
         """原版 rule 里 `#剑与魔法帮助` 是无空格连写形态。"""
-        help_texts = []
-        async for r in self._sm_dispatch(event, "帮助"):
-            help_texts.append(r)
-        # W33-fix：帮助正文收集后与菜单按钮合并单条 MD
+        # W34-fix：正文直接取 help_text（此前收集 _smart 输出会被转成图片组件，正文丢失）
+        body = sm_mod.help_text()
         r_ = _uk_row([_uk_btn("sjm.sub", "📖世界观", a1="世界观", style="primary"),
                       _uk_btn("sjm.sub", "📊我的状态", a1="状态", style="primary"),
                       _uk_btn("sjm.sub", "🗺地图", a1="地图", style="primary")],
                      fallback="#剑与魔法 世界观 / 状态 / 地图", timeout=3600)
-        body = chr(10).join(str(getattr(p, "chain", []) and
-                           (p.chain[0].text if p.chain and hasattr(p.chain[0], "text")
-                            else "") or "") for p in help_texts)
         res = self._kb(event, body or "剑与魔法 · 帮助：", r_)
         if res:
             yield res
@@ -26120,9 +26047,9 @@ class ZhutianPlugin(Star):
         return handler(event, arg) if arg else handler(event)
 
     async def handle_sjm_sub(self, event: AstrMessageEvent, sub: str = ""):
-        """W33-final：剑与魔法子页按钮（世界观/状态/地图）。"""
+        """W33-final：剑与魔法子页按钮（世界观/状态/地图）。W34-fix：回复走纯文本。"""
         sub = str(sub or "帮助").strip()
-        async for r in self._sm_dispatch(event, sub):
+        async for r in self._sm_dispatch(event, sub, render=False):
             yield r
 
     @filter.button_action()
