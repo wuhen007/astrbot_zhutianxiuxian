@@ -7685,7 +7685,7 @@ async def main():
     miss57 = [c for c in names57 if f"@filter.command({c}" not in src57]
     assert miss57 == [], f"漏注册：{miss57}"
     assert "pup_mod.battle_bonus(" in src57 and "await self._pup_open(event)" in src57
-    assert "pup_mod.craft(" in src57 and "确认请发送「#毁去人傀 确认」" in src57
+    assert "pup_mod.craft(" in src57 and "#毁去人傀 确认" in src57
     help57 = _json57.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
     assert len(help57) >= 39 and any(g["group"] == "人傀 · 外来道果" for g in help57)
     print("W8-F6 puppet ok")
@@ -10034,8 +10034,10 @@ async def main():
     assert "uid != me" in src300, "发起者校验"
     assert "def _msg_of" in src300 and "self._msg_of(event)" in src300
     # 按钮追加点：探索三径/战败/撤离/命签/择院/红包墙/至宝链/状态快捷
-    for frag300 in ("W31：探索三径按钮", "W31：战败生死抉择按钮", "W31：命签候选按钮",
-                    "W31：择院按钮", "点击抢红包（30 分钟内有效）"):
+    for frag300 in ("W31：探索三径按钮", "W31：战败生死抉择按钮",
+                    "W33-fix：分布正文+候选按钮合并单条 MD",
+                    "W33-fix：入院正文+择院按钮合并单条 MD",
+                    "W33-fix：墙正文+抢按钮合并单条 MD"):
         assert frag300 in src300, f"按钮追加点缺失：{frag300}"
     assert src300.count('W31：战败生死抉择按钮') == 2, "移动+选择两处战败按钮"
     assert "_uk_btn(\"xb.t2\"" in src300 and "_uk_btn(\"xb.vow\"" in src300

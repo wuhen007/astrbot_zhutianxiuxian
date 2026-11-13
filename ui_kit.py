@@ -36,6 +36,28 @@ def available() -> bool:
     return AVAILABLE
 
 
+def md_text(text: str) -> str:
+    """QQ 官方原生 Markdown 渲染规则：单个 \\n 不换行。
+
+    行尾补两空格强制换行；连续空行压缩；粗体标题行加 **。"""
+    lines = str(text or "").split("\n")
+    out = []
+    for i, line in enumerate(lines):
+        stripped = line.rstrip()
+        if not stripped:
+            out.append("")
+            continue
+        # 标题行（以【或 # 开头，或以】结尾的整行短语）加粗
+        if (stripped.startswith("【") and stripped.endswith("】")) or \
+                stripped.startswith("# "):
+            stripped = f"**{stripped}**"
+        # 行尾两空格 = markdown 强制换行；最后一行不需要
+        if i < len(lines) - 1 and stripped:
+            stripped += "  "
+        out.append(stripped)
+    return "\n".join(out)
+
+
 def own(data: dict | None, uid: Any) -> dict:
     """回调 data 注入发起者 uid（分发器校验点击者==发起者，防冒用）。"""
     d = dict(data or {})
@@ -78,7 +100,7 @@ def kb_result(event: Any, text: str, *rows: Any, markdown: bool = True) -> Any |
     """构造「短文本 + 键盘」消息结果；组件不可用时退化为纯文本结果。"""
     rows = [r for r in rows if r is not None]
     if AVAILABLE and rows:
-        chain = [Plain(text), *rows]
+        chain = [Plain(md_text(text)), *rows]
         res = event.chain_result(chain)
         if markdown:
             res.use_markdown(True)

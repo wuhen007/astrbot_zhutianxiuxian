@@ -9650,11 +9650,10 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         if (arg or self._adm_tail(event)).strip() != "确认":
-            yield event.plain_result(prefix + "销毁后不返还材料。确认请发送「#毁去人傀 确认」。")
             r_ = _uk_row([_uk_btn("pup.destroy", "✅确认销毁", uid=doc.uid, style="danger"),
                           _uk_btn("pup.keep", "保留人傀", uid=doc.uid)],
                          fallback="#毁去人傀 确认", timeout=120)
-            res = self._kb(event, "**毁去人傀**\n\n> 人傀将被彻底销毁，已消耗的材料不会返还。", r_)
+            res = self._kb(event, prefix + "毁去人傀\n销毁后不返还材料。", r_)
             if res:
                 yield res
             return
@@ -23966,14 +23965,18 @@ class ZhutianPlugin(Star):
     @filter.regex(r"^#剑与魔法帮助$")
     async def handle_sm_help_bare(self, event: AstrMessageEvent):
         """原版 rule 里 `#剑与魔法帮助` 是无空格连写形态。"""
+        help_texts = []
         async for r in self._sm_dispatch(event, "帮助"):
-            yield r
-        # W33-final：原版 SwordMagic L22 菜单按钮
+            help_texts.append(r)
+        # W33-fix：帮助正文收集后与菜单按钮合并单条 MD
         r_ = _uk_row([_uk_btn("sjm.sub", "📖世界观", a1="世界观", style="primary"),
                       _uk_btn("sjm.sub", "📊我的状态", a1="状态", style="primary"),
                       _uk_btn("sjm.sub", "🗺地图", a1="地图", style="primary")],
                      fallback="#剑与魔法 世界观 / 状态 / 地图", timeout=3600)
-        res = self._kb(event, "剑与魔法 · 快捷入口：", r_)
+        body = NL.join(str(getattr(p, "chain", []) and
+                           (p.chain[0].text if p.chain and hasattr(p.chain[0], "text")
+                            else "") or "") for p in help_texts)
+        res = self._kb(event, body or "剑与魔法 · 帮助：", r_)
         if res:
             yield res
 
@@ -24455,7 +24458,7 @@ class ZhutianPlugin(Star):
         r_ = _uk_row([_uk_btn("xg.evac", "✅确认撤离", uid=doc.uid, style="success"),
                       _uk_btn("xg.status", "📊查看状态", uid=doc.uid)],
                      fallback="#确认撤离 或 #秘境状态", timeout=(duration + 130))
-        res = self._kb(event, "读条完毕后点击确认（也可再次发送指令）：", r_)
+        res = self._kb(event, "**撤离读条中**（完毕后点击确认，也可再次发送指令）：", r_)
         if res:
             yield res
 
@@ -25213,15 +25216,16 @@ class ZhutianPlugin(Star):
         ok, msg = acd_mod.apply(doc, xgm_mod.xg_level_of(doc), plane.current(plane_st))
         if ok:
             await self._pe_save(doc, {})
-        yield event.plain_result(msg)
-        # W31：择院按钮（一次性，10 分钟内点击）
+        # W33-fix：入院正文+择院按钮合并单条 MD
         if ok:
             r_ = _uk_row([_uk_btn("tssy.good", "✦选仙院", uid=doc.uid, style="success"),
                           _uk_btn("tssy.holy", "▼选圣院", uid=doc.uid, style="primary")],
                          fallback="#选择仙院 或 #选择圣院", timeout=600)
-            res = self._kb(event, "请择院（选择后不可更改）：", r_)
+            res = self._kb(event, msg, r_)
             if res:
                 yield res
+        else:
+            yield event.plain_result(msg)
 
     @filter.command(CMD_TSSY_MY, "我的院籍")
     async def handle_tssy_my(self, event: AstrMessageEvent):
@@ -25371,8 +25375,7 @@ class ZhutianPlugin(Star):
             wall_now = (world.get("hongbao") or {})
             cal["xiangu"] = world
             await self.db.save_calamity(cal)
-        yield event.plain_result(text)
-        # W31/W32：每红包一个「抢」按钮（公开玩法不绑 uid），上限 25
+        # W33-fix：墙正文+抢按钮合并单条 MD
         btns = []
         for s_uid, rec in list(wall_now.items())[:25]:
             if int(rec.get("left", 0) or 0) > 0:
@@ -25381,10 +25384,11 @@ class ZhutianPlugin(Star):
         if btns:
             rows_ = [_uk_row(btns[i:i + 5], fallback="#抢红包 @发送者", timeout=300)
                      for i in range(0, len(btns), 5)][:5]
-            res = self._kb(event, "点击抢红包（30 分钟内有效）：",
-                           *[r for r in rows_ if r is not None])
+            res = self._kb(event, text, *[r for r in rows_ if r is not None])
             if res:
                 yield res
+        else:
+            yield event.plain_result(text)
 
     @filter.command(CMD_GIFT, "赠送 @对方 物品*数量")
     async def handle_gift(self, event: AstrMessageEvent, arg: str = ""):
@@ -25702,8 +25706,7 @@ class ZhutianPlugin(Star):
             async with self.db.transaction():
                 await self.db.save_player(doc.model_dump())
                 await self.db.remove_item(doc.uid, mingge.EXTRACT_ITEM, count)
-        yield event.plain_result(msg)
-        # W31：命签候选按钮（前 5 + 保留）
+        # W33-fix：分布正文+候选按钮合并单条 MD（QQ 原生 MD 单 \n 不换行，kb_result 内 md_text 处理）
         pend = st.get("mingge_pending") or {}
         cands = (pend.get("candidates") or [])[:5]
         if ok and cands:
@@ -25713,10 +25716,11 @@ class ZhutianPlugin(Star):
             rows_ = [_uk_row(btns[:5], fallback="#选择轮回命签*序号", timeout=600)]
             if btns[5:]:
                 rows_.append(_uk_row(btns[5:], fallback="#保留轮回命签", timeout=600))
-            res = self._kb(event, "择优保留（10 分钟内点击）：",
-                           *[r for r in rows_ if r is not None])
+            res = self._kb(event, msg, *[r for r in rows_ if r is not None])
             if res:
                 yield res
+        elif ok:
+            yield event.plain_result(msg)
 
     @filter.regex(r"^#选择轮回命签\*(\d+)$")
     async def handle_mg_choose(self, event: AstrMessageEvent):
