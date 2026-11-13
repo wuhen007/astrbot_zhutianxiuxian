@@ -9570,6 +9570,15 @@ class ZhutianPlugin(Star):
                 + "\n" + pup_mod.rules_text() + "\n" + pup_mod.help_text())
         async for r in self._smart(event, text, "人傀 · 外来道果"):
             yield r
+        # W34 铺开：无参下一步按钮（驱使人傀 / 修复人傀）
+        row = _uk_row([
+            _uk_btn("pup.summon", "🤖 驱使人傀", uid=_doc.uid, style="primary"),
+            _uk_btn("pup.repair", "🛠 修复人傀", uid=_doc.uid),
+        ], fallback=f"{CMD_PUP_SUMMON} / {CMD_PUP_REPAIR}", timeout=600)
+        res = self._kb(event, "【人傀·下一步】", row)
+        if res is not None and _uk_avail():
+            res.use_markdown(True)
+        yield res if res is not None else event.plain_result(f"下一步：{CMD_PUP_SUMMON} / {CMD_PUP_REPAIR}")
 
     @filter.command(CMD_PUP_SUMMON, "驱使人傀")
     async def handle_pup_summon(self, event: AstrMessageEvent):
@@ -10323,6 +10332,16 @@ class ZhutianPlugin(Star):
         async for r in self._smart(event, prefix + "\n".join(
                 rev_mod.panel_lines(ps, wy)), "帝关战况"):
             yield r
+        # W34 铺开：无参下一步按钮（出关迎战）
+        uid = _doc.uid if _doc else ""
+        row = _uk_row([
+            _uk_btn("ip.sortie", "⚔️ 出关迎战", uid=uid, style="primary"),
+            _uk_btn("ip.rank", "🏆 帝关威名榜", uid="", style="secondary"),
+        ], fallback=f"{CMD_IP_SORTIE} / {CMD_IP_RANK}", timeout=600)
+        res = self._kb(event, "【帝关·下一步】", row)
+        if res is not None and _uk_avail():
+            res.use_markdown(True)
+        yield res if res is not None else event.plain_result(f"下一步：{CMD_IP_SORTIE} / {CMD_IP_RANK}")
 
     @filter.command(CMD_IP_RANK, "帝关威名榜")
     async def handle_ip_rank(self, event: AstrMessageEvent):
@@ -14932,6 +14951,15 @@ class ZhutianPlugin(Star):
             return
         async for r in self._smart(event, mem_mod.status_text(doc), "记忆命途"):
             yield r
+        # W34 铺开：无参下一步按钮（命途行进 / 泰坦试炼）
+        row = _uk_row([
+            _uk_btn("mem.advance", "🚶 命途行进", uid=doc.uid, style="primary"),
+            _uk_btn("mem.sim", "🎲 命途模拟", uid=doc.uid),
+        ], fallback=f"{CMD_MEM_ADV} / {CMD_MEM_SIM}", timeout=600)
+        res = self._kb(event, "【记忆命途·下一步】", row)
+        if res is not None and _uk_avail():
+            res.use_markdown(True)
+        yield res if res is not None else event.plain_result(f"下一步：{CMD_MEM_ADV} / {CMD_MEM_SIM}")
 
     @filter.command(CMD_MEM_FACTORS, "记忆因子")
     async def handle_mem_factors(self, event: AstrMessageEvent):
@@ -15053,6 +15081,15 @@ class ZhutianPlugin(Star):
             return
         async for r in self._smart(event, iw_mod.panel(doc, self._cls_of), "我的内景地"):
             yield r
+        # W34 铺开：无参下一步按钮（升级空间 / 一键存入）
+        row = _uk_row([
+            _uk_btn("iw.upgrade", "🏗 升级空间", uid=doc.uid, style="primary"),
+            _uk_btn("iw.put_all", "📦 一键存入", uid=doc.uid),
+        ], fallback=f"{CMD_IW_UPGRADE} / {CMD_IW_PUT_ALL}", timeout=600)
+        res = self._kb(event, "【内景地·下一步】", row)
+        if res is not None and _uk_avail():
+            res.use_markdown(True)
+        yield res if res is not None else event.plain_result(f"下一步：{CMD_IW_UPGRADE} / {CMD_IW_PUT_ALL}")
 
     @filter.command(CMD_IW_UPGRADE, alias={"#升级内景地空间"})
     async def handle_iw_upgrade(self, event: AstrMessageEvent):
@@ -15231,6 +15268,15 @@ class ZhutianPlugin(Star):
         lines.append("用法：以X修炼元神 / 以X淬炼元神 / 以X元神爆发 / 以X元神护体")
         async for r in self._smart(event, "\n".join(lines), "我的元神"):
             yield r
+        # W34 铺开：无参下一步按钮（凝练元神 / 神游）
+        row = _uk_row([
+            _uk_btn("ys.consolidate", "🧠 凝练元神", uid=doc.uid, style="primary"),
+            _uk_btn("ys.enter", "🌌 神游", uid=doc.uid),
+        ], fallback=f"{CMD_YS_CONSOLIDATE} / {CMD_YS_ENTER}", timeout=600)
+        res = self._kb(event, "【元神·下一步】", row)
+        if res is not None and _uk_avail():
+            res.use_markdown(True)
+        yield res if res is not None else event.plain_result(f"下一步：{CMD_YS_CONSOLIDATE} / {CMD_YS_ENTER}")
 
     @filter.command(CMD_YS_PILL, "服食天药")
     async def handle_ys_pill(self, event: AstrMessageEvent, arg: str = ""):
@@ -19021,6 +19067,15 @@ class ZhutianPlugin(Star):
         await self._fl_apply(doc, {})
         async for r in self._smart(event, msg, "花粉进化路"):
             yield r
+        # W34 铺开：无参下一步按钮（感应异变 / 进化）
+        row = _uk_row([
+            _uk_btn("fl.sense", "🌸 感应异变", uid=doc.uid, style="primary"),
+            _uk_btn("fl.evolve", "🧬 进化", uid=doc.uid),
+        ], fallback=f"{CMD_FL_SENSE} / {CMD_FL_EVOLVE}", timeout=600)
+        res = self._kb(event, "【花粉路·下一步】", row)
+        if res is not None and _uk_avail():
+            res.use_markdown(True)
+        yield res if res is not None else event.plain_result(f"下一步：{CMD_FL_SENSE} / {CMD_FL_EVOLVE}")
 
     @filter.command(CMD_FL_LEVELS, "花粉境界")
     async def handle_fl_levels(self, event: AstrMessageEvent):
@@ -19345,6 +19400,15 @@ class ZhutianPlugin(Star):
         text = (note + "\n" if note else "") + msg
         async for r in self._smart(event, text, "岁云之力"):
             yield r
+        # W34 铺开：无参下一步按钮（感应岁云 / 云月修炼）
+        row = _uk_row([
+            _uk_btn("sy.seek", "🌙 感应岁云", uid=doc.uid, style="primary"),
+            _uk_btn("sy.cultivate", "☁️ 云月修炼", uid=doc.uid),
+        ], fallback=f"{CMD_SY_SEEK} / {CMD_SY_CULTIVATE}", timeout=600)
+        res = self._kb(event, "【岁云·下一步】", row)
+        if res is not None and _uk_avail():
+            res.use_markdown(True)
+        yield res if res is not None else event.plain_result(f"下一步：{CMD_SY_SEEK} / {CMD_SY_CULTIVATE}")
 
     @filter.command(CMD_SY_STAGES, "岁云五阶")
     async def handle_sy_stages(self, event: AstrMessageEvent):
@@ -19721,6 +19785,15 @@ class ZhutianPlugin(Star):
         reg = await self._dz_registry()
         async for r in self._smart(event, dz_mod.panel(doc, reg), "道伤·证道"):
             yield r
+        # W34 铺开：无参下一步按钮（冲关 / 证道成帝）
+        row = _uk_row([
+            _uk_btn("dz.charge", "⚡ 冲关", uid=doc.uid, style="primary"),
+            _uk_btn("dz.prove", "👑 证道成帝", uid=doc.uid),
+        ], fallback=f"{CMD_DZ_CHARGE} / {CMD_DZ_PROVE}", timeout=600)
+        res = self._kb(event, "【证道·下一步】", row)
+        if res is not None and _uk_avail():
+            res.use_markdown(True)
+        yield res if res is not None else event.plain_result(f"下一步：{CMD_DZ_CHARGE} / {CMD_DZ_PROVE}")
 
     @filter.command(CMD_DZ_RULES, "道伤规则")
     async def handle_dz_rules(self, event: AstrMessageEvent):
@@ -20185,6 +20258,15 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         yield event.plain_result(ow_mod.panel(doc))
+        # W34 铺开：无参下一步按钮（参悟节点 / 突破段位）
+        row = _uk_row([
+            _uk_btn("ow.attempt", "🧘 参悟节点", uid=doc.uid, style="primary"),
+            _uk_btn("ow.break", "⚡ 突破段位", uid=doc.uid),
+        ], fallback=f"{CMD_WD_ATTEMPT} / {CMD_OW_BREAK}", timeout=600)
+        res = self._kb(event, "【自身之道·下一步】", row)
+        if res is not None and _uk_avail():
+            res.use_markdown(True)
+        yield res if res is not None else event.plain_result(f"下一步：{CMD_WD_ATTEMPT} / {CMD_OW_BREAK}")
 
     # ------------------------------------------------ W12-F1/F2：体质进阶
 
@@ -20737,6 +20819,20 @@ class ZhutianPlugin(Star):
         async with self.db.transaction():
             await self.db.save_player(doc.model_dump())
         yield event.plain_result(msg)
+        # W34 铺开：开局职业按钮（空参列用法时）与剧情选项按钮（开局成功后）
+        if ok:
+            row = _uk_row([_uk_btn("rs.choose", f"剧情选择 {i}", a1=i, uid=doc.uid,
+                                   style="primary") for i in (1, 2, 3)],
+                          fallback=f"{CMD_RS_CHOOSE} 1-3", timeout=1800)
+        else:
+            jobs = ("老兵", "学生", "医生", "黑客")
+            row = _uk_row([_uk_btn("rs.start", f"▶ {j}", a1=j, uid=doc.uid)
+                           for j in jobs],
+                          fallback=f"{CMD_RS_START} 老兵/学生/医生/黑客", timeout=600)
+        res = self._kb(event, "【无尽轮回·抉择】点击选择（或回复指令）：", row)
+        if res is not None and _uk_avail():
+            res.use_markdown(True)
+        yield res if res is not None else event.plain_result("（回复指令完成抉择）")
 
     @filter.command(CMD_RS_CHOOSE, "轮回选择 1~3")
     async def handle_rs_choose(self, event: AstrMessageEvent, arg: str = ""):
@@ -20755,6 +20851,15 @@ class ZhutianPlugin(Star):
         async with self.db.transaction():
             await self.db.save_player(doc.model_dump())
         yield event.plain_result(msg)
+        if ok:
+            # W34 铺开：每幕选项按钮（下一幕继续 1-3）
+            row = _uk_row([_uk_btn("rs.choose", f"剧情选择 {i}", a1=i, uid=doc.uid,
+                                   style="primary") for i in (1, 2, 3)],
+                          fallback=f"{CMD_RS_CHOOSE} 1-3", timeout=1800)
+            res = self._kb(event, "【无尽轮回·下一幕】点击选择（或回复指令）：", row)
+            if res is not None and _uk_avail():
+                res.use_markdown(True)
+            yield res if res is not None else event.plain_result("（回复指令完成抉择）")
 
     @filter.command(CMD_RS_QUIT, "退出无尽轮回：结算评价")
     async def handle_rs_quit(self, event: AstrMessageEvent):
@@ -21808,6 +21913,15 @@ class ZhutianPlugin(Star):
             return
         async for r in self._smart(event, sp_mod.panel(doc), "至尊之路"):
             yield r
+        # W34 铺开：无参下一步按钮（斩骨 / 至尊试炼）
+        row = _uk_row([
+            _uk_btn("sp.chop", "🔪 斩骨", uid=doc.uid, style="primary"),
+            _uk_btn("sp.trial", "⚡ 至尊试炼", uid=doc.uid),
+        ], fallback=f"{CMD_SP_CHOP} / {CMD_SP_TRIAL}", timeout=600)
+        res = self._kb(event, "【至尊之路·下一步】", row)
+        if res is not None and _uk_avail():
+            res.use_markdown(True)
+        yield res if res is not None else event.plain_result(f"下一步：{CMD_SP_CHOP} / {CMD_SP_TRIAL}")
 
     @filter.command(CMD_SP_RULES, "至尊规则")
     async def handle_sp_rules(self, event: AstrMessageEvent):
@@ -23117,6 +23231,15 @@ class ZhutianPlugin(Star):
                 lambda d, w, y, t, r, a, s: (True, ss_mod.status_text(w, y)
                                              + "\n" + ss_mod.ancestor_text(w), {}, [])):
             yield r
+        # W34 铺开：迎战按钮（公开玩法，不绑发起者）
+        row = _uk_row([
+            _uk_btn("ss.small", "🩸 迎战诡异小祭", uid="", style="primary"),
+            _uk_btn("ss.big", "💀 迎战诡异大祭", uid="", style="danger"),
+        ], fallback=f"{CMD_SS_FIGHT_SMALL} / {CMD_SS_FIGHT_BIG}", timeout=600)
+        res = self._kb(event, "【诡异祭礼·迎战】", row)
+        if res is not None and _uk_avail():
+            res.use_markdown(True)
+        yield res if res is not None else event.plain_result(f"迎战：{CMD_SS_FIGHT_SMALL} / {CMD_SS_FIGHT_BIG}")
 
     @filter.command(CMD_SS_SLASH, "天意一刀状态")
     async def handle_ss_slash(self, event: AstrMessageEvent):
@@ -23738,6 +23861,15 @@ class ZhutianPlugin(Star):
         async for r in self._dr_dispatch(event, "若陀龙王状态",
                 lambda d, w, t, r, c: (dr_mod.status_text(w, d, t), [])):
             yield r
+        # W34 铺开：无参下一步按钮（加入讨伐 / 讨伐龙王，公开玩法）
+        row = _uk_row([
+            _uk_btn("dr.join", "🐲 加入讨伐", uid="", style="primary"),
+            _uk_btn("dr.fight", "⚔️ 讨伐龙王", uid=""),
+        ], fallback=f"{CMD_DR_JOIN} / {CMD_DR_FIGHT}", timeout=600)
+        res = self._kb(event, "【若陀龙王·下一步】", row)
+        if res is not None and _uk_avail():
+            res.use_markdown(True)
+        yield res if res is not None else event.plain_result(f"下一步：{CMD_DR_JOIN} / {CMD_DR_FIGHT}")
 
     @filter.command(CMD_DR_RANK, "龙王榜：累计伤害前 20 与占比")
     async def handle_dr_rank(self, event: AstrMessageEvent):
@@ -25801,7 +25933,8 @@ class ZhutianPlugin(Star):
         public = {"hb.grab", "xg.status", "tb.join", "tr.join", "tb.info",
                   "page.cmd", "pr.yes", "pr.no", "tb.leave",
                   "endless.meta_no", "faction.quit_no", "sublime.no",
-                  "xgd.cancel", "mg.keep", "pup.keep"}          # 公开/无参按钮
+                  "xgd.cancel", "mg.keep", "pup.keep",
+                  "ss.small", "ss.big", "dr.join", "dr.fight", "ip.rank"}
         if uid and act not in public and uid != me:
             yield event.plain_result("该按钮只属于发起者，请自行进入对应玩法操作。")
             return
@@ -25856,6 +25989,33 @@ class ZhutianPlugin(Star):
             "tj.slay": ("handle_tj_slay", str(a1 or "")),
             "sjm.sub": ("handle_sjm_sub", str(a1 or "")),
             "endless.ckpt": ("handle_endless_checkpoint", str(a1 or "")),
+            # W34 铺开：面板无参下一步按钮（A 类收尾）
+            "sp.chop": ("handle_sp_chop", ""),
+            "sp.trial": ("handle_sp_trial", ""),
+            "sy.seek": ("handle_sy_seek", ""),
+            "sy.cultivate": ("handle_sy_cultivate", ""),
+            "fl.sense": ("handle_fl_sense", ""),
+            "fl.evolve": ("handle_fl_evolve", ""),
+            "ow.attempt": ("handle_wd_attempt", ""),
+            "ow.break": ("handle_ow_break", ""),
+            "dz.charge": ("handle_dz_charge", ""),
+            "dz.prove": ("handle_dz_prove", ""),
+            "ip.sortie": ("handle_ip_sortie", ""),
+            "ip.rank": ("handle_ip_rank", ""),
+            "ss.small": ("handle_ss_fight_small", ""),
+            "ss.big": ("handle_ss_fight_big", ""),
+            "dr.join": ("handle_dr_join", ""),
+            "dr.fight": ("handle_dr_fight", ""),
+            "pup.summon": ("handle_pup_summon", ""),
+            "pup.repair": ("handle_pup_repair", ""),
+            "ys.consolidate": ("handle_ys_consolidate", ""),
+            "ys.enter": ("handle_ys_enter", ""),
+            "iw.upgrade": ("handle_iw_upgrade", ""),
+            "iw.put_all": ("handle_iw_put_all", ""),
+            "mem.advance": ("handle_mem_advance", ""),
+            "mem.sim": ("handle_mem_sim", ""),
+            "rs.start": ("handle_rs_start", str(a1 or "")),
+            "rs.choose": ("handle_rs_choose", str(a1 or "")),
         }
         if act not in routes:
             yield event.plain_result("该按钮已失效（版本更新或会话过期），请直接发送对应指令。")
@@ -25868,7 +26028,8 @@ class ZhutianPlugin(Star):
             if act in ("tj.accept", "tj.reject", "xb.t1", "xb.t2", "xb.t3",
                        "xb.t4", "xb.vow", "hb.grab", "pup.destroy", "tb.join",
                        "tr.join", "page.cmd", "jyh.c1", "jyh.c2", "jyh.c3",
-                       "tj.soul", "tj.slay", "sjm.sub", "endless.ckpt"):
+                       "tj.soul", "tj.slay", "sjm.sub", "endless.ckpt",
+                       "rs.start", "rs.choose"):
                 async for r in handler(event, str(a1 or "")):
                     got = True
                     yield r

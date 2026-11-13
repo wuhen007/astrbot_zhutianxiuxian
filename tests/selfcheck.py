@@ -10119,6 +10119,35 @@ async def main():
     assert any(g["group"] == "剑云海机缘" for g in help310f)
     print("W33 原版 MD 模板对齐 ok")
 
+    # ========================================================= W34：时代推送 + 按钮全铺开（A 类收尾）
+    src340 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    # 时代变化主动推送（对齐原版 EraChangeTask broadcastNewEra + 每千年播报）
+    from core import era as era340
+    _, ix340 = era340.advance_years(era340.ensure({"years_total": 9999}, 1_800_000_000), 1000)
+    assert "天地巨变！修仙世界已从【神话时代】进入【太古时代】！" in era340.push_text(ix340)
+    assert "▰▰▱▱▱▱▱▱▱▱ 20%" in era340.progress_text(era340.state_of(2000), 1000)
+    assert "_era_push_loop" in src340 and "_era_broadcast(" in src340
+    assert "era_mod.push_text(" in src340 and "era_mod.progress_text(" in src340
+    # W34 铺开：26 条新路由（至尊/岁云/花粉/己道/证道/帝关/大祭/龙王/人傀/元神/内景地/命途/轮回）
+    for act340 in ("sp.chop", "sp.trial", "sy.seek", "sy.cultivate", "fl.sense",
+                   "fl.evolve", "ow.attempt", "ow.break", "dz.charge", "dz.prove",
+                   "ip.sortie", "ip.rank", "ss.small", "ss.big", "dr.join",
+                   "dr.fight", "pup.summon", "pup.repair", "ys.consolidate",
+                   "ys.enter", "iw.upgrade", "iw.put_all", "mem.advance",
+                   "mem.sim", "rs.start", "rs.choose"):
+        assert f'"{act340}": (' in src340, f"W34 路由缺 {act340}"
+    # 按钮挂载点（面板正文后追加按钮消息）
+    for mark340 in ("【至尊之路·下一步】", "【岁云·下一步】", "【花粉路·下一步】",
+                    "【自身之道·下一步】", "【证道·下一步】", "【帝关·下一步】",
+                    "【诡异祭礼·迎战】", "【若陀龙王·下一步】", "【人傀·下一步】",
+                    "【元神·下一步】", "【内景地·下一步】", "【记忆命途·下一步】",
+                    "【无尽轮回·抉择】"):
+        assert mark340 in src340, f"W34 按钮缺 {mark340}"
+    # 公开玩法按钮（不绑发起者）
+    for pub340 in ("ss.small", "ss.big", "dr.join", "dr.fight", "ip.rank"):
+        assert f'"{pub340}"' in src340.split("routes = {")[0], f"W34 公开按钮缺 {pub340}"
+    print("W34 时代推送+按钮铺开A类 ok")
+
     await db.close()
     print("ALL M12 CHECKS PASSED")
 
