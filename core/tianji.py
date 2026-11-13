@@ -35,6 +35,22 @@ WHEEL_MATERIALS = ("旧神印章", "仙王残魂", "轮回印")
 WHEEL_ITEM = "命运仙轮"
 FULOU_PASS = "天机符楼邀请函"
 
+# 原版 yijishop2（面板禁制）原文
+FULOU_GATE_TEXT = "\n".join([
+    "【天机符楼·禁制】",
+    "门前浮现金色符文：",
+    "「非持函者不得窥视楼内天机！」",
+    "",
+    "获取方式：",
+    "天机阁购买（#天机阁兑换 天机符楼邀请函）",
+])
+# 原版 daibiduihuan2（兑换拦截）原文
+FULOU_EXCHANGE_GATE_TEXT = "\n".join([
+    "天机符楼守卫拦住了你",
+    "「此地乃天机重地，需持邀请函方可入内！」",
+    "请先获取【天机符楼邀请函】后再尝试兑换",
+])
+
 
 def _shop(name: str) -> list[dict]:
     if name not in _CACHE:

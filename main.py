@@ -7912,104 +7912,6 @@ class ZhutianPlugin(Star):
         await self.db.save_player(d.model_dump())
         yield event.plain_result("已闭关谢客，双修请求将被婉拒。")
 
-    # ---- 天机阁 / 天机符楼（对齐原版 tianjishop.js） ----
-
-    async def _tianji_view(self, event: AstrMessageEvent, table: str, title: str, cmd: str):
-        goods = [e for e in (self.content.table(table) or []) if isinstance(e, dict) and e.get("name")]
-        if not goods:
-            yield event.plain_result("天机阁空空如也。")
-            return
-        groups = [{"group": f"{g['name']}（{g.get('daibi')}×{g.get('出售价')}）",
-                   "list": [{"title": f"{g.get('class')}｜{g.get('稀有度', '')}",
-                             "desc": f"{g.get('desc', '')}｜兑换：{cmd} {g['name']}"}]}
-                  for g in goods[:30]]
-        data = {"title": title, "groups": groups}
-        if self.render_on:
-            png = await render.render_panel("catalog", data, self.panel_dir)
-            if png:
-                yield event.image_result(str(png))
-                return
-        lines = [f"【{title}】"]
-        for g in goods[:30]:
-            lines.append(f"· {g['name']}（{g.get('daibi')}×{g.get('出售价')}）")
-        async for _r in self._smart(event, "\n".join(lines)):
-            yield _r
-    @filter.command("#天机阁", "天机阁商店")
-    async def handle_tianji_shop(self, event: AstrMessageEvent):
-        if not self._allowed(event):
-            return
-        async for r in self._tianji_view(event, "item/商店/天机阁", "诸天修仙 · 天机阁", "#天机阁兑换"):
-            yield r
-
-    async def _tianji_buy(self, event: AstrMessageEvent, table: str, thing_name: str, qty: int,
-                          invite_need: bool):
-        doc, err = await self._require_player(event)
-        if err:
-            yield event.plain_result(err)
-            return
-        if invite_need:
-            inv0 = await self.db.get_inventory(doc.uid)
-            if int(inv0.get("天机符楼邀请函", 0)) < 1:
-                yield event.plain_result(
-                    "【天机符楼·禁制】\n「非持函者不得窥视楼内天机！」\n获取方式：天机阁兑换 天机符楼邀请函。")
-                return
-        goods = [e for e in (self.content.table(table) or []) if isinstance(e, dict) and e.get("name")]
-        g = next((x for x in goods if x.get("name") == thing_name), None)
-        if not g:
-            yield event.plain_result(f"此处并无「{thing_name}」。")
-            return
-        currency = str(g.get("daibi", "灵石"))
-        unit = int(g.get("出售价", 0) or 0)
-        total = unit * qty
-        inv = await self.db.get_inventory(doc.uid)
-        if int(inv.get(currency, 0)) < total:
-            yield event.plain_result(f"{currency}不足：需 {total}，当前 {int(inv.get(currency, 0))}。")
-            return
-        d = doc.model_copy(deep=True)
-        async with self.db.transaction():
-            await self.db.save_player(d.model_dump())
-            await self.db.remove_item(doc.uid, currency, total)
-            await self.db.add_items(doc.uid, {thing_name: qty})
-        yield event.plain_result(f"兑换成功！获得[{thing_name}]×{qty}（{currency}×{total}）。")
-
-    @filter.command("#天机阁兑换", "天机阁兑换")
-    async def handle_tianji_buy(self, event: AstrMessageEvent, thing_name: str = "", qty: int = 1):
-        if not self._allowed(event):
-            return
-        thing = (thing_name or "").strip()
-        if not thing:
-            yield event.plain_result("格式：#天机阁兑换 物品 数量")
-            return
-        async for r in self._tianji_buy(event, "item/商店/天机阁", thing, max(1, int(qty or 1)), False):
-            yield r
-
-    @filter.command("#天机符楼", "天机符楼商店")
-    async def handle_tianji_fu(self, event: AstrMessageEvent):
-        if not self._allowed(event):
-            return
-        doc, err = await self._require_player(event)
-        if err:
-            yield event.plain_result(err)
-            return
-        inv = await self.db.get_inventory(doc.uid)
-        if int(inv.get("天机符楼邀请函", 0)) < 1:
-            yield event.plain_result(
-                "【天机符楼·禁制】\n「非持函者不得窥视楼内天机！」\n获取方式：天机阁兑换 天机符楼邀请函。")
-            return
-        async for r in self._tianji_view(event, "item/商店/天机阁符楼", "诸天修仙 · 天机符楼", "#天机符楼兑换"):
-            yield r
-
-    @filter.command("#天机符楼兑换", "天机符楼兑换")
-    async def handle_tianji_fu_buy(self, event: AstrMessageEvent, thing_name: str = "", qty: int = 1):
-        if not self._allowed(event):
-            return
-        thing = (thing_name or "").strip()
-        if not thing:
-            yield event.plain_result("格式：#天机符楼兑换 物品 数量")
-            return
-        async for r in self._tianji_buy(event, "item/商店/天机阁符楼", thing, max(1, int(qty or 1)), True):
-            yield r
-
     # ---- 诸天镜主线（对齐原版 zhutiantouying/ZhutianMirror） ----
 
     def _zt_save(self, doc: PlayerDoc, zt: dict) -> PlayerDoc:
@@ -25623,12 +25525,24 @@ class ZhutianPlugin(Star):
     async def handle_tjfl_panel(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        if int((inv or {}).get(tjge_mod.FULOU_PASS, 0) or 0) < 1:
+            yield event.plain_result(tjge_mod.FULOU_GATE_TEXT)
+            return
         async with self.db.calamity_lock:
             cal = await self.db.get_calamity()
             world = xgm_mod.world_state(cal)
-            yield event.plain_result(tjge_mod.fulou_text(world))
+            text = tjge_mod.fulou_text(world)
             cal["xiangu"] = world
             await self.db.save_calamity(cal)
+        res = self._kb(event, text)
+        if res is not None and _uk_avail():
+            res.use_markdown(True)
+        yield res if res is not None else event.plain_result(text)
 
     @filter.command(CMD_TJFL_EXCHANGE, "天机符楼兑换 物品*数量")
     async def handle_tjfl_exchange(self, event: AstrMessageEvent, arg: str = ""):
@@ -25645,10 +25559,8 @@ class ZhutianPlugin(Star):
             return
         inv = await self.db.get_inventory(doc.uid)
         if int((inv or {}).get(tjge_mod.FULOU_PASS, 0) or 0) < 1:
-            yield event.plain_result("【天机符楼·禁制】「非持函者不得窥视楼内天机！」\n"
-                                     "获取方式：#天机阁兑换 天机符楼邀请函")
+            yield event.plain_result(tjge_mod.FULOU_EXCHANGE_GATE_TEXT)
             return
-        now_ms = time.time() * 1000
         async with self.db.calamity_lock:
             cal = await self.db.get_calamity()
             world = xgm_mod.world_state(cal)

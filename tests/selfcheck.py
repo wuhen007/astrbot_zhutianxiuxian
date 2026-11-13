@@ -9997,6 +9997,14 @@ async def main():
     assert miss300 == [], f"漏注册：{miss300}"
     assert 'regex(r"^#选择轮回命签' in src300
     assert "tjge_mod.exchange_fulou(" in src300 and "mingge.batch_reroll(" in src300
+    # W34 去重：旧 handle_tianji_* 实现已删（与 tjge_mod 版指令冲突），仅保留 W29 版
+    assert "handle_tianji_buy" not in src300 and "handle_tianji_fu_buy" not in src300
+    assert "_tianji_view" not in src300 and "_tianji_buy" not in src300
+    # 符楼邀请函禁制门（面板+兑换，对齐原版 yijishop2/daibiduihuan2 原文）
+    assert "tjge_mod.FULOU_GATE_TEXT" in src300
+    assert "tjge_mod.FULOU_EXCHANGE_GATE_TEXT" in src300
+    assert "门前浮现金色符文" in tj300.FULOU_GATE_TEXT
+    assert "天机符楼守卫拦住了你" in tj300.FULOU_EXCHANGE_GATE_TEXT
     help300b = _json60.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
     assert any(g["group"] == "天机阁与轮回命签" for g in help300b)
     assert "天机阁与命签" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
