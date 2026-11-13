@@ -10187,9 +10187,11 @@ async def main():
     assert "chr(10).join" not in _sm_help340, "不再从 _smart 输出收集正文"
     assert "render: bool = True" in src340.split("async def _sm_dispatch")[1][:200], "render 开关"
     assert "self._sm_dispatch(event, sub, render=False)" in src340, "子页按钮走纯文本"
-    # W34 批五：kb_result 无按钮行也走 md_text（QQ 原生 MD 单 \n 不换行 → 排版事故）
+    # W34 批五：kb_result 无按钮行走原生文本（纯 markdown 无键盘时 \n 不换行）
     _uk340 = open(PLUGIN / "ui_kit.py", encoding="utf-8").read()
-    assert "if AVAILABLE and (rows or markdown):" in _uk340, "kb_result 无行也走 MD"
+    assert "if AVAILABLE and rows:" in _uk340, "kb_result 有行才走 MD"
+    assert "无按钮行走原生文本" in _uk340, "kb_result 无行回退 plain"
+    assert "res.use_markdown(True)" not in src340.split("async def _sm_dispatch")[1][:900], "子页不标 MD"
     print("W34 时代推送+按钮铺开A类 ok")
 
     await db.close()

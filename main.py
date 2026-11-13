@@ -24153,10 +24153,9 @@ class ZhutianPlugin(Star):
             if op[0] == "items":
                 await self.db.add_items(doc.uid, {k: int(v) for k, v in op[1].items()})
         if not render:
-            # W34-fix：按钮回调回复走纯文本 MD（QQ 交互事件的图片被动回复会被拒）
+            # W34-fix：按钮回调回复走原生文本（msg_type=0 换行自带；纯 markdown
+            # 无键盘时行尾双空格不生效，且交互事件的图片回复会被 QQ 拒绝）
             res = self._kb(event, msg)
-            if res is not None and _uk_avail():
-                res.use_markdown(True)
             yield res if res is not None else event.plain_result(msg)
             return
         async for r in self._smart(event, msg, "剑与魔法"):
