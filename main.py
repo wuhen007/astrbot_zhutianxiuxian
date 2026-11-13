@@ -25566,7 +25566,7 @@ class ZhutianPlugin(Star):
 
     # ================================================================ W29 深度核查补漏 II：天机阁代币商店 + 轮回命签批量重抽
 
-    @filter.command(CMD_TJGE_PANEL, "天机阁（仙兽玉/命运仙轮代币商店）")
+    @filter.regex(r"^#天机阁$")
     async def handle_tjge_panel(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
@@ -25619,7 +25619,7 @@ class ZhutianPlugin(Star):
                         await self.db.remove_item(doc.uid, n, -q)
         yield event.plain_result(msg)
 
-    @filter.command(CMD_TJFL_PANEL, "天机符楼（邀请函准入·全服日限购）")
+    @filter.regex(r"^#天机符楼$")
     async def handle_tjfl_panel(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return

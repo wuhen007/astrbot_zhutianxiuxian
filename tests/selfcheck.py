@@ -9990,7 +9990,10 @@ async def main():
     # CMD_MG_CHOOSE 带 *N 后缀参数，走 regex 注册（同 #借助道种 点燃神火）
     miss300 = [c for c in names300w
                if (f"@filter.command({c}" not in src300
-                   and not (c == "CMD_MG_CHOOSE" and 'regex(r"^#选择轮回命签' in src300))]
+                   and not (c == "CMD_MG_CHOOSE" and 'regex(r"^#选择轮回命签' in src300)
+                   and not (c in ("CMD_TJGE_PANEL", "CMD_TJFL_PANEL")
+                            and 'regex(r"^#天机阁$' in src300
+                            and 'regex(r"^#天机符楼' in src300))]
     assert miss300 == [], f"漏注册：{miss300}"
     assert 'regex(r"^#选择轮回命签' in src300
     assert "tjge_mod.exchange_fulou(" in src300 and "mingge.batch_reroll(" in src300
