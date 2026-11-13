@@ -13845,8 +13845,8 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         # W33：原版 shili L184 两步确认——首次只发确认面板
-        f_st = faction.state_of(doc)
-        fkey = str(f_st.get("faction") or "")
+        _fs = await self._faction_state()
+        fkey = faction.faction_of(_fs, doc.uid) or ""
         if not fkey:
             yield event.plain_result("你尚未加入任何势力。")
             return
@@ -23973,7 +23973,7 @@ class ZhutianPlugin(Star):
                       _uk_btn("sjm.sub", "📊我的状态", a1="状态", style="primary"),
                       _uk_btn("sjm.sub", "🗺地图", a1="地图", style="primary")],
                      fallback="#剑与魔法 世界观 / 状态 / 地图", timeout=3600)
-        body = NL.join(str(getattr(p, "chain", []) and
+        body = chr(10).join(str(getattr(p, "chain", []) and
                            (p.chain[0].text if p.chain and hasattr(p.chain[0], "text")
                             else "") or "") for p in help_texts)
         res = self._kb(event, body or "剑与魔法 · 帮助：", r_)
