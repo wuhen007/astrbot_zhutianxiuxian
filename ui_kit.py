@@ -99,13 +99,15 @@ def row(buttons: list[Any], fallback: str | None = None,
 def kb_result(event: Any, text: str, *rows: Any, markdown: bool = True) -> Any | None:
     """构造「短文本 + 键盘」消息结果；组件不可用时退化为纯文本结果。"""
     rows = [r for r in rows if r is not None]
-    if AVAILABLE and rows:
+    if AVAILABLE and (rows or markdown):
+        # W34-fix：无按钮行也走 MD（md_text 行尾双空格）——QQ 原生 MD 单 \n 不换行，
+        # 纯文本被调用方标 MD 后会把多行面板压成一段（剑与魔法子页排版事故）。
         chain = [Plain(md_text(text)), *rows]
         res = event.chain_result(chain)
         if markdown:
             res.use_markdown(True)
         return res
-    # 降级：拼接 fallback 文本
+    # 降级：拼接 fallback 文本（原生纯文本 \n 自带换行，不做 md_text）
     parts = [text]
     for r in rows:
         if r is not None and getattr(r, "fallback_text", None):
