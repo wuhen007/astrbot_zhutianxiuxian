@@ -180,7 +180,7 @@ def shenhuo_text(doc: Any, st: Mapping) -> str:
     return "\n".join(lines)
 
 
-def seed_detail_text(st: Mapping, cfg: Mapping | None = None) -> str:
+def seed_detail_text(doc: Any, st: Mapping, cfg: Mapping | None = None) -> str:
     """#查看道种 分品质详表（W27 增强版）。"""
     seeds = usable_seeds(doc, st, cfg)
     if not seeds:

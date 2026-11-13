@@ -352,9 +352,13 @@ def get_other_shore_neighbors(world: dict[str, Any], coordinate) -> list[dict[st
     require_star(world, origin)
     by_id = {item["id"]: item for item in world.get("stars", [])}
     return [
-        by_id.get(other_shore_coordinate_id(origin["q"] + dq, origin["r"] + dr))
-        for dq, dr in OTHER_SHORE_HEX_DIRECTIONS
-    ].filter(Boolean)
+        _hit
+        for _hit in (
+            by_id.get(other_shore_coordinate_id(origin["q"] + dq, origin["r"] + dr))
+            for dq, dr in OTHER_SHORE_HEX_DIRECTIONS
+        )
+        if _hit is not None
+    ]
 
 
 def find_other_shore_shortest_path(world: dict[str, Any], from_, to) -> list[str] | None:

@@ -2058,7 +2058,7 @@ def move(doc: Any, st: dict, key: str, steps: int, cfg: Mapping,
         msg = _cell_void(doc, st, map_st, nxt, rng)
         events["hp_loss"] = max(events["hp_loss"], 0)
     elif cell == CELL_UNIQUE:
-        msg = _cell_unique(doc, st, map_st, nxt, claims, rng, now)
+        msg = _cell_unique(doc, st, map_st, nxt, claims, rng, now, battle)
     elif cell == CELL_EMPTY:
         if rng.random() < 0.2:
             ambient = (f"{getattr(doc, 'name', '')}缓步前行，四周一片寂静...",
@@ -2295,7 +2295,8 @@ def _cell_void(doc: Any, st: dict, map_st: dict, pos: Mapping,
 
 
 def _cell_unique(doc: Any, st: dict, map_st: dict, pos: Mapping,
-                 claims: Mapping | None, rng: Callable[[], float], now: float) -> str:
+                 claims: Mapping | None, rng: Callable[[], float], now: float,
+                 battle: Callable | None = None) -> str:
     x, y = pos["x"], pos["y"]
     map_st["revealed"][y][x] = True
     found_name = found = None

@@ -24,6 +24,8 @@ import time
 from collections.abc import Mapping
 from typing import Any, Mapping
 
+from .player import PlayerDoc
+
 PERSONAL_CD_SECONDS = 90 * 60
 REVIVE_SECONDS = 18 * 3600
 ESCAPE_SECONDS = 6 * 3600

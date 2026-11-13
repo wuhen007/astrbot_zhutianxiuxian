@@ -14,7 +14,7 @@ shortcut：速度/生命本源/心神/悟道/采集炼丹等其余消费点仍�
 from __future__ import annotations
 
 import random
-from typing import Any
+from typing import Any, Mapping
 
 from .player import PlayerDoc
 

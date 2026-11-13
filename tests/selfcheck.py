@@ -10192,6 +10192,16 @@ async def main():
     assert "if AVAILABLE and rows:" in _uk340, "kb_result 有行才走 MD"
     assert "无按钮行走原生文本" in _uk340, "kb_result 无行回退 plain"
     assert "res.use_markdown(True)" not in src340.split("async def _sm_dispatch")[1][:900], "子页不标 MD"
+    # W34 全量审计（pyflakes 联动）：NameError 类修复 + 路由可调用 + 交互事件图片守卫
+    assert "other_shore_world, relic as relic_mod" in src340, "other_shore_world 已导入"
+    assert "async def handle_endless_meta_no" in src340, "保留道碑 handler"
+    assert '"pup.keep": ("handle_page_cmd"' in src340 and '"tb.info": ("handle_page_cmd"' in src340, "act 名误作方法名"
+    assert "import json\nimport random" in src340, "顶层 json"
+    assert "event.get_button_interaction():" in src340.split("async def _smart")[1][:800], "_smart 交互守卫"
+    assert "def seed_detail_text(doc: Any" in open(PLUGIN / "core/xiangu_dao.py", encoding="utf-8").read(), "seed_detail_text +doc"
+    assert ".filter(Boolean)" not in open(PLUGIN / "core/other_shore_world.py", encoding="utf-8").read(), "JS 残留清除"
+    assert "int(inv[gname])" in src340, "inv[gname]"
+    assert 'str(self._msg_of(event) or "").strip()' in src340.split("async def handle_page_cmd")[1][:400], "page_cmd 回退"
     print("W34 时代推送+按钮铺开A类 ok")
 
     await db.close()

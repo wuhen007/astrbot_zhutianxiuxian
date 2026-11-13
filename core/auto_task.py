@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import random
 import time
-from typing import Any
+from typing import Any, Mapping
 
 from .player import PlayerDoc
 

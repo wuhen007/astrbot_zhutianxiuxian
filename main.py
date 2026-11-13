@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import random
 import re
 import time
@@ -14,7 +15,7 @@ from astrbot.api.star import Context, Star, StarTools, register
 from .ui_kit import btn as _uk_btn, row as _uk_row, kb_result as _uk_kb, own as _uk_own, data_ok as _uk_data, encode_size_ok as _uk_size, available as _uk_avail
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_story as rs_mod, plane_events as pe_mod, games_mini as gm_mod, xtzb_birth as xb_mod, auto_task as at_mod, easter_eggs as eg_mod, plane_relay as pr_mod, sect_extra as se_mod, assistant as as_mod, bounty as bt_mod, xiangu as xgm_mod, xiangu_npc as xn_mod, xiangu_camp as xc_mod, xiangu_dao as xdd_mod, xiangu_baodi as xbd_mod, academy as acd_mod, social as soc_mod, abilities as ab_mod, tianji as tjge_mod, sellall as sa_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, other_shore_world, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_story as rs_mod, plane_events as pe_mod, games_mini as gm_mod, xtzb_birth as xb_mod, auto_task as at_mod, easter_eggs as eg_mod, plane_relay as pr_mod, sect_extra as se_mod, assistant as as_mod, bounty as bt_mod, xiangu as xgm_mod, xiangu_npc as xn_mod, xiangu_camp as xc_mod, xiangu_dao as xdd_mod, xiangu_baodi as xbd_mod, academy as acd_mod, social as soc_mod, abilities as ab_mod, tianji as tjge_mod, sellall as sa_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
@@ -1578,6 +1579,11 @@ class ZhutianPlugin(Star):
     async def _smart(self, event: AstrMessageEvent, text: str, title: str = "诸天修仙"):
         """智能回复：长文本/多行面板自动转通用面板图，渲染失败回退原文。"""
         if not self._is_panel(text):
+            yield event.plain_result(text)
+            return
+        # W34 审计：按钮回调事件的图片被动回复会被 QQ 拒绝（sjm.sub 事故），
+        # 交互事件一律降级为文本——所有经 _smart 的按钮路由（sp./sy./fl./dz./bm.…）自动受益。
+        if event.get_button_interaction():
             yield event.plain_result(text)
             return
         if self.render_on:
@@ -7964,7 +7970,7 @@ class ZhutianPlugin(Star):
         pair = {root_a, root_b}
         if len(pair) == 2:
             for names, chance, fused_name, flavor in FUSION_RULES:
-                if pair == names and _random.random() < chance:
+                if pair == names and random.random() < chance:
                     fused = next((e for e in self.linggen_table if e.get("name") == fused_name), None)
                     if fused:
                         snap = linggen.snapshot(fused)
@@ -8883,7 +8889,7 @@ class ZhutianPlugin(Star):
         used_gold: dict[str, int] = {}
         left = sacrifice
         for gname in sorted([g for g in dibing.GOLD_RARITY if inv.get(g)], key=lambda g: -int(inv[g])):
-            take = min(left, int(inv[g]))
+            take = min(left, int(inv[gname]))
             if take <= 0:
                 continue
             used_gold[gname] = take
@@ -11972,6 +11978,10 @@ class ZhutianPlugin(Star):
                          "> 将清空全部节点与流派，仅返还已消耗道痕的 80%。", r_)
         if res:
             yield res
+
+    async def handle_endless_meta_no(self, event: AstrMessageEvent):
+        """W34 审计补：保留道碑按钮（路由此前指向不存在的 handler，点击无反应）。"""
+        yield event.plain_result("已保留万劫道碑，未做任何改动。")
 
     @filter.command(CMD_ENDLESS_META_RESET_YES, "确认重置万劫道碑")
     async def handle_endless_meta_reset_yes(self, event: AstrMessageEvent):
@@ -24612,7 +24622,7 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         st = xgm_mod.state_of(doc)
-        yield event.plain_result(xdd_mod.seed_detail_text(st, xgm_mod.load_config()))
+        yield event.plain_result(xdd_mod.seed_detail_text(doc, st, xgm_mod.load_config()))
 
     @filter.command(CMD_XGM_LEAVE, "离开仙古秘境（须核心，10-60s 读条）")
     async def handle_xgm_leave(self, event: AstrMessageEvent):
@@ -24661,19 +24671,20 @@ class ZhutianPlugin(Star):
                 else "【仙古花蕾·撤离通道开启】")
         body = ("燃烧秘境印记，强行锚定外界坐标！" if mode == "emergency"
                 else "立于仙古花蕾核心，引动归途法则！")
+        _dur = xgm_mod.evac_duration(mode, bag["loot_units"])
         yield event.plain_result("\n".join([
             lead,
             f"{doc.name or '修士'}{body}",
             "",
             f"秘境背包物品：{bag['item_count']} 件｜道种：{bag['seed_count']} 枚｜"
             f"源石：{bag['source_stone']:,}",
-            f"撤离准备时间：{xgm_mod.evac_duration(mode, bag['loot_units'])} 秒",
+            f"撤离准备时间：{_dur} 秒",
             "",
             f"等待结束后再次发送 {cmd} 或 #确认撤离。",
             "移动、探索、主动交战或受到伤害都会中断撤离。"]))
         r_ = _uk_row([_uk_btn("xg.evac", "✅确认撤离", uid=doc.uid, style="success"),
                       _uk_btn("xg.status", "📊查看状态", uid=doc.uid)],
-                     fallback="#确认撤离 或 #秘境状态", timeout=(duration + 130))
+                     fallback="#确认撤离 或 #秘境状态", timeout=(_dur + 130))
         res = self._kb(event, "**撤离读条中**（完毕后点击确认，也可再次发送指令）：", r_)
         if res:
             yield res
@@ -25051,6 +25062,8 @@ class ZhutianPlugin(Star):
                 rival_doc = PlayerDoc(**rival_dict)
                 rival_st = xgm_mod.state_of(rival_doc)
                 # 双方战斗（玩家先手）
+                from .core.combat.loadout import build_fighter
+                from .core.combat import run_1v1
                 sa = self._stats(doc)
                 hp_a, _ = self._hp_pair(doc)
                 sb = self._stats(rival_doc)
@@ -25712,7 +25725,8 @@ class ZhutianPlugin(Star):
             yield event.plain_result(gate)
             return
         # W33：原版两步确认——首次只发确认面板
-        st["sublime_pending"] = True
+        doc.ext["sublime_pending"] = True
+        await self.db.save_player(doc.model_dump())
         r_ = _uk_row([_uk_btn("sublime.yes", "✅确认升华", uid=doc.uid, style="danger"),
                       _uk_btn("sublime.no", "取消", uid=doc.uid)],
                      fallback="回复 1 确认 / 0 取消", timeout=60)
@@ -25741,8 +25755,10 @@ class ZhutianPlugin(Star):
         yield event.plain_result(msg)
 
     async def handle_sublime_no(self, event: AstrMessageEvent):
-        st = xgm_mod.state_of(event and self._find_player_sync(event) or {})
-        st.pop("sublime_pending", None)
+        doc = await self._find_player(event)
+        if doc:
+            doc.ext.pop("sublime_pending", None)
+            await self.db.save_player(doc.model_dump())
         yield event.plain_result("已取消极尽升华。")
 
     @filter.command(CMD_EMP_TITLE, "自封帝号 帝号（证道成帝者）")
@@ -25948,7 +25964,7 @@ class ZhutianPlugin(Star):
                 await self.db.save_player(doc.model_dump())
                 await self.db.remove_item(doc.uid, mingge.EXTRACT_ITEM, count)
         # W33-fix：分布正文+候选按钮合并单条 MD（QQ 原生 MD 单 \n 不换行，kb_result 内 md_text 处理）
-        pend = st.get("mingge_pending") or {}
+        pend = doc.ext.get("mingge_pending") or {}
         cands = (pend.get("candidates") or [])[:5]
         if ok and cands:
             btns = [_uk_btn("mg.pick", f"{i}.{c.get('name')}", a1=i, uid=doc.uid)
@@ -26007,7 +26023,7 @@ class ZhutianPlugin(Star):
 
     async def handle_page_cmd(self, event: AstrMessageEvent, cmd: str = ""):
         """W33：通用指令按钮——把按钮 command 当作一次文本指令执行。"""
-        cmd = str(cmd or "").strip()
+        cmd = str(cmd or "").strip() or str(self._msg_of(event) or "").strip()
         if not cmd:
             return
         self._BTN_MSGS[id(event)] = cmd
@@ -26102,13 +26118,13 @@ class ZhutianPlugin(Star):
             "faction.quit_yes": ("handle_faction_quit_yes", ""),
             "faction.quit_no": ("handle_faction_quit_no", ""),
             "pup.destroy": ("handle_pup_destroy", "确认"),
-            "pup.keep": ("page.cmd", CMD_PUP_MY),
+            "pup.keep": ("handle_page_cmd", CMD_PUP_MY),
             "sublime.yes": ("handle_sublime_yes", ""),
             "sublime.no": ("handle_sublime_no", ""),
             "xgd.confirm": ("handle_xgd_confirm", ""),
             "xgd.cancel": ("handle_xgd_cancel", ""),
             "tb.join": ("handle_tb_join", str(a1 or "")),
-            "tb.info": ("page.cmd", CMD_TR_INFO),
+            "tb.info": ("handle_page_cmd", CMD_TR_INFO),
             "tb.start": ("handle_tb_start", ""),
             "tb.leave": ("handle_tb_leave", ""),
             "tr.join": ("handle_team_join", str(a1 or "")),
