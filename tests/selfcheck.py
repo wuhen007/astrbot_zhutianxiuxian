@@ -3516,6 +3516,20 @@ async def main():
     assert abs(st23["last_tick"] - (1000.0 + 4 * 3600)) < 1e-6   # 余下 1 小时不吞
     st23, info23 = era_mod23.tick(era_mod23.ensure({"years_total": 0}, 1000.0), 1000.0 + 60)
     assert info23["ticks"] == 0 and st23["years_total"] == 0
+    # W34 时代变化主动推送：push_text（broadcastNewEra 原文）+ progress_text（每千年播报）
+    _, ix23 = era_mod23.advance_years(era_mod23.ensure({"years_total": 9999}, 1_800_000_000), 1000)
+    pt23 = era_mod23.push_text(ix23)
+    assert "天地巨变！修仙世界已从【神话时代】进入【太古时代】！" in pt23
+    assert "纪元更迭" not in pt23 and "天道法则转变" in pt23      # 同纪元跨时代不加纪元行
+    _, ix23b = era_mod23.advance_years(era_mod23.ensure({"years_total": 49_999}, 1_800_000_000), 1000)
+    assert "纪元更迭！当前纪元：第2纪元" in era_mod23.push_text(ix23b)
+    assert era_mod23.push_text({"changed": False}) == ""
+    p7000 = era_mod23.progress_text(era_mod23.state_of(7000), 1000)
+    assert "时代自动推进 1000 年！" in p7000 and "年份: 7000/10000 年" in p7000
+    assert "当前纪元: 第1纪元" in p7000 and "▰▰▰▰▰▰▰▱▱▱ 70%" in p7000
+    src23 = open(PLUGIN / "main.py", encoding="utf-8").read()
+    assert "_era_push_loop" in src23 and "_era_broadcast(" in src23
+    assert "era_mod.push_text(" in src23 and "era_mod.progress_text(" in src23
     print("W7-2 ② rotation/epoch/lazy tick ok")
 
     # ③ 禁仙六封：封印拦截 + 跨时代（黄金大世）自动解封

@@ -324,3 +324,38 @@ def change_text(info: Mapping) -> str:
         "所有修士请适应新的天地法则。",
     ]
     return "\n".join(lines)
+
+
+def push_text(info: Mapping) -> str:
+    """时代变迁主动推送（对齐原版 EraChangeTask.broadcastNewEra 原文）。
+
+    原版：`天地巨变！修仙世界已从【旧】进入【新】！`；跨纪元时加一行
+    `纪元更迭！当前纪元：第N纪元`，再跟新时代 icon+desc 与应对提示。
+    """
+    old, new = info.get("old"), info.get("new")
+    if not info.get("changed") or not old or not new:
+        return ""
+    lines = [f"天地巨变！修仙世界已从【{old['name']}】进入【{new['name']}】！"]
+    if int(old["epoch"]) != int(new["epoch"]):
+        lines.append(f"纪元更迭！当前纪元：第{new['epoch']}纪元")
+    lines += [f"{new['icon']} {new['desc']}",
+              "天道法则转变，所有修士请做好应对准备！"]
+    return "\n".join(lines)
+
+
+def progress_text(row: Mapping, advanced_years: int) -> str:
+    """每千年进度播报（对齐原版 EraChangeTask 每千年通知原文，含 ▰▱ 进度条）。
+
+    进度条与百分比对齐 createProgressBar：filled = min(100, 年份//100) // 10。
+    """
+    years = max(0, min(ERA_YEARS, int(row.get("years", 0) or 0)))
+    progress = min(100, years // 100)
+    filled = min(10, progress // 10)
+    bar = "▰" * filled + "▱" * (10 - filled)
+    return "\n".join([
+        f"时代自动推进 {int(advanced_years)} 年！",
+        f"当前纪元: 第{int(row.get('epoch', 1) or 1)}纪元",
+        f"当前时代: {row.get('name', '')} {row.get('icon', '')}",
+        f"年份: {years}/{ERA_YEARS} 年",
+        f"进度: {bar} {progress}%",
+    ])

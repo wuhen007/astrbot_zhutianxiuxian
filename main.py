@@ -1413,6 +1413,9 @@ class ZhutianPlugin(Star):
             logger.warning(f"[zhutian] 超管世界状态载入失败：{exc}")
         self._reminder_task = asyncio.create_task(self._daily_reminder_loop())
         self._lingjie_task = asyncio.create_task(self._lingjie_loop())
+        self._era_push_task = asyncio.create_task(self._era_push_loop())
+        self._last_era_push_key = ""      # 上次广播过的时代身份键（epoch:index）
+        self._last_era_push_total = -1    # 上次广播进度时的世界总年数
         logger.info("[zhutian] M0 插件已加载。")
 
     async def terminate(self) -> None:
@@ -1422,8 +1425,64 @@ class ZhutianPlugin(Star):
         task = getattr(self, "_lingjie_task", None)
         if task:
             task.cancel()
+        task = getattr(self, "_era_push_task", None)
+        if task:
+            task.cancel()
         await self.db.close()
         await render.shutdown()
+
+    async def _era_broadcast(self, text: str) -> None:
+        """时代变化主动消息：向白名单群推送（对齐原版 Era.notifyGroups 广播）。"""
+        if not text:
+            return
+        from astrbot.api.event import MessageChain
+        from astrbot.api.message_components import Plain
+
+        platform_id = "大肥鱼"  # qq_official 平台实例 id
+        for gid in self.whitelist_groups:
+            try:
+                await self.context.send_message(
+                    f"{platform_id}:GroupMessage:{gid}",
+                    MessageChain(chain=[Plain(text)]),
+                )
+            except Exception as e:  # 单群失败不影响其它群（QQ 主动消息有额度限制）
+                logger.warning(f"[zhutian] 时代推送发送失败 {gid}: {e}")
+
+    async def _era_push_loop(self) -> None:
+        """后台监听世界历法：每 60s 懒推进一次，跨时代/跨纪元或满千年即推送（W34）。
+
+        对齐原版 EraChangeTask：每 tick（默认 2h/1000 年）发进度播报，跨时代发
+        broadcastNewEra 变迁推送；玩家指令触发的懒推进也在此兜底感知。
+        """
+        try:
+            while True:
+                await asyncio.sleep(60)
+                try:
+                    span, step = self._era_tick_args()
+                    raw = await self.db.get_era()
+                    st, info = era_mod.tick(raw, time.time(),
+                                            tick_seconds=span, years_per_tick=step)
+                    if info["ticks"]:
+                        await self.db.save_era(st)
+                    key = era_mod.era_key(st)
+                    changed_text = era_mod.push_text(info)
+                    crossed = (key != getattr(self, "_last_era_push_key", "") and self._last_era_push_key)
+                    if changed_text and (crossed or self._last_era_push_key == ""):
+                        await self._era_broadcast(changed_text)
+                    if key != getattr(self, "_last_era_push_key", ""):
+                        self._last_era_push_key = key
+                    # 每满一个 tick 年数（默认 1000 年）发一次进度播报（原版每千年通知）
+                    if (self._val("ERA_PROGRESS_PUSH", 1) and info["ticks"]
+                            and st["years_total"] - self._last_era_push_total >= step):
+                        self._last_era_push_total = st["years_total"]
+                        await self._era_broadcast(
+                            era_mod.progress_text(info["new"], info["years"]))
+                    if self._last_era_push_total < 0:
+                        self._last_era_push_total = st["years_total"]
+                except Exception as exc:
+                    logger.warning(f"[zhutian] 时代推送轮询异常：{exc}")
+        except asyncio.CancelledError:
+            pass
 
     async def _daily_reminder_loop(self) -> None:
         """每日 00:05（上海时区）向白名单群推送日常刷新提醒（对齐原版 AutoDailyTask 时点）。"""
@@ -13011,6 +13070,8 @@ class ZhutianPlugin(Star):
         # 世界历法同步走一千年（可能跨时代）：灾厄与天地同频
         wst, winfo = era_mod.advance_years(await self._era_state(), 1_000)
         await self.db.save_era(wst)
+        if winfo["changed"]:
+            await self._era_broadcast(era_mod.push_text(winfo))
         yield event.plain_result(
             f"【纪元轮转】第 {res['index']} 纪元（第 {res['years']} 年）降临。\n"
             f"绝灵压制加深至 {int(res['suppression'] * 100)}%，新增灾厄 {res['spawned']} 尊。\n"
@@ -13130,6 +13191,8 @@ class ZhutianPlugin(Star):
         before = era_mod.state_of(st["years_total"])
         st, info = era_mod.to_next_era(st)
         await self.db.save_era(st)
+        if info["changed"]:
+            await self._era_broadcast(era_mod.push_text(info))
         span, step = self._era_tick_args()
         sealed = await self._era_sealed_count(st)
         yield event.plain_result(
@@ -13157,6 +13220,8 @@ class ZhutianPlugin(Star):
             return
         st, info = era_mod.set_era(await self._era_state(), idx, years)
         await self.db.save_era(st)
+        if info["changed"]:
+            await self._era_broadcast(era_mod.push_text(info))
         yield event.plain_result(
             f"【天地改易】世界已拨至 {info['new']['icon']}{info['new']['name']}"
             f"（第 {info['new']['epoch']} 纪元·第 {info['new']['years']} 年）。\n"
