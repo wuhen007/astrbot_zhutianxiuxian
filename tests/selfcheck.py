@@ -10162,6 +10162,21 @@ async def main():
                      "【团本·下一步】"):
         assert mark340b in src340, f"W34 批二按钮缺 {mark340b}"
     assert '$", self._msg_of(event).strip())' in src340.split("handle_world_batch_water")[1][:600], "浇灌走 _msg_of"
+    # W34 批三：锻造图纸 7 张全开（补 4 件装备入物品索引）+ 天机阁面板按钮
+    from infra.content import ContentStore as _CS340
+    _cs340 = _CS340(PLUGIN / "data")
+    _idx340 = set()
+    for _name340, _rows340 in _cs340.tables.items() if hasattr(_cs340, "tables") else []:
+        for _r340 in _rows340 if isinstance(_rows340, list) else []:
+            if isinstance(_r340, dict) and _r340.get("name"):
+                _idx340.add(str(_r340["name"]))
+    _tuzhi340 = _cs340.table("occupation/装备图纸") or []
+    assert len(_tuzhi340) == 7, f"图纸应 7 条：{len(_tuzhi340)}"
+    _closed340 = [r["name"] for r in _tuzhi340 if r["name"] not in _idx340]
+    assert _closed340 == [], f"图纸未全开：{_closed340}"
+    for act340c in ("tjge.buy", "tjge.wheel", "tjge.view", "tjfl.view"):
+        assert f'"{act340c}": (' in src340, f"W34 批三路由缺 {act340c}"
+    assert 'a1="天机符楼邀请函"' in src340, "邀请函按钮"
     print("W34 时代推送+按钮铺开A类 ok")
 
     await db.close()

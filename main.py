@@ -25860,7 +25860,15 @@ class ZhutianPlugin(Star):
     async def handle_tjge_panel(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
-        res = self._kb(event, tjge_mod.list_text())
+        doc, err = await self._require_player(event)
+        uid = doc.uid if not err and doc else ""
+        row = _uk_row([
+            _uk_btn("tjge.buy", "🎫 兑换符楼邀请函", a1="天机符楼邀请函",
+                    uid=uid, style="primary"),
+            _uk_btn("tjge.wheel", "🎡 创造命运仙轮×1", a1="1", uid=uid),
+            _uk_btn("tjfl.view", "🏯 天机符楼", uid="", style="secondary"),
+        ], fallback="#天机阁兑换 天机符楼邀请函 / #创造命运仙轮*1 / #天机符楼", timeout=600)
+        res = self._kb(event, tjge_mod.list_text(), row)
         if res is not None and _uk_avail():
             res.use_markdown(True)
         yield res if res is not None else event.plain_result(tjge_mod.list_text())
@@ -25927,7 +25935,14 @@ class ZhutianPlugin(Star):
             text = tjge_mod.fulou_text(world)
             cal["xiangu"] = world
             await self.db.save_calamity(cal)
-        res = self._kb(event, text)
+        doc, err = await self._require_player(event)
+        uid = doc.uid if not err and doc else ""
+        row = _uk_row([
+            _uk_btn("tjge.view", "🏪 返回天机阁", uid="", style="secondary"),
+            _uk_btn("tjge.buy", "🎫 兑换符楼邀请函", a1="天机符楼邀请函",
+                    uid=uid, style="primary"),
+        ], fallback="#天机阁 / #天机阁兑换 天机符楼邀请函", timeout=600)
+        res = self._kb(event, text, row)
         if res is not None and _uk_avail():
             res.use_markdown(True)
         yield res if res is not None else event.plain_result(text)
@@ -26236,6 +26251,11 @@ class ZhutianPlugin(Star):
             "fish.cast": ("handle_fish_cast", ""),
             "rv.sub": ("handle_rv_sub", str(a1 or "")),
             "tr.create": ("handle_team_create", str(a1 or "")),
+            # W34 批三：天机阁/符楼面板按钮（兑换/造轮走带参路由）
+            "tjge.buy": ("handle_tjge_exchange", str(a1 or "")),
+            "tjge.wheel": ("handle_tjge_wheel", str(a1 or "")),
+            "tjge.view": ("handle_tjge_panel", ""),
+            "tjfl.view": ("handle_tjfl_panel", ""),
         }
         if act not in routes:
             yield event.plain_result("该按钮已失效（版本更新或会话过期），请直接发送对应指令。")
@@ -26249,7 +26269,8 @@ class ZhutianPlugin(Star):
                        "xb.t4", "xb.vow", "hb.grab", "pup.destroy", "tb.join",
                        "tr.join", "page.cmd", "jyh.c1", "jyh.c2", "jyh.c3",
                        "tj.soul", "tj.slay", "sjm.sub", "endless.ckpt",
-                       "rs.start", "rs.choose", "pl.go", "rv.sub", "tr.create"):
+                       "rs.start", "rs.choose", "pl.go", "rv.sub", "tr.create",
+                       "tjge.buy", "tjge.wheel"):
                 async for r in handler(event, str(a1 or "")):
                     got = True
                     yield r
