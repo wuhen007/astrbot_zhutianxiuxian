@@ -10146,6 +10146,22 @@ async def main():
     # 公开玩法按钮（不绑发起者）
     for pub340 in ("ss.small", "ss.big", "dr.join", "dr.fight", "ip.rank"):
         assert f'"{pub340}"' in src340.split("routes = {")[0], f"W34 公开按钮缺 {pub340}"
+    # W34 批二：B 类无参按钮路由（本命/至宝/炼器/锻炉/镜补/宗门/灵市/彼岸/时间线/上苍/星阁/星路/小世界/仙钓/复活地球/团本）
+    for act340b in ("bm.sw", "bm.sa", "bm.st", "bm.embed", "xt.claim", "xt.help",
+                    "dt.my", "dt.mats", "furn.open", "furn.oneclick",
+                    "mg.purify", "mg.adv", "sec.beast", "sec.bless",
+                    "ls.tip", "ls.rank", "osw.observe", "osw.nearest",
+                    "wl.take", "wl.reduce", "sc.addict", "xg.show", "xg.rules",
+                    "pl.go", "wb.water", "fish.cast", "rv.sub", "tr.create"):
+        assert f'"{act340b}": (' in src340, f"W34 批二路由缺 {act340b}"
+    for mark340b in ("【本命法宝·下一步】", "【先天至宝·下一步】", "【大道熔炉·下一步】",
+                     "【锻炉·下一步】", "【诸天镜补充·下一步】", "【宗门运营·下一步】",
+                     "【万界灵市·下一步】", "【彼岸世界·下一步】", "【时间线权能·下一步】",
+                     "【上苍之上·下一步】", "【星阁·下一步】", "【诸天星路·穿梭已记忆位面】",
+                     "【小世界·一键浇灌】", "【剑与魔法·下一步】", "【复活地球·下一步】",
+                     "【团本·下一步】"):
+        assert mark340b in src340, f"W34 批二按钮缺 {mark340b}"
+    assert '$", self._msg_of(event).strip())' in src340.split("handle_world_batch_water")[1][:600], "浇灌走 _msg_of"
     print("W34 时代推送+按钮铺开A类 ok")
 
     await db.close()
