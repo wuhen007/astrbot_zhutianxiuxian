@@ -12,6 +12,8 @@
   对应 D/C+/B/A/S/SS/SSS 三段共 9 档评价（名字压缩）。
 - #轮回任务（每日悬赏文案）/#轮回小队（NPC 队友）/#轮回怪物（图鉴）/
   #轮回档案（历史最高）为只读面板；强化/兑换持久化在 ext。
+- points 为跨局可用钱包，run_points 只用于单局评价；结算只入账本局新赚点数，
+  保留权限的开局底分不重复入账。旧档在第一次成功操作时随保存惰性迁移。
 """
 
 from __future__ import annotations
@@ -75,6 +77,7 @@ EXCHANGES: tuple[tuple[str, int, str], ...] = (
 
 def _defaults() -> dict[str, Any]:
     return {"active": False, "job": "", "scene": 0, "stress": 0, "points": 0,
+            "run_points": 0, "run_start_points": 0,
             "attrs": {"体术": 0, "心智": 0, "源能": 0}, "grade": "", "best": 0,
             "history": [], "keep_ratio": 0.0, "extra_cap": 0, "check_bonus": 0,
             "revive": False, "rank_up": False}
@@ -99,6 +102,16 @@ def state_of(doc: Any) -> dict[str, Any]:
     if not isinstance(st.get("history"), list):
         st["history"] = []
     st["active"] = bool(st.get("active"))
+    if not isinstance(raw, dict) or "run_points" not in raw:
+        # 旧活跃档的余额尚未结算；旧非活跃档已结算，不能再次发放。
+        last = st["history"][-1] if st["history"] else {}
+        last_points = last.get("points", 0) if isinstance(last, dict) else 0
+        st["run_points"] = st["points"] if st["active"] else last_points
+        if st["active"]:
+            st["points"] = 0
+    st["run_points"] = max(0, int(st.get("run_points", 0) or 0))
+    st["run_start_points"] = max(0, int(st.get("run_start_points", 0) or 0))
+    st["points"] = max(0, st["points"])
     st["revive"] = bool(st.get("revive"))
     st["rank_up"] = bool(st.get("rank_up"))
     return st
@@ -121,10 +134,9 @@ def start(doc: PlayerDoc, job: str) -> tuple[bool, str]:
     if job not in PROFESSIONS:
         return False, ("用法：#开启无尽轮回 老兵/学生/医生/黑客\n"
                        "（特长：体术/心智/心智/源能）")
-    keep = st["points"] if st.get("keep_ratio") else 0
-    kept = int(keep * float(st.get("keep_ratio", 0) or 0)) if keep else 0
+    kept = int(st["run_points"] * float(st.get("keep_ratio", 0) or 0))
     st.update({"active": True, "job": job, "scene": 0, "stress": 0,
-               "points": kept, "grade": ""})
+               "run_points": kept, "run_start_points": kept, "grade": ""})
     save(doc, st)
     return True, (f"【无尽轮回 · 开启】雾海市，末班车，23:44。\n"
                   f"你的身份：{job}（特长 {SPECIALTY[job]}）\n"
@@ -146,7 +158,7 @@ def choose(doc: PlayerDoc, pick: int, now: float | None = None,
     text, attr, diff, p_win, p_lose, win_msg, lose_msg = options[pick - 1]
     value = int(st["attrs"].get(attr, 0) or 0) + int(st.get("check_bonus", 0) or 0)
     ok = (value + int(rng.random() * 10) + 1) >= diff
-    st["points"] += p_win if ok else max(0, p_lose - 0)
+    st["run_points"] += p_win if ok else max(0, p_lose - 0)
     stress_gain = 8 if ok else 20
     st["stress"] = min(STRESS_CAP + st.get("extra_cap", 0), st["stress"] + stress_gain)
     st["scene"] += 1
@@ -156,7 +168,7 @@ def choose(doc: PlayerDoc, pick: int, now: float | None = None,
     save(doc, st)
     head = f"【{sname} · {text}】{'成功' if ok else '失败'}（{attr} 检定 {value}+1d10 vs {diff}）"
     body = win_msg if ok else lose_msg
-    tail = f"点数 {st['points']}｜压力 {st['stress']}/{STRESS_CAP + st.get('extra_cap', 0)}"
+    tail = f"本局点数 {st['run_points']}｜可用点数 {st['points']}｜压力 {st['stress']}/{STRESS_CAP + st.get('extra_cap', 0)}"
     if grade_hit:
         return True, f"{head}\n{body}\n{tail}\n压力爆表——你被列车抹除了。#退出无尽轮回 结算。"
     if st["scene"] >= len(SCENES):
@@ -169,7 +181,9 @@ def settle(doc: PlayerDoc) -> tuple[bool, str]:
     if not st["active"]:
         return False, "不在轮回之中。"
     st["active"] = False
-    pts = int(st["points"])
+    earned = max(0, st["run_points"] - st["run_start_points"])
+    st["points"] += earned
+    pts = st["run_points"]
     if st.get("rank_up"):
         idx = next((i for i, (_, th) in enumerate(ENDINGS) if pts >= th), len(ENDINGS) - 1)
         pts = ENDINGS[max(0, idx - 1)][1]
@@ -180,7 +194,8 @@ def settle(doc: PlayerDoc) -> tuple[bool, str]:
                                                        "ts": int(time.time())}])[-10:]
     save(doc, st)
     return True, (f"≡≡≡ 无尽轮回 · 结算 ≡≡≡\n评价：【{grade}】（{pts:,} 点）\n"
-                  f"历史最高：{st['best']:,} 点｜#轮回强化 / #轮回兑换 使用点数，"
+                  f"本次获得：{earned:,} 点｜可用点数：{st['points']:,}｜历史最高：{st['best']:,} 点\n"
+                  "#轮回强化 / #轮回兑换 使用可用点数，"
                   "#开启无尽轮回 再入列车。")
 
 
@@ -230,7 +245,7 @@ def panel(doc: Any) -> str:
         "--- 无尽轮回 · 档案 ---",
         f"状态：{'进行中' if st['active'] else '未在轮回'}｜身份：{st.get('job') or '—'}"
         f"｜当前幕：{sname}",
-        f"点数 {st['points']:,}｜压力 {st['stress']}/{STRESS_CAP + st.get('extra_cap', 0)}"
+        f"可用点数 {st['points']:,}｜本局点数 {st['run_points']:,}｜压力 {st['stress']}/{STRESS_CAP + st.get('extra_cap', 0)}"
         f"｜属性 {st['attrs']}",
         f"最高评价：{grade_of(st['best'])}（{st['best']:,} 点）｜最近：{st['grade'] or '—'}",
         "指令：#开启无尽轮回 职业 / #轮回选择 1~3 / #退出无尽轮回 / "

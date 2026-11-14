@@ -3,7 +3,7 @@
 
 原版语义：
 - #召唤神兽：宗门等级 ≥5 且宗门基金 ≥50,000 → 随机获得一只护山神兽
-  （青龙/白虎/朱雀/玄武/麒麟），神兽每日可赐福一次。
+  （青龙/白虎/朱雀/玄武/麒麟），每位成员按北京时间自然日各可领取一次赐福。
 - #神兽赐福：消耗宗门基金 10,000 → 随机 buff（三维加成/修为/灵石/洗根水）。
 - #药园：宗门药园种植草药，成员可收获；#拔苗助长 偷拔加速成熟。
 
@@ -19,6 +19,7 @@ import time
 from typing import Any, Mapping
 
 from .player import PlayerDoc
+from .clock import day_key
 
 BEASTS = ("青龙", "白虎", "朱雀", "玄武", "麒麟")
 BEAST_COST = 50_000
@@ -40,8 +41,10 @@ def beast_of(s: Mapping[str, Any]) -> str:
     return str(s.get("beast") or "")
 
 
-def beast_cd_left(s: Mapping[str, Any], now: float) -> float:
-    return max(0.0, float(s.get("beast_bless_ts", 0) or 0) + 86400 - now)
+def beast_cd_left(doc: PlayerDoc, now: float) -> float:
+    if doc.ext.get("beast_bless_day") != day_key(now):
+        return 0.0
+    return 86400 - (now + 8 * 3600) % 86400
 
 
 def summon_beast(doc: PlayerDoc, s: dict[str, Any], fund: int, level: int,
@@ -70,7 +73,7 @@ def beast_bless(doc: PlayerDoc, s: dict[str, Any], fund: int, now: float,
     """#神兽赐福：每日一次，基金 10,000 → 随机奖励。"""
     if not s.get("beast"):
         return False, "本宗尚无护山神兽——#召唤神兽 先。", {}, fund
-    left = beast_cd_left(s, now)
+    left = beast_cd_left(doc, now)
     if left > 0:
         return False, f"【{s['beast']}】尚在沉睡，{int(left // 3600)} 小时后方可赐福。", {}, fund
     if fund < BLESS_COST:
@@ -91,7 +94,7 @@ def beast_bless(doc: PlayerDoc, s: dict[str, Any], fund: int, now: float,
     else:
         delta[name] = 2
         detail = f"{name} ×2"
-    s["beast_bless_ts"] = now
+    doc.ext["beast_bless_day"] = day_key(now)
     new_fund = fund - BLESS_COST
     return True, (f"【{s['beast']}·赐福】{desc}——{detail}"), delta, new_fund
 

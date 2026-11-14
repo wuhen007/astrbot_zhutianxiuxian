@@ -745,7 +745,7 @@ LUCKY_REWARDS: tuple[tuple[str, int], ...] = (
 )
 TALISMAN_HERBS: tuple[str, ...] = ("定魂草", "固元花", "静心草", "聚灵藤", "灵墨汁", "轮回果")
 MEAL_SUBSTITUTES: tuple[str, ...] = (
-    "五果", "六斋", "七荤", "八素", "月桂凝露", "紫府灵参", "天地琼浆", "仙馐果",
+    "五果", "六斋", "七荤", "八素", "月桂凝露", "紫府灵参", "天地琼浆", "仙馐果", "混沌元液",
 )
 SUPPLY_KEYS = ("仙宠口粮", "界源矿石", "工坊构件", "欠餐")
 
@@ -929,11 +929,13 @@ def _quality_bonus(pet: Mapping[str, Any]) -> float:
 
 
 def settle_pets(world: dict[str, Any], eff_hours: float, inv: Mapping[str, int],
-                rng: Any, shanhe_yield: bool = False) -> tuple[dict[str, Any], dict[str, int], list[str], dict[str, int]]:
+                rng: Any, shanhe_yield: bool = False,
+                harvested: dict[str, int] | None = None) -> tuple[dict[str, Any], dict[str, int], list[str], dict[str, int]]:
     """仙宠工坊结算（收获时调用）。返回 (world, extras, 日志, 纳戒扣food)。
 
     extras 键：__stones__ 进 out、__yuanshi__/__exp__/__xueqi__ 由 main 落账、
-    其余为物品。喂食：supplies 仙宠口粮 → 纳戒替代食物 → 欠餐，缺餐降效率。
+    其余为物品。喂食：supplies 口粮 → 本次收获 → 纳戒替代食物 → 欠餐。
+    harvested 原地扣除本次食物，meals_used 仅返回旧纳戒扣款，避免重复消费。
     """
     w = world
     sup = _ensure_supplies(w)
@@ -957,13 +959,21 @@ def settle_pets(world: dict[str, Any], eff_hours: float, inv: Mapping[str, int],
         pet["cycle"] = round(st["cycle"], 3)
         required_meals += int(st["meals"])
         states.append((pet, st))
-    # 喂食：supplies 口粮 → 纳戒替代 → 欠餐
+    # 所有仙宠共用一次食物预算；新收获直接减产物，旧库存通过 meals_used 落账。
     remaining = required_meals + int(sup.get("欠餐") or 0)
     total = remaining
     take_sup = min(remaining, int(sup.get("仙宠口粮") or 0))
     if take_sup > 0:
         sup["仙宠口粮"] -= take_sup
         remaining -= take_sup
+    current_food: dict[str, int] = {}
+    if harvested is not None:
+        for name in ("仙馐果", "混沌元液"):
+            used = min(remaining, max(0, int(harvested.get(name, 0))))
+            if used > 0:
+                harvested[name] -= used
+                current_food[name] = used
+                remaining -= used
     for name in MEAL_SUBSTITUTES:
         if remaining <= 0:
             break
@@ -975,7 +985,13 @@ def settle_pets(world: dict[str, Any], eff_hours: float, inv: Mapping[str, int],
     sup["欠餐"] = max(0, remaining)
     feeding_eff = (total - remaining) / total if total > 0 else 1.0
     if total > 0:
-        meal_txt = "、".join(f"{k}×{v}" for k, v in meals_used.items()) or "没有食物"
+        eaten = dict(current_food)
+        for name, used in meals_used.items():
+            eaten[name] = eaten.get(name, 0) + used
+        meal_txt = "、".join(f"{k}×{v}" for k, v in eaten.items())
+        if take_sup:
+            meal_txt = f"仙宠口粮×{take_sup}" + (f"、{meal_txt}" if meal_txt else "")
+        meal_txt = meal_txt or "没有食物"
         miss = f"；缺少 {remaining} 份，工坊总效率降至 {int(feeding_eff * 100)}%" if remaining else ""
         logs.append(f"🍚 仙宠用餐：{meal_txt}{miss}")
     # 产出
@@ -988,7 +1004,9 @@ def settle_pets(world: dict[str, Any], eff_hours: float, inv: Mapping[str, int],
             logs.append(f"🔴 {pet['name']}精力耗尽，在{ws}睡了整整一轮…")
             continue
         e_eff = (st["weighted"] / worked) if worked > 0 else 0.0
-        base_eff = _work_efficiency(pet, ws) * e_eff
+        level = max(1, min(WORKSHOP_MAX, workshop_level(w, ws)))
+        level_bonus = (1.0, 1.2, 1.4, 1.7, 2.0)[level - 1]
+        base_eff = _work_efficiency(pet, ws) * level_bonus * e_eff
         eff = base_eff * feeding_eff
         qrate = PINJI_RATE.get(pet.get("quality", "仙胎"), 1)
         innate = 2.0 if shanhe_yield else 1.0
@@ -1122,7 +1140,8 @@ def harvest_full(world: Mapping[str, Any], now: float | None = None,
         extras["insight"] = extras.get("insight", 0) + temple_reward["insight"]
         extras["temple_hours"] = temple_hours
     # 仙宠工坊
-    w, pet_out, pet_logs, meals_used = settle_pets(w, eff_hours, inv, rng, shanhe_yield=shanhe)
+    w, pet_out, pet_logs, meals_used = settle_pets(
+        w, eff_hours, inv, rng, shanhe_yield=shanhe, harvested=out)
     for k, v in pet_out.items():
         if k == "__stones__":
             out["__stones__"] = out.get("__stones__", 0) + v

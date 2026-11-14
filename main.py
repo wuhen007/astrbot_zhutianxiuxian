@@ -21581,18 +21581,23 @@ class ZhutianPlugin(Star):
     async def handle_sec_bless(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
-        doc, row, s, cal, prefix, err = await self._sec_open(event)
-        if err:
-            yield event.plain_result(err)
-            return
-        ok, msg, delta, nf = se_mod.beast_bless(doc, s, row["fund"], time.time(),
-                                                random.Random(f"{doc.uid}:bless:{int(time.time())}"))
-        if ok:
-            await self._sec_flush(doc.ext["sect"], row, s, cal,
-                                  fund_delta=-se_mod.BLESS_COST, player=doc)
-            for g, q in (delta or {}).items():
-                if q > 0:
-                    await self.db.add_items(doc.uid, {g: q})
+        async with self.db.calamity_lock:
+            doc, row, s, cal, prefix, err = await self._sec_open(event)
+            if err:
+                yield event.plain_result(err)
+                return
+            now = time.time()
+            ok, msg, delta, nf = se_mod.beast_bless(
+                doc, s, row["fund"], now, random.Random(f"{doc.uid}:bless:{int(now)}"))
+            if ok:
+                sec_mod.commit(cal, doc.ext["sect"], s)
+                async with self.db.transaction():
+                    await self.db.save_calamity(cal)
+                    await self.db.update_sect(doc.ext["sect"], row["level"], nf)
+                    await self.db.save_player(doc.model_dump())
+                    for g, q in delta.items():
+                        if q > 0:
+                            await self.db.add_items(doc.uid, {g: q})
         yield event.plain_result(msg)
 
     @filter.command(CMD_SEC_GARDEN, "药园总览")

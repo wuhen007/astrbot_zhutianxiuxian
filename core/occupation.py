@@ -29,7 +29,6 @@ HERB_W_HIGH = (0.17, 0.22, 0.17, 0.17, 0.17, 0.024, 0.024, 0.024, 0.024, 0.024, 
 MINE_POOL_A = (
     "金色石胚", "棕色石胚", "绿色石胚", "红色石胚", "蓝色石胚",
     "金色石料", "棕色石料", "绿色石料", "红色石料", "蓝色石料",
-    "金色矿石", "棕色矿石",
 )
 MINE_POOL_B = (
     "金色妖石", "棕色妖石", "绿色妖石", "红色妖石", "蓝色妖石",
@@ -230,8 +229,8 @@ def mine_yield_full(
         "庚金": math.floor(4 * (rate + 1) * ore),
         "玄土": math.floor(4 * (rate + 1) * ore),
     }
-    xuanze = rng.randrange(0, 5)  # 五色之一（原版按境界分段，此处取色随机）
-    a_name = MINE_POOL_A[xuanze + (5 if occ_level >= 24 else 0)]
+    xuanze = rng.randrange(0, len(MINE_POOL_B))
+    a_name = MINE_POOL_A[xuanze]
     b_name = MINE_POOL_B[xuanze]
     out[a_name] = math.floor((rate / 12) * t / 30)
     out[b_name] = math.floor((rate / 12) * t / 30 / 48)
