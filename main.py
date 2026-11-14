@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import random
 import re
@@ -15,12 +16,32 @@ from astrbot.api.star import Context, Star, StarTools, register
 from .ui_kit import btn as _uk_btn, row as _uk_row, kb_result as _uk_kb, own as _uk_own, data_ok as _uk_data, encode_size_ok as _uk_size, available as _uk_avail
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
-from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, other_shore_world, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_story as rs_mod, plane_events as pe_mod, games_mini as gm_mod, xtzb_birth as xb_mod, auto_task as at_mod, easter_eggs as eg_mod, plane_relay as pr_mod, sect_extra as se_mod, assistant as as_mod, bounty as bt_mod, xiangu as xgm_mod, xiangu_npc as xn_mod, xiangu_camp as xc_mod, xiangu_dao as xdd_mod, xiangu_baodi as xbd_mod, academy as acd_mod, social as soc_mod, abilities as ab_mod, tianji as tjge_mod, sellall as sa_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
+from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, other_shore_world, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_state as rs_mod, plane_events as pe_mod, games_mini as gm_mod, xtzb_birth as xb_mod, auto_task as at_mod, easter_eggs as eg_mod, plane_relay as pr_mod, sect_extra as se_mod, assistant as as_mod, bounty as bt_mod, xiangu as xgm_mod, xiangu_npc as xn_mod, xiangu_camp as xc_mod, xiangu_dao as xdd_mod, xiangu_baodi as xbd_mod, academy as acd_mod, social as soc_mod, abilities as ab_mod, tianji as tjge_mod, sellall as sa_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
 
 PLUGIN_DIR = Path(__file__).parent
+
+
+def _serialized_calamity_command(fn):
+    @functools.wraps(fn)
+    async def wrapped(self, *args, **kwargs):
+        async with self.db.calamity_lock:
+            async for result in fn(self, *args, **kwargs):
+                yield result
+    return wrapped
+
+
+def _serialized_player_command(fn):
+    @functools.wraps(fn)
+    async def wrapped(self, event, *args, **kwargs):
+        uid = str(event.get_sender_id())
+        async with self._pl_lock(uid):
+            async for result in fn(self, event, *args, **kwargs):
+                yield result
+    return wrapped
+
 
 
 def talent_desc(t: dict) -> str:
@@ -1415,6 +1436,8 @@ class ZhutianPlugin(Star):
         self._reminder_task = asyncio.create_task(self._daily_reminder_loop())
         self._lingjie_task = asyncio.create_task(self._lingjie_loop())
         self._era_push_task = asyncio.create_task(self._era_push_loop())
+        self._xiangu_npc_task = asyncio.create_task(self._xiangu_npc_loop())
+        self._xg_auction_task = asyncio.create_task(self._xg_auction_loop())
         self._last_era_push_key = ""      # 上次广播过的时代身份键（epoch:index）
         self._last_era_push_total = -1    # 上次广播进度时的世界总年数
         logger.info("[zhutian] M0 插件已加载。")
@@ -1427,6 +1450,12 @@ class ZhutianPlugin(Star):
         if task:
             task.cancel()
         task = getattr(self, "_era_push_task", None)
+        if task:
+            task.cancel()
+        task = getattr(self, "_xiangu_npc_task", None)
+        if task:
+            task.cancel()
+        task = getattr(self, "_xg_auction_task", None)
         if task:
             task.cancel()
         await self.db.close()
@@ -1482,6 +1511,91 @@ class ZhutianPlugin(Star):
                         self._last_era_push_total = st["years_total"]
                 except Exception as exc:
                     logger.warning(f"[zhutian] 时代推送轮询异常：{exc}")
+        except asyncio.CancelledError:
+            pass
+
+    async def _xg_broadcast(self, groups: list[str], text: str) -> None:
+        if not text:
+            return
+        from astrbot.api.event import MessageChain
+        from astrbot.api.message_components import Plain
+
+        for gid in groups:
+            try:
+                await self.context.send_message(
+                    f"大肥鱼:GroupMessage:{gid}",
+                    MessageChain(chain=[Plain(text)]),
+                )
+            except Exception as exc:
+                logger.warning(f"[zhutian] 星阁群推送失败 {gid}: {exc}")
+
+    async def _xg_auction_loop(self) -> None:
+        """每分钟结算到期场次，并按原版晚间时段开启官方拍品。"""
+        try:
+            while True:
+                await asyncio.sleep(60)
+                try:
+                    async with self.db.calamity_lock:
+                        state = await self.db.get_calamity()
+                        w = xg_mod.world_of(state)
+                        now = time.time()
+                        groups = sorted(set(
+                            w["groups"] + w["groups2"] +
+                            [str(g) for kind in ("official", "inner")
+                             for g in ((w.get(kind) or {}).get("groups") or [])]
+                        ))
+                        balances: dict[str, tuple[int, int]] = {}
+                        for kind in xg_mod.KINDS:
+                            lot = w.get(kind)
+                            if not isinstance(lot, dict):
+                                continue
+                            bidder = str(lot.get("bidder") or "0")
+                            if bidder in ("0", "-1", "") or bidder in balances:
+                                continue
+                            raw = await self.db.get_player(bidder)
+                            if raw:
+                                bidder_doc = PlayerDoc(**raw)
+                                balances[bidder] = (
+                                    int(bidder_doc.stones),
+                                    int(yuanshi.system_of(bidder_doc).get("amount") or 0),
+                                )
+                        notes, ops = xg_mod.tick(
+                            w, now, self._xg_pools, random.Random(time.time_ns()),
+                            balances, xg_mod.open_kinds_at(now), allow_player_open=False,
+                            scheduled=True)
+                        if notes or ops:
+                            async with self.db.transaction():
+                                for op in ops:
+                                    await self._xg_op(op)
+                            xg_mod.set_world(state, w)
+                            await self.db.save_calamity(state)
+                    if notes:
+                        await self._xg_broadcast(groups, "\n".join(notes))
+                except Exception as exc:
+                    logger.warning(f"[zhutian] 星阁定时拍卖异常：{exc}")
+        except asyncio.CancelledError:
+            pass
+
+    async def _xiangu_npc_loop(self) -> None:
+        """Advance one eligible NPC action on each active private map."""
+        try:
+            while True:
+                await asyncio.sleep(5)
+                try:
+                    for uid in await self.db.all_player_uids():
+                        async with self._pl_lock(uid):
+                            raw = await self.db.get_player(uid)
+                            if not raw:
+                                continue
+                            doc = PlayerDoc(**raw)
+                            st = xgm_mod.state_of(doc)
+                            if not st.get("active") or not st.get("map"):
+                                continue
+                            moved = xn_mod.advance_autonomous(st, time.time() * 1000)
+                            if moved:
+                                await self.db.save_player(doc.model_dump())
+                except Exception as exc:
+                    logger.warning(f"[zhutian] 仙古 NPC 自主推进异常：{exc}")
         except asyncio.CancelledError:
             pass
 
@@ -8020,6 +8134,7 @@ class ZhutianPlugin(Star):
         return d
 
     @filter.command(CMD_ZTJ_USE, "使用诸天镜（绑定）")
+    @_serialized_player_command
     async def handle_xt_bind(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
@@ -8070,6 +8185,7 @@ class ZhutianPlugin(Star):
         async for _r in self._smart(event, "\n".join(lines)):
             yield _r
     @filter.command(CMD_MIRROR_REFINE, "淬炼诸天镜")
+    @_serialized_player_command
     async def handle_mirror_refine(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
@@ -8100,6 +8216,7 @@ class ZhutianPlugin(Star):
         async for _r in self._smart(event, "\n".join(lines)):
             yield _r
     @filter.command(CMD_MIRROR_PROJ, "投影诸天")
+    @_serialized_player_command
     async def handle_mirror_proj(self, event: AstrMessageEvent, world: str = ""):
         if not self._allowed(event):
             return
@@ -8107,9 +8224,19 @@ class ZhutianPlugin(Star):
         if err:
             yield event.plain_result(err)
             return
-        if doc.ext.get("projection"):
-            yield event.plain_result("已有进行中的投影（#1-#3 抉择 或 #退出投影）。")
-            return
+        active_projection = doc.ext.get("projection")
+        if active_projection:
+            try:
+                projection_age = time.time() - float(active_projection.get("ts") or 0)
+            except (AttributeError, TypeError, ValueError):
+                projection_age = 900
+            if projection_age < 900:
+                yield event.plain_result("已有进行中的投影（#1-#3 抉择 或 #退出投影）。")
+                return
+            expired_doc = doc.model_copy(deep=True)
+            expired_doc.ext.pop("projection", None)
+            await self.db.save_player(expired_doc.model_dump())
+            doc = expired_doc
         ok, msg, zt, proj = zhutian.begin_projection(doc, world.strip(), time.time())
         if not ok:
             yield event.plain_result(msg)
@@ -8120,6 +8247,7 @@ class ZhutianPlugin(Star):
         yield event.plain_result(msg)
 
     @filter.command(CMD_MIRROR_CHOICE, "投影抉择")
+    @_serialized_player_command
     async def handle_mirror_choice(self, event: AstrMessageEvent, choice: str = ""):
         if not self._allowed(event):
             return
@@ -8132,6 +8260,16 @@ class ZhutianPlugin(Star):
             yield event.plain_result("当前没有进行中的投影。")
             return
         try:
+            projection_age = time.time() - float(proj.get("ts") or 0)
+        except (AttributeError, TypeError, ValueError):
+            projection_age = 900
+        if projection_age >= 900:
+            expired_doc = doc.model_copy(deep=True)
+            expired_doc.ext.pop("projection", None)
+            await self.db.save_player(expired_doc.model_dump())
+            yield event.plain_result("投影抉择已超时，请重新投影；已记录的后续剧情仍可继续。")
+            return
+        try:
             n = int(choice)
         except (TypeError, ValueError):
             n = 0
@@ -8142,7 +8280,21 @@ class ZhutianPlugin(Star):
         rng = _random.Random(f"{doc.uid}:proj:{time.time()}")
         tail, zt = zhutian.resolve_projection(doc, proj, n, rng)
         d = self._zt_save(doc, zt)
-        d.ext.pop("projection", None)
+        world = str(proj.get("world", ""))
+        state = (zt.get("exploration") or {}).get(world, {})
+        pending = str(state.get("pending") or "")
+        if pending:
+            from core.projection_story import event_by_id
+            next_story = event_by_id(world, pending)
+        else:
+            next_story = None
+        if next_story:
+            d.ext["projection"] = {"world": world, "ts": time.time(), "event_id": next_story["id"],
+                                   "title": next_story["title"], "scene": next_story["scene"],
+                                   "options": [o["text"] for o in next_story["options"]],
+                                   "max_choice": len(next_story["options"])}
+        else:
+            d.ext.pop("projection", None)
         await self.db.save_player(d.model_dump())
         yield event.plain_result(tail)
 
@@ -8167,6 +8319,7 @@ class ZhutianPlugin(Star):
             yield r
 
     @filter.command(CMD_MIRROR_EXIT, "退出投影")
+    @_serialized_player_command
     async def handle_mirror_exit(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
@@ -20863,7 +21016,8 @@ class ZhutianPlugin(Star):
             return
         yield event.plain_result(ac_mod.panel(doc))
 
-    @filter.command(CMD_RS_START, "开启无尽轮回：老兵/学生/医生/黑客")
+    @filter.command(CMD_RS_START, "开启无尽轮回：原版八种职业")
+    @_serialized_player_command
     async def handle_rs_start(self, event: AstrMessageEvent, arg: str = ""):
         if not self._allowed(event):
             return
@@ -20875,22 +21029,30 @@ class ZhutianPlugin(Star):
         async with self.db.transaction():
             await self.db.save_player(doc.model_dump())
         yield event.plain_result(msg)
-        # W34 铺开：开局职业按钮（空参列用法时）与剧情选项按钮（开局成功后）
+        jobs = rs_mod.profession_names()
         if ok:
+            count = rs_mod.choice_count(doc)
             row = _uk_row([_uk_btn("rs.choose", f"剧情选择 {i}", a1=i, uid=doc.uid,
-                                   style="primary") for i in (1, 2, 3)],
-                          fallback=f"{CMD_RS_CHOOSE} 1-3", timeout=1800)
+                                   style="primary") for i in range(1, count + 1)],
+                          fallback=f"{CMD_RS_CHOOSE} 1-{count}", timeout=1800)
+            res = self._kb(event, "【无尽轮回·抉择】点击选择（或回复指令）：", row)
+            if res is not None and _uk_avail():
+                res.use_markdown(True)
+            yield res if res is not None else event.plain_result("（回复指令完成抉择）")
         else:
-            jobs = ("老兵", "学生", "医生", "黑客")
-            row = _uk_row([_uk_btn("rs.start", f"▶ {j}", a1=j, uid=doc.uid)
-                           for j in jobs],
-                          fallback=f"{CMD_RS_START} 老兵/学生/医生/黑客", timeout=600)
-        res = self._kb(event, "【无尽轮回·抉择】点击选择（或回复指令）：", row)
-        if res is not None and _uk_avail():
-            res.use_markdown(True)
-        yield res if res is not None else event.plain_result("（回复指令完成抉择）")
+            for start in range(0, len(jobs), 4):
+                subset = jobs[start:start + 4]
+                row = _uk_row([_uk_btn("rs.start", f"▶ {job}", a1=job, uid=doc.uid)
+                               for job in subset],
+                              fallback=f"{CMD_RS_START} 职业名", timeout=600)
+                res = self._kb(event, "【无尽轮回·职业】选择职业：", row)
+                if res is not None and _uk_avail():
+                    res.use_markdown(True)
+                if res is not None:
+                    yield res
 
-    @filter.command(CMD_RS_CHOOSE, "轮回选择 1~3")
+    @filter.command(CMD_RS_CHOOSE, "轮回选择 1~4")
+    @_serialized_player_command
     async def handle_rs_choose(self, event: AstrMessageEvent, arg: str = ""):
         if not self._allowed(event):
             return
@@ -20907,17 +21069,18 @@ class ZhutianPlugin(Star):
         async with self.db.transaction():
             await self.db.save_player(doc.model_dump())
         yield event.plain_result(msg)
-        if ok:
-            # W34 铺开：每幕选项按钮（下一幕继续 1-3）
+        count = rs_mod.choice_count(doc) if ok else 0
+        if count:
             row = _uk_row([_uk_btn("rs.choose", f"剧情选择 {i}", a1=i, uid=doc.uid,
-                                   style="primary") for i in (1, 2, 3)],
-                          fallback=f"{CMD_RS_CHOOSE} 1-3", timeout=1800)
+                                   style="primary") for i in range(1, count + 1)],
+                          fallback=f"{CMD_RS_CHOOSE} 1-{count}", timeout=1800)
             res = self._kb(event, "【无尽轮回·下一幕】点击选择（或回复指令）：", row)
             if res is not None and _uk_avail():
                 res.use_markdown(True)
             yield res if res is not None else event.plain_result("（回复指令完成抉择）")
 
     @filter.command(CMD_RS_QUIT, "退出无尽轮回：结算评价")
+    @_serialized_player_command
     async def handle_rs_quit(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
@@ -20934,7 +21097,8 @@ class ZhutianPlugin(Star):
         else:
             yield event.plain_result(msg)
 
-    @filter.command(CMD_RS_ENH, "轮回强化：体术/心智/源能（600点）")
+    @filter.command(CMD_RS_ENH, "轮回强化：生命力/战斗力/智力/精神力（600点）")
+    @_serialized_player_command
     async def handle_rs_enh(self, event: AstrMessageEvent, arg: str = ""):
         if not self._allowed(event):
             return
@@ -20948,6 +21112,7 @@ class ZhutianPlugin(Star):
         yield event.plain_result(msg)
 
     @filter.command(CMD_RS_EXCH, "轮回兑换 名称")
+    @_serialized_player_command
     async def handle_rs_exch(self, event: AstrMessageEvent, arg: str = ""):
         if not self._allowed(event):
             return
@@ -20972,7 +21137,13 @@ class ZhutianPlugin(Star):
 
     @filter.command(CMD_RS_SQUAD, "轮回小队（NPC 队友）")
     async def handle_rs_squad(self, event: AstrMessageEvent):
-        yield event.plain_result(rs_mod.squad_text())
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result(rs_mod.squad_text(doc))
 
     @filter.command(CMD_RS_ATTR, "轮回属性")
     async def handle_rs_attr(self, event: AstrMessageEvent):
@@ -20986,7 +21157,13 @@ class ZhutianPlugin(Star):
 
     @filter.command(CMD_RS_MON, "轮回怪物图鉴")
     async def handle_rs_mon(self, event: AstrMessageEvent):
-        yield event.plain_result(rs_mod.monster_text())
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        yield event.plain_result(rs_mod.monster_text(doc))
 
     @filter.command(CMD_RS_FILE, "轮回档案（最高评价）")
     async def handle_rs_file(self, event: AstrMessageEvent):
@@ -23102,7 +23279,9 @@ class ZhutianPlugin(Star):
         if items:
             await self.db.add_items(uid, items)
 
-    async def _xg_dispatch(self, event, title, fn, need_inv=False, admin=False):
+    @_serialized_calamity_command
+    async def _xg_dispatch(self, event, title, fn, need_inv=False, admin=False,
+                           hostility=False):
         """统一分发：惰性结算 → 落账变 → 重读当前玩家（避免覆盖）→ 执行指令 → 落全服状态。"""
         if not self._allowed(event):
             return
@@ -23127,7 +23306,8 @@ class ZhutianPlugin(Star):
                         bd = PlayerDoc(**row)
                         balances[b] = (int(bd.stones),
                                        int(yuanshi.system_of(bd).get("amount") or 0))
-        notes, ops = xg_mod.tick(w, now, self._xg_pools, rng, balances)
+        notes, ops = xg_mod.tick(
+            w, now, self._xg_pools, rng, balances, xg_mod.open_kinds_at(now))
         async with self.db.transaction():
             for op in ops:
                 await self._xg_op(op)
@@ -23136,6 +23316,17 @@ class ZhutianPlugin(Star):
             doc = PlayerDoc(**row)
         inv = await self.db.get_inventory(doc.uid) if need_inv else {}
         result = fn(doc, inv, w, now, rng)
+        if hostility and result[0]:
+            name = xg_mod.select_hostile_tianjiao(
+                doc, self._tianjiao_rows(), await self._tj_world(), now, rng)
+            if name:
+                lot_kind = "inner" if title == "内场出价" else "official"
+                countered, price = xg_mod.apply_tianjiao_counterbid(
+                    w, lot_kind, name, str(doc.uid), rng, now)
+                if countered:
+                    result = (result[0], result[1] +
+                              f"\n【天骄·{name}】因仇恨介入，反价至 {price:,} "
+                              f"{xg_mod.currency_of(lot_kind)}！", result[2])
         xg_mod.set_world(state, w)
         await self.db.save_calamity(state)
         if notes:
@@ -23192,7 +23383,8 @@ class ZhutianPlugin(Star):
     @filter.command(CMD_XG_OFFICIAL_BID, "星阁官方外场出价")
     async def handle_xg_official_bid(self, event: AstrMessageEvent, arg: str = ""):
         async for r in self._xg_dispatch(event, "星阁出价",
-                lambda d, i, w, t, r: xg_mod.bid(w, d, "official", arg, t, r)):
+                lambda d, i, w, t, r: xg_mod.bid(w, d, "official", arg, t, r),
+                hostility=True):
             yield r
 
     @filter.command(CMD_XG_OPEN, "开启星阁体系（管理员）")
@@ -23233,7 +23425,8 @@ class ZhutianPlugin(Star):
     @filter.command(CMD_XG_INNER_BID, "星阁内场出价（源石）", alias={CMD_XG_INNER_BID_ALIAS})
     async def handle_xg_inner_bid(self, event: AstrMessageEvent, arg: str = ""):
         async for r in self._xg_dispatch(event, "内场出价",
-                lambda d, i, w, t, r: xg_mod.bid(w, d, "inner", arg, t, r)):
+                lambda d, i, w, t, r: xg_mod.bid(w, d, "inner", arg, t, r),
+                hostility=True):
             yield r
 
     @filter.command(CMD_XG_VERIFY, "星阁内场验资（永久身份）")
@@ -24336,6 +24529,7 @@ class ZhutianPlugin(Star):
         yield event.plain_result(xgm_mod.rules_text())
 
     @filter.command(CMD_XGM_ENTER, "进入仙古秘境（铭文~尊者·九天十地·12h CD）")
+    @_serialized_player_command
     async def handle_xgm_enter(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
@@ -24426,6 +24620,7 @@ class ZhutianPlugin(Star):
             yield r
 
     @filter.command(CMD_XGM_EXPLORE, "秘境探索：神识感知 + 三径择一")
+    @_serialized_player_command
     async def handle_xgm_explore(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
@@ -24466,6 +24661,7 @@ class ZhutianPlugin(Star):
             yield res
 
     @filter.regex(r"^([123])$")
+    @_serialized_player_command
     async def handle_xgm_choice(self, event: AstrMessageEvent):
         """秘境探索三径择一（仅在持有未过期选项时响应）。"""
         if not self._allowed(event):
@@ -24509,6 +24705,7 @@ class ZhutianPlugin(Star):
                 yield res
 
     @filter.regex(r"^#(上|下|左|右|左上|右上|左下|右下)(\d*)$")
+    @_serialized_player_command
     async def handle_xgm_move(self, event: AstrMessageEvent):
         """八方向移动（支持 #左5 多步，最多 20 步）。"""
         if not self._allowed(event):
@@ -24629,6 +24826,7 @@ class ZhutianPlugin(Star):
         yield event.plain_result(xdd_mod.seed_detail_text(doc, st, xgm_mod.load_config()))
 
     @filter.command(CMD_XGM_LEAVE, "离开仙古秘境（须核心，10-60s 读条）")
+    @_serialized_player_command
     async def handle_xgm_leave(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
@@ -24640,6 +24838,7 @@ class ZhutianPlugin(Star):
             yield r
 
     @filter.command(CMD_XGM_EMERGENCY, "紧急撤离（任意区域，30-90s 读条）")
+    @_serialized_player_command
     async def handle_xgm_emergency(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
@@ -24694,6 +24893,7 @@ class ZhutianPlugin(Star):
             yield res
 
     @filter.command(CMD_XGM_CONFIRM, "确认撤离（读条完毕后结算收获）")
+    @_serialized_player_command
     async def handle_xgm_confirm(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
@@ -24799,6 +24999,7 @@ class ZhutianPlugin(Star):
         return cb
 
     @filter.command(CMD_XGN_TALK, "与NPC交谈（好感+5~8，隐秘邀请）")
+    @_serialized_player_command
     async def handle_xgn_talk(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
@@ -24822,6 +25023,7 @@ class ZhutianPlugin(Star):
         yield event.plain_result(text)
 
     @filter.command(CMD_XGN_TRADE, "向NPC购买 [物品名]（无参看商店）")
+    @_serialized_player_command
     async def handle_xgn_trade(self, event: AstrMessageEvent, name: str = ""):
         if not self._allowed(event):
             return
@@ -24841,6 +25043,7 @@ class ZhutianPlugin(Star):
         yield event.plain_result(text)
 
     @filter.command(CMD_XGN_ATTACK, "攻击NPC（胜得掉落+搜魂窗口，败入生死抉择）")
+    @_serialized_player_command
     async def handle_xgn_attack(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
@@ -24869,6 +25072,7 @@ class ZhutianPlugin(Star):
             yield r
 
     @filter.command(CMD_XGN_SOUL, "搜魂NPC（击败后 5 分钟内，掠功法，业力）")
+    @_serialized_player_command
     async def handle_xgn_soul(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
@@ -24900,6 +25104,7 @@ class ZhutianPlugin(Star):
         yield event.plain_result(xn_mod.relation_text(doc, xgm_mod.state_of(doc)))
 
     @filter.command(CMD_XGN_TEAM, "NPC组队（好感≥50，战斗助战）")
+    @_serialized_player_command
     async def handle_xgn_team(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
@@ -24917,6 +25122,7 @@ class ZhutianPlugin(Star):
         yield event.plain_result(text)
 
     @filter.command(CMD_XGN_TEAM_LEAVE, "解除组队")
+    @_serialized_player_command
     async def handle_xgn_team_leave(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return

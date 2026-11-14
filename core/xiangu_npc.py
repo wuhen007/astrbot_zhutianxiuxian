@@ -7,8 +7,7 @@
   随机修士（W25 generate_npc）。绑定改为进入碎片时一次性分配（原版每图重抽）。
 - NPC 属性：原版按四境界表合成（攻 3 亿级），端口无独立轨 → 相对玩家缩放
   （atk ×1.5 / hp ×1.2 / canon ×2.2 / ×2.6），docstring 登记为 shortcut。
-- 生态简化：原版 BFS 寻路 + 每秒世界 tick；端口在移动/探索指令内联触发
-  「邻格遭遇」（敌意猎杀 / 诡诈 / 结交），NPC 不再自行移动寻宝。
+- 生态：地图私有状态在首次 tick 后延迟 15 秒，再每 30 秒轮转一名存活 NPC；敌意 NPC 朝玩家寻路，其他 NPC 朝目标或机缘移动。
 - 全服幂等：NPC 死亡名额存 calamity_state["xiangu"]["npc_deaths"][scope]
   （原版 Redis claimXianguNpcDeath），先到先得，重复攻击收到「已陨」。
 - 搜魂窗口 5 分钟（原版一致），成功率 75%/canon 60%，单门 80%，业力 +20/30。
@@ -22,6 +21,7 @@ rng 约定：只用 rng.random()。
 from __future__ import annotations
 
 import time
+from collections import deque
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -781,3 +781,90 @@ def bump_goal(doc: Any, st: dict, kind: str, item_name: str = "") -> str | None:
 
 def now_ms() -> float:
     return time.time() * 1000
+
+
+def advance_autonomous(st: dict, now: float) -> dict | None:
+    """Advance one scheduled NPC action and one BFS step on its private map."""
+    map_st = st.get("map") or {}
+    grid = map_st.get("grid")
+    pos = map_st.get("pos") or {}
+    spots = map_st.get("npc_locations") or []
+    if not grid or not spots or pos.get("x") is None:
+        return None
+    ecology = map_st.setdefault("npcEcology", {"turn": 0, "nextActionAt": 0})
+    if not ecology.get("nextActionAt"):
+        ecology["nextActionAt"] = float(now) + 15_000
+        return {"initialized": True, "moved": False}
+    if float(now) < float(ecology["nextActionAt"]):
+        return None
+    ecology["nextActionAt"] = float(now) + 30_000
+    alive = [spot for spot in spots
+             if isinstance(spot.get("npc"), dict) and spot["npc"].get("is_alive", True)]
+    if not alive:
+        return {"moved": False}
+    index = int(ecology.get("turn", 0) or 0) % len(alive)
+    ecology["turn"] = int(ecology.get("turn", 0) or 0) + 1
+    spot = alive[index]
+    npc = spot["npc"]
+    rels = st.get("npc_relations") or {}
+    faction_rep = st.get("faction_rep") or {}
+    npc_id = str(npc.get("id") or npc.get("name") or "")
+    relation = int(rels.get(npc_id, faction_rep.get(str(npc.get("faction")), 0)) or 0)
+    hostile = (npc.get("hostile") is True or npc.get("personality") == "hostile"
+               or relation <= -30)
+    if hostile:
+        target = (int(pos["x"]), int(pos["y"]))
+    else:
+        goal = npc.get("xianguGoal") or npc.get("goal") or {}
+        location = goal.get("location") if isinstance(goal, dict) else None
+        if isinstance(location, dict) and location.get("x") is not None:
+            target = (int(location["x"]), int(location["y"]))
+        else:
+            treasures = [(x, y) for y, row in enumerate(grid) for x, cell in enumerate(row)
+                         if cell == xg.CELL_TREASURE]
+            if not treasures:
+                return {"moved": False, "npc": npc.get("name") or npc_id}
+            sx, sy = int(spot["x"]), int(spot["y"])
+            target = min(treasures, key=lambda xy: abs(xy[0] - sx) + abs(xy[1] - sy))
+    sx, sy = int(spot["x"]), int(spot["y"])
+    if (sx, sy) == target:
+        return {"moved": False, "npc": npc.get("name") or npc_id}
+    height, width = len(grid), len(grid[0])
+    occupied = {(int(other["x"]), int(other["y"])) for other in spots if other is not spot}
+    queue = deque([(sx, sy)])
+    previous: dict[tuple[int, int], tuple[int, int] | None] = {(sx, sy): None}
+    directions = ((0, -1), (1, 0), (0, 1), (-1, 0),
+                  (1, -1), (1, 1), (-1, 1), (-1, -1))
+    while queue and target not in previous:
+        x, y = queue.popleft()
+        for dx, dy in directions:
+            nx, ny = x + dx, y + dy
+            if not (0 <= nx < width and 0 <= ny < height):
+                continue
+            cell = grid[ny][nx]
+            if (nx, ny) in previous or (nx, ny) in occupied or cell in (
+                    xg.CELL_WALL, xg.CELL_NPC, xg.CELL_VOID, xg.CELL_EXIT):
+                continue
+            previous[(nx, ny)] = (x, y)
+            queue.append((nx, ny))
+    if target not in previous:
+        return {"moved": False, "npc": npc.get("name") or npc_id}
+    step = target
+    while previous[step] != (sx, sy):
+        parent = previous[step]
+        if parent is None:
+            return {"moved": False, "npc": npc.get("name") or npc_id}
+        step = parent
+    nx, ny = step
+    old_cell = spot.get("under_cell", xg.CELL_EXPLORED)
+    if grid[sy][sx] == xg.CELL_NPC:
+        grid[sy][sx] = old_cell
+        if isinstance(map_st.get("revealed"), list):
+            map_st["revealed"][sy][sx] = True
+    spot["under_cell"] = grid[ny][nx]
+    spot["x"], spot["y"] = nx, ny
+    grid[ny][nx] = xg.CELL_NPC
+    if isinstance(map_st.get("revealed"), list):
+        map_st["revealed"][ny][nx] = True
+    return {"npc": npc.get("name") or npc_id, "from": (sx, sy), "to": (nx, ny),
+            "hostile": hostile}

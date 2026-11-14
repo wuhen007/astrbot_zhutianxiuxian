@@ -1,19 +1,9 @@
-"""无尽轮回·剧情组（W16-F2）——原版 `apps/EndlessReincarnation.js` +
-`model/endlessReincarnation.js`（雾海市末班车无限列车）的纯函数移植。
-注意与 `core/reincarnation.py`（轮回路执掌/遗落纳戒）是两个系统。
+"""Legacy reincarnation wallet/economy helpers retained for save compatibility.
 
-原版结构：#开启无尽轮回 4 选 1 职业 → 场景 3 选 1（属性检定）→ 压力/点数
-累积 → 9 档结局（D 120 → SSS 9600）→ #轮回强化（潜能 600/次）/ #轮回兑换
-（12 项道具）→ #退出无尽轮回 开新档。
-
-本移植（shortcut）：
-- 场景压缩为 5 幕（原版更多），每幕 3 选 1，检定 = 特长属性 + rng；
-  压力 ≥100 强制结局 D；点数阈值 120/180/600/900/1400/2200/3400/5600/9600
-  对应 D/C+/B/A/S/SS/SSS 三段共 9 档评价（名字压缩）。
-- #轮回任务（每日悬赏文案）/#轮回小队（NPC 队友）/#轮回怪物（图鉴）/
-  #轮回档案（历史最高）为只读面板；强化/兑换持久化在 ext。
-- points 为跨局可用钱包，run_points 只用于单局评价；结算只入账本局新赚点数，
-  保留权限的开局底分不重复入账。旧档在第一次成功操作时随保存惰性迁移。
+The active branched run model is implemented in :mod:`core.reinc_state` and
+loads the original scene, profession, NPC, monster, and ending data. This module
+keeps the cumulative points wallet and legacy upgrade/exchange storage used by
+existing saves and regression tests.
 """
 
 from __future__ import annotations
@@ -29,6 +19,19 @@ EXT_KEY = "reinc_story"
 PROFESSIONS = ("老兵", "学生", "医生", "黑客")
 SPECIALTY = {"老兵": "体术", "学生": "心智", "医生": "心智", "黑客": "源能"}
 STRESS_CAP = 100
+MAX_RUN_HP = 100
+SQUAD_TEMPLATE = (
+    {"name": "陈默", "job": "老兵", "specialty": "体术", "hp": 100, "trust": 0},
+    {"name": "周苓", "job": "医生", "specialty": "心智", "hp": 100, "trust": 0},
+    {"name": "阿鬼", "job": "黑客", "specialty": "源能", "hp": 100, "trust": 0},
+)
+MONSTERS = (
+    {"id": "faceless_inspector", "name": "无面检票员", "weakness": "心智", "attack": 12, "terror": 7, "npc_damage": 8},
+    {"id": "reverse_passenger", "name": "倒行乘客", "weakness": "源能", "attack": 8, "terror": 5, "npc_damage": 6},
+    {"id": "mist_hound", "name": "雾骸猎犬", "weakness": "体术", "attack": 11, "terror": 3, "npc_damage": 10},
+    {"id": "ticket_wraith", "name": "纸票鬼", "weakness": "心智", "attack": 6, "terror": 8, "npc_damage": 0},
+    {"id": "last_driver", "name": "末班车司机", "weakness": "源能", "attack": 22, "terror": 15, "npc_damage": 16},
+)
 
 # (幕名, [(选项, 检定属性, 难度, 成功点数, 失败点数, 成功文案, 失败文案)])
 SCENES: tuple[tuple[str, tuple[tuple[str, str, int, int, int, str, str], ...]], ...] = (
@@ -80,7 +83,8 @@ def _defaults() -> dict[str, Any]:
             "run_points": 0, "run_start_points": 0,
             "attrs": {"体术": 0, "心智": 0, "源能": 0}, "grade": "", "best": 0,
             "history": [], "keep_ratio": 0.0, "extra_cap": 0, "check_bonus": 0,
-            "revive": False, "rank_up": False}
+            "revive": False, "rank_up": False, "hp": MAX_RUN_HP, "max_hp": MAX_RUN_HP,
+            "flags": {}, "squad": [], "encounters": [], "defeated": [], "failed": False}
 
 
 def save(doc: Any, st: Mapping[str, Any]) -> None:
@@ -101,6 +105,20 @@ def state_of(doc: Any) -> dict[str, Any]:
         st["attrs"] = {"体术": 0, "心智": 0, "源能": 0}
     if not isinstance(st.get("history"), list):
         st["history"] = []
+    st["active"] = bool(st.get("active"))
+    if not isinstance(st.get("flags"), dict):
+        st["flags"] = {}
+    if not isinstance(st.get("squad"), list):
+        st["squad"] = []
+    if st["active"] and not st["squad"]:
+        st["squad"] = [dict(member, alive=True, max_hp=100, separated=False) for member in SQUAD_TEMPLATE]
+    if not isinstance(st.get("encounters"), list):
+        st["encounters"] = []
+    if not isinstance(st.get("defeated"), list):
+        st["defeated"] = []
+    st["hp"] = max(0, int(st.get("hp", MAX_RUN_HP) or 0))
+    st["max_hp"] = max(1, int(st.get("max_hp", MAX_RUN_HP) or MAX_RUN_HP))
+    st["failed"] = bool(st.get("failed"))
     st["active"] = bool(st.get("active"))
     if not isinstance(raw, dict) or "run_points" not in raw:
         # 旧活跃档的余额尚未结算；旧非活跃档已结算，不能再次发放。
@@ -136,7 +154,10 @@ def start(doc: PlayerDoc, job: str) -> tuple[bool, str]:
                        "（特长：体术/心智/心智/源能）")
     kept = int(st["run_points"] * float(st.get("keep_ratio", 0) or 0))
     st.update({"active": True, "job": job, "scene": 0, "stress": 0,
-               "run_points": kept, "run_start_points": kept, "grade": ""})
+               "run_points": kept, "run_start_points": kept, "grade": "",
+               "hp": MAX_RUN_HP, "max_hp": MAX_RUN_HP, "flags": {},
+               "squad": [dict(member, alive=True, max_hp=100, separated=False) for member in SQUAD_TEMPLATE],
+               "encounters": [], "defeated": [], "failed": False})
     save(doc, st)
     return True, (f"【无尽轮回 · 开启】雾海市，末班车，23:44。\n"
                   f"你的身份：{job}（特长 {SPECIALTY[job]}）\n"

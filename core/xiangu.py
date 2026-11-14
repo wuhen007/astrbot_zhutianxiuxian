@@ -16,7 +16,7 @@ shortcut（相对原版，均在本 docstring 登记）：
   calamity_state["xiangu"]["lifecycle"]，世界年取 era.years_total。
 - 血量类伤害原版为绝对值（亿级），端口量级失真 → 改当前血量百分比制；
   奖励公式保留「2000 + 系数×境界²×随机×乘区」形状，系数 ÷1000。
-- NPC 生态 tick（每秒 cron + AsyncLocalStorage 动作锁）→ 移动/探索时内联触发遭遇。
+- NPC 生态按原版 15 秒初始延迟、每 30 秒轮转一步 BFS；私人地图由后台任务推进。
 - 多玩家同图相遇（presence/peer）不做（单服群聊低频，擂台 PvP 走 ext 报名表 W26）。
 - 机缘宝池 worldUnique=False 按个人地图结算，无跨玩家争抢。
 

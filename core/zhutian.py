@@ -300,12 +300,15 @@ def begin_projection(
         return False, f"镜阶不足：{world} 需 {need_tier} 阶诸天镜（当前 {zt['tier']} 阶）。", zt, None
     if int(zt["energy"]) < PROJECTION_COST["energy"]:
         return False, "镜能不足（每日恢复）。", zt, None
+    from .projection_story import select_event
+    story = select_event(zt, world, random.Random(f"{world}:{now}"))
+    if story is None:
+        return False, f"{world} 当前没有可继续的探索剧情。", zt, None
     zt["energy"] = int(zt["energy"]) - 1
-    story = rng_story(world)
-    proj = {"world": world, "ts": now, "title": story["title"], "max_choice": len(story["options"])}
+    proj = {"world": world, "ts": now, "event_id": story["id"], "title": story["title"], "scene": story["scene"], "options": [o["text"] for o in story["options"]], "max_choice": len(story["options"])}
     text = (f"神魂没入镜光，投影【{world}】！\n"
             f"【{story['title']}】\n{story['scene']}\n"
-            + "\n".join(f"{i + 1}. {o}" for i, o in enumerate(story["options"]))
+            + "\n".join(f"{i + 1}. {o['text']}" for i, o in enumerate(story["options"]))
             + "\n15 分钟内「#选择 序号」作出抉择。")
     return True, text, zt, proj
 
@@ -320,6 +323,22 @@ def resolve_projection(
 ) -> tuple[str, dict]:
     """分支结算：慧/勇/仁 三答给不同档位奖励（镜尘/残响/晶核概率/化身线索）。"""
     zt = system_of(doc)
+    if proj.get("event_id"):
+        from .projection_story import resolve_event
+        resolution_id = f"{getattr(doc, 'uid', '')}:{proj.get('ts', '')}:{int(choice)}"
+        ok, tail, _next = resolve_event(
+            zt, str(proj["event_id"]), int(choice), resolution_id=resolution_id)
+        if not ok:
+            return tail, zt
+        state = (zt.get("exploration") or {}).get(str(proj.get("world", "")), {})
+        pending = str(state.get("pending") or "")
+        if pending:
+            from .projection_story import event_by_id
+            event = event_by_id(str(proj.get("world", "")), pending)
+            if event:
+                tail += "\n\n" + f"【后续剧情：{event['title']}】\n{event['scene']}\n"
+                tail += "\n".join(f"{i}. {o['text']}" for i, o in enumerate(event["options"], 1))
+        return tail, zt
     world = str(proj.get("world", "?"))
     mats = zt["materials"]
     tier = int(zt["tier"])

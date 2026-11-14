@@ -188,6 +188,7 @@ def run_1v1(
     winner: int | None = None
     skipped: set[int] = set()
     log: list[str] = []
+    rage_stacks = [0, 0]
 
     for rnd in range(1, max_rounds + 1):
         i, j = (0, 1) if rnd % 2 else (1, 0)
@@ -213,11 +214,27 @@ def run_1v1(
         # 治疗技能（W1-5）：出手前掷 pr 回血
         try_heal_skills(atk_u, hp, i, rng, log)
 
+        # 无尽劫境独立战斗效果；无效果时不额外消耗随机数，维持既有战斗序列。
+        dodge = min(0.45, max(0.0, float(def_u.eff("dodge_chance", 0) or 0)))
+        if dodge and rng.random() < dodge:
+            log.append(f"第{rnd}回合：{def_u.name}看穿攻势，避开一击")
+            continue
+        take_damage_pct = max(0.0, float(atk_u.eff("take_damage_attack_pct", 0) or 0))
+        combo_pct = max(0.0, float(atk_u.eff("combo_attack_pct", 0) or 0))
+        rage_mult = 1 + take_damage_pct * rage_stacks[i]
+        combo_mult = 1 + combo_pct * min(10, max(0, rnd - 1))
+        attack = max(1, int(atk_u.atk * rage_mult * combo_mult + 0.5))
         dmg, crit = battle.harm(
-            max(1, int(atk_u.atk * float(atk_u.eff("dmg_dealt_mult", 1.0)))),
+            max(1, int(attack * float(atk_u.eff("dmg_dealt_mult", 1.0)))),
             max(1, int(def_u.defense * float(def_u.eff("dmg_taken_mult", 1.0)))),
             rng, atk_u.bao,
         )
+        execute = max(0.0, float(atk_u.eff("execute_pct", 0) or 0))
+        if execute and hp[j] / max(1, def_u.hp_max) <= 0.15:
+            dmg = int(dmg * (1 + execute))
+        summon = max(0.0, float(atk_u.eff("summon_pct", 0) or 0))
+        summon_dmg = int(attack * summon)
+        dmg += summon_dmg
         # 攻击技能（W1-5）：逐条掷 pr → beilv 乘区（法球不吃倍率）+ 控制定身
         dmg, atk_extra = roll_attack_skills(atk_u, def_u, dmg, rng)
         log.extend(atk_extra)
@@ -228,6 +245,9 @@ def run_1v1(
         # 防御技能（W1-5）：逐条掷 pr → 减免/格挡；护盾/反弹写效果槽（下次结算生效）
         dealt, def_extra = roll_defense_skills(def_u, dealt, rng)
         log.extend(def_extra)
+        reduction = min(0.65, max(0.0, float(def_u.eff("damage_reduction", 0) or 0)))
+        if reduction:
+            dealt = max(0, int(round(dealt * (1 - reduction))))
         # 护盾先吸收（法球并入总伤后一击结算）
         shield = int(def_u.eff("shield", 0) or 0)
         suffix = ""
@@ -238,6 +258,8 @@ def run_1v1(
             if absorbed:
                 suffix += f"（护盾吸收 {absorbed}）"
         hp[j] = max(0, hp[j] - dealt)
+        if dealt > 0:
+            rage_stacks[j] = min(10, rage_stacks[j] + 1)
         if orb_dmg > 0:
             suffix += f"，法球 {orb_dmg}"
         line = (f"第{rnd}回合：{atk_u.name}出手，对{def_u.name}造成 {dealt} 点伤害"
@@ -245,10 +267,14 @@ def run_1v1(
                 + f"，{def_u.name}剩余 {hp[j]}")
         # 反噬 / 汲取（按实际造成的伤害；护盾吸收部分不触发）
         reflect = float(def_u.eff("reflect", 0.0) or 0.0)
+        reflect_chance = min(0.45, max(0.0, float(def_u.eff("reflect_chance", 0) or 0)))
+        if reflect_chance and rng.random() < reflect_chance:
+            reflect = max(reflect, min(1.0, max(0.0, float(def_u.eff("reflect_pct", 0) or 0))))
         if reflect > 0 and dealt > 0:
             back = min(int(dealt * reflect), hp[i])
             if back > 0:
                 hp[i] -= back
+                rage_stacks[i] = min(10, rage_stacks[i] + 1)
                 line += f"，反噬 {back}"
         lifesteal = float(atk_u.eff("lifesteal", 0.0) or 0.0)
         if lifesteal > 0 and dealt > 0:
@@ -256,6 +282,13 @@ def run_1v1(
             if heal > 0:
                 hp[i] += heal
                 line += f"，汲取 {heal}"
+        extra_chance = min(0.55, max(0.0, float(atk_u.eff("extra_action_chance", 0) or 0)))
+        if extra_chance and hp[j] > 0 and rng.random() < extra_chance:
+            extra_damage = max(1, int(dmg * 0.55))
+            extra_damage = max(0, int(round(extra_damage * (1 - reduction))))
+            hp[j] = max(0, hp[j] - extra_damage)
+            dealt += extra_damage
+            line += f"，额外行动追击 {extra_damage}"
         log.append(line)
         if hp[j] <= 0:
             if _try_revive(def_u, hp, j, log, rng):

@@ -2,18 +2,18 @@
 
 取证口径（`Z:/wbsy/.../ref/_zj/zhutianxiuxian1.0-master`）：
 - `apps/Auction/Auction.js` 8 条 + `Auction2.js` 8 条 = 16 主指令 / 0 别名。
-- **无手续费、无撤拍、无结算指令**；原版靠每分钟 cron 结算，本移植改为指令驱动的惰性结算。
-- `last_offer_price` 在原版是「最后一次出价的毫秒时间戳」，不是价格；本移植改名 `bid_ts`。
+- 无手续费、无撤拍、无手动结算；后台每分钟按原版配置开拍/结算，单进程锁替代 Redis Lua CAS。
+- `last_offer_price` 在原版是「最后一次出价的毫秒时间戳」，本移植另存 `bid_ts`。
 - 加价 10%、`interval:2` 分钟且每次出价重置倒计时、上架 24h CD、全服同时仅 1 场玩家外场。
+- 内场 NPC 每分钟有 30% 概率按原版类型权重竞价；玩家成功出价后按天骄仇恨概率反价。
 - 内场验资 = 1200 万源石验资 + 扣 500 万源石买断**永久**身份；货币为源石，外场为灵石。
 - 官方成交不传 sellerId（货币系统回收）；NPC 得标原版不扣款不发货；官方流拍无返还。
 
 shortcut：
 - 玩家内场 `xiuxian:auction2` 在原版是死链（无写入者、cron 不结算），本移植跳过，
   `#查看当前内场拍卖` / `#内场竞价` 一律映射到官方内场。
-- 官方「每日 20-21 / 21-23 点时段开拍」改为管理员开关 + 每次指令惰性开拍（无 cron）。
-- 内场 NPC 竞价原版是 30%/分钟 cron，改为「玩家出价后 30% 概率同步触发一次」。
-- 全服广播 / 群推图 / 敌对天骄反抬价 / redis Lua CAS 未搬；单进程 AstrBot 由事务包裹。
+- 官方外场20-21点、内场21-23点按上海时区开拍；每分钟尝试内场 NPC 加价并处理到期结算。
+- 全服图片广播未移植，改为向登记群发送文本；天骄仇恨反价已接入官方出价。
 - **数值不折算**：本移植源石坊（天字号 200 万源石/块）与原版内场同量级；
   外场灵石亦同量级。与 W8-D1 败天神殿的 ÷1000 不同，那是本移植自建产出节奏的特例。
 - 幂等用全服 `claims` 记录 `<kind>:<lot id>`；结算时余额不足按 `defaulted` 退物给卖家。
@@ -110,6 +110,7 @@ def _open(w: dict[str, Any], kind: str, pools: Mapping[str, Any],
         "rarity": int(item.get("稀有度") or 0),
         "amount": amount, "start": price, "price": price,
         "bid_ts": now, "bidder": "0", "seller": "",
+        "groups": list(w.get("groups2" if kind == "inner" else "groups") or []),
     }
     return (f"【{LABELS[kind]}】开拍：{w[kind]['name']}×{amount}（{w[kind]['desc']}）\n"
             f"起拍 {price:,} {currency_of(kind)}，{int(INTERVAL_SECONDS / 60)} 分钟无人加价即成交。")
@@ -153,8 +154,11 @@ def _settle(w: dict[str, Any], kind: str, lot: Mapping[str, Any],
 
 def tick(w: dict[str, Any], now: float, pools: Mapping[str, Any],
          rng: random.Random,
-         balances: Mapping[str, tuple[int, int]] | None = None) -> tuple[list[str], list[dict[str, Any]]]:
-    """惰性结算 + 自动开拍。每次星阁相关指令入口调用一次，替代原版每分钟 cron。"""
+         balances: Mapping[str, tuple[int, int]] | None = None,
+         open_kinds: set[str] | None = None,
+         allow_player_open: bool = True,
+         scheduled: bool = False) -> tuple[list[str], list[dict[str, Any]]]:
+    """结算到期场次；官方外/内场仅在各自原版每日窗口开拍。"""
     balances = balances or {}
     notes: list[str] = []
     ops: list[dict[str, Any]] = []
@@ -162,19 +166,129 @@ def tick(w: dict[str, Any], now: float, pools: Mapping[str, Any],
         lot = w.get(kind)
         if not isinstance(lot, dict):
             enabled = w["enabled2"] if kind == "inner" else w["enabled"]
-            if kind in ("official", "inner") and enabled:
+            can_open = (kind == "player" and allow_player_open) or (
+                kind != "player" and (open_kinds is None or kind in open_kinds))
+            has_groups = bool(w["groups2"] if kind == "inner" else w["groups"])
+            if kind in ("official", "inner") and enabled and can_open and has_groups:
                 note = _open(w, kind, pools, rng, now)
                 if note:
                     notes.append(note)
             continue
-        if now - float(lot.get("bid_ts") or 0) < INTERVAL_SECONDS:
+        if scheduled and kind == "player":
             continue
-        note, more = _settle(w, kind, lot, balances)
-        w[kind] = None
-        if note:
-            notes.append(note)
-        ops.extend(more)
+        if now - float(lot.get("bid_ts") or 0) >= INTERVAL_SECONDS:
+            note, more = _settle(w, kind, lot, balances)
+            w[kind] = None
+            if note:
+                notes.append(note)
+            ops.extend(more)
+            continue
+        if kind == "inner" and scheduled and _positive_player_bid(lot.get("bidder")):
+            if rng.random() < NPC_CHANCE:
+                note = _inner_npc_bid(lot, rng, now)
+                if note:
+                    notes.append(note)
     return notes, ops
+
+
+def _positive_player_bid(value: Any) -> bool:
+    try:
+        return int(value) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _inner_npc_bid(lot: dict[str, Any], rng: random.Random, now: float) -> str:
+    npc_types = (
+        ("谨慎", 1.05, 1.15, 0.4, ("此物虽好，但价格已高", "再加一次，若不成便放弃")),
+        ("激进", 1.15, 1.35, 0.3, ("此物我志在必得！", "再加！我看谁还敢争")),
+        ("豪爽", 1.25, 1.50, 0.2, ("这点源石不算什么", "宝物有缘者得之")),
+        ("神秘", 1.10, 1.80, 0.1, ("......", "此物与我有缘")),
+    )
+    npc_type = rng.choices(npc_types, weights=[row[3] for row in npc_types], k=1)[0]
+    name = rng.choice(("隐世高人", "仙门长老", "世家公子", "妖族大能", "魔道巨擘", "佛门高僧"))
+    comment = rng.choice(npc_type[4])
+    price = math.ceil(int(lot.get("price") or 0) * rng.uniform(npc_type[1], npc_type[2]))
+    lot.update({"price": price, "bidder": "-1", "bid_ts": now,
+                "last_offer_player": -1, "last_offer_price": now * 1000,
+                "npcBidder": name, "npcBidType": npc_type[0]})
+    return f"【星阁内场】NPC {name}（{npc_type[0]}）加价至 {price:,} 源石：{comment}"
+
+
+AUCTION_WINDOWS = {"official": (20, 21), "inner": (21, 23)}
+AUCTION_EVENT_CHANCE = {"仇恨": 0.25, "死敌": 0.35, "不死不休": 0.50}
+
+
+def open_kinds_at(now: float) -> set[str]:
+    """原版配置：上海时区外场20-21点、内场21-23点。"""
+    from datetime import datetime, timedelta, timezone
+
+    hour = datetime.fromtimestamp(float(now), timezone(timedelta(hours=8))).hour
+    return {kind for kind, (start, end) in AUCTION_WINDOWS.items()
+            if start <= hour < end}
+
+
+def select_hostile_tianjiao(doc: Any, rows: list[Mapping[str, Any]],
+                            world: Mapping[str, Any], now: float,
+                            rng: random.Random) -> str | None:
+    """按仇恨加权选择一名可用天骄，再按其仇恨档掷拍卖介入率。"""
+    from . import tianjiao as tj
+
+    hatred_table = (getattr(doc, "ext", {}) or {}).get("tianjiao_hatred") or {}
+    bosses = world.get("bosses") if isinstance(world, Mapping) else {}
+    candidates: list[tuple[str, int, str]] = []
+    for row in rows:
+        name = str(row.get("name") or row.get("名号") or "")
+        if not name:
+            continue
+        try:
+            hatred = max(0, int(hatred_table.get(name, 0) or 0))
+        except (AttributeError, TypeError, ValueError):
+            continue
+        level = tj.level_of(hatred)[0]
+        if level not in AUCTION_EVENT_CHANCE:
+            continue
+        boss = bosses.get(name, {}) if isinstance(bosses, Mapping) else {}
+        if not isinstance(boss, Mapping):
+            boss = {}
+        if (float(boss.get("alive_until") or 0) > now
+                or float(boss.get("escaped_until") or 0) > now
+                or float(boss.get("hp_pct", 1.0) or 0) <= 0):
+            continue
+        candidates.append((name, hatred, level))
+    if not candidates:
+        return None
+    total = sum(max(1, hatred) for _, hatred, _ in candidates)
+    roll = min(1.0, max(0.0, rng.random())) * total
+    chosen = candidates[-1]
+    for candidate in candidates:
+        roll -= max(1, candidate[1])
+        if roll <= 0:
+            chosen = candidate
+            break
+    name, _, level = chosen
+    return name if rng.random() < AUCTION_EVENT_CHANCE[level] else None
+
+
+def apply_tianjiao_counterbid(w: dict[str, Any], kind: str, name: str,
+                              player_id: str, rng: random.Random,
+                              now: float) -> tuple[bool, int]:
+    lot = w.get(kind)
+    if not isinstance(lot, dict) or not name:
+        return False, 0
+    targeted = [str(uid) for uid in (lot.get("tianjiaoCounteredPlayers") or [])]
+    uid = str(player_id)
+    if uid in targeted:
+        return False, int(lot.get("price") or 0)
+    price = max(1, math.ceil(int(lot.get("price") or 0) * (1.1 + min(1.0, max(0.0, rng.random())) * 0.25)))
+    targeted.append(uid)
+    lot.update({
+        "price": price, "bidder": "-1", "bid_ts": now,
+        "last_offer_player": -1, "last_offer_price": now * 1000,
+        "tianjiaoBidder": name, "tianjiaoTarget": uid,
+        "tianjiaoCounteredPlayers": targeted,
+    })
+    return True, price
 
 
 def is_restricted(doc: Any, name: str) -> bool:
@@ -261,15 +375,6 @@ def bid(w: dict[str, Any], doc: Any, kind: str, arg: str, now: float,
     lot["bid_ts"] = now
     msg = f"叫价 {price:,} {cur}（{LABELS[kind]}·{lot['name']}），倒计时重置。"
 
-    # 原版内场 NPC 是 30%/分钟 cron；改为玩家出价后同步触发一次
-    if kind == "inner" and rng.random() < NPC_CHANCE:
-        lo, hi = rng.choices([(1.05, 1.15), (1.15, 1.35), (1.25, 1.50), (1.10, 1.80)],
-                             weights=[4, 3, 2, 1], k=1)[0]
-        np_price = math.ceil(price * rng.uniform(lo, hi))
-        lot["price"] = np_price
-        lot["bidder"] = "-1"
-        lot["bid_ts"] = now
-        msg += f"\n【神秘 NPC】反手加价到 {np_price:,} 源石！"
     return True, msg, {}
 
 
@@ -305,7 +410,7 @@ def switch(w: dict[str, Any], action: str, inner: bool, gid: str,
         groups.add(gid)
         w[gkey] = sorted(groups)
         return True, (f"【{label}】已在本群开启。\n"
-                      "本移植无 cron：每次星阁指令会惰性开拍 / 结算上一场。"), {}
+                      "官方拍品将在每日原版时间窗开拍，内场 NPC 每分钟参与竞价。"), {}
     if action == "cancel":
         groups.discard(gid)
         w[gkey] = sorted(groups)
@@ -325,7 +430,7 @@ def panel(w: dict[str, Any], kind: str, now: float) -> str:
             return "【玩家外场】当前无拍品。发 #拍卖 物品*起拍价*数量 上架。"
         if not enabled:
             return f"【{label}】尚未开启（管理员 #开启{'星阁内场' if kind == 'inner' else '星阁'}体系）。"
-        return f"【{label}】已开启，下一次星阁指令会自动开拍。"
+        return f"【{label}】已开启，等待每日原版时段（外场20-21点/内场21-23点）定时开拍。"
     left = max(0.0, INTERVAL_SECONDS - (now - float(lot.get("bid_ts") or 0)))
     bidder = str(lot.get("bidder") or "0")
     who = "无人出价" if bidder == "0" else ("神秘 NPC" if bidder == "-1" else bidder)
@@ -348,8 +453,8 @@ def rules_text() -> str:
         "5. 成交为「最高价全额得标」，**无手续费**；玩家场卖家收全款，官方场货币由系统回收。",
         "6. 流拍退物给卖家；竞得者余额不足按违约取消；NPC 得标不扣款不发货（原版行为）。",
         f"7. 内场验资 {VERIFY_MIN:,} 源石，通过扣 {VERIFY_COST:,} 买断**永久**身份。",
-        f"8. 内场 NPC 有 {int(NPC_CHANCE * 100)}% 概率在玩家出价后同步抬价（原版是 30%/分钟 cron）。",
-        "9. 本移植**无 cron**：结算/开拍挂在每个星阁指令入口惰性执行；不发指令的场次会一直挂着。",
+        f"8. 内场 NPC 每分钟有 {int(NPC_CHANCE * 100)}% 概率加价；天骄按个人仇恨档介入外场/内场出价。",
+        "9. 官方外场每日20-21点、内场21-23点（上海时区）开拍；后台每分钟处理竞价与结算。",
         "10. 玩家内场（原版 xiuxian:auction2）是死链，未移植；#内场竞价 等同 #星阁内场出价。",
         "11. 数值不折算：本移植源石坊为百万级量级，与原版内场一致。",
     ])

@@ -8,10 +8,9 @@
 - model/endlessCelestial.js：每日天象（能力强度 / 道痕收益 / 商店价格）
 
 本移植（B8-1，单人劫环）：
-- 一局 10 层；第 5 层精英、第 10 层 Boss；第 3/6/9 层后「劫后问道」三选一
+- 每档 150 层；第 10、20…150 层为界主，第 3/6/9 层后「劫后问道」三选一
 - 每层先看星图三途（战斗 / 精英 / 机缘 / 休整 / 道痕矿脉），选定后 `#无尽下一关`
-- 能力只取数值型效果；闪避/减伤/斩杀等按系数折算为攻防血（见 `_fold_effect`），
-  召唤/连击/周期天罚等 proc 在 B8-1 不单独结算（文档标注）
+- 战斗保留闪避/减伤/反伤/斩杀/召唤/追击、连击与受击增攻、团队护盾、阶段回血、胜利攻击成长及标签协同；多成员协同仍未移植
 - 命火 / 心神 / 无尽秘钥 / 组队 / 跨服 / 商店 / 道碑 / 至宝 → B8-2/B8-3
 """
 
@@ -25,9 +24,10 @@ import time
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from .battle import Unit, spar_full
+from .battle import Unit
+from .combat import Fighter, run_1v1
 
-MAX_LAYERS = 10
+MAX_LAYERS = 150
 ENTRY_COST = 200_000
 ENTRY_REALM = 15
 BANK_ON_DEFEAT = 0.5
@@ -189,26 +189,18 @@ def set_tier(st: Mapping, tier: int) -> tuple[bool, str, dict]:
 
 
 def _fold_effect(eff: Mapping) -> dict:
-    """把原版各类效果折算为攻/防/血/暴击/回血/复活。"""
+    """拆分基础属性与原版回合触发效果。"""
     out = {"atk": 0.0, "def": 0.0, "hp": 0.0, "crit": 0.0, "regen": 0.0, "revive": 0.0}
-    out["atk"] += float(eff.get("attackPct", 0) or 0)
-    out["def"] += float(eff.get("defensePct", 0) or 0)
-    out["hp"] += float(eff.get("hpPct", 0) or 0)
-    out["crit"] += float(eff.get("critChance", 0) or 0)
-    out["regen"] += float(eff.get("regenPct", 0) or 0)
+    for key in ("attackPct", "defensePct", "hpPct", "critChance", "regenPct"):
+        target = {"attackPct": "atk", "defensePct": "def", "hpPct": "hp",
+                  "critChance": "crit", "regenPct": "regen"}[key]
+        out[target] += float(eff.get(key, 0) or 0)
     out["revive"] = max(out["revive"], float(eff.get("revivePct", 0) or 0))
-    # 以下为近似折算（原版为 proc/闪避/减伤等独立机制，B8-1 不单独结算）
-    out["def"] += float(eff.get("dodgeChance", 0) or 0) * 2.5
-    out["def"] += float(eff.get("damageReduction", 0) or 0) * 1.5
-    out["def"] += float(eff.get("reflectChance", 0) or 0) * float(eff.get("reflectPct", 0) or 0) * 0.5
-    out["atk"] += float(eff.get("executePct", 0) or 0) * 0.4
-    out["atk"] += float(eff.get("extraActionChance", 0) or 0) * 0.8
-    out["atk"] += float(eff.get("comboAttackPct", 0) or 0) * 2.0
-    out["atk"] += float(eff.get("summonPct", 0) or 0) * 0.25
-    out["atk"] += float(eff.get("takeDamageAttackPct", 0) or 0)
-    out["atk"] += float(eff.get("onWinAttackPct", 0) or 0)
-    out["atk"] += float(eff.get("fireScalingPct", 0) or 0) * 0.5
-    out["hp"] += float(eff.get("teamShieldPct", 0) or 0) * 0.4
+    for key in ("dodgeChance", "damageReduction", "reflectChance", "reflectPct",
+                "extraActionChance", "summonPct", "executePct", "comboAttackPct",
+                "takeDamageAttackPct", "onWinAttackPct", "victoryHealPct",
+                "fireScalingPct", "teamShieldPct"):
+        out[key] = float(eff.get(key, 0) or 0)
     return out
 
 
@@ -223,10 +215,17 @@ def run_stats(st: Mapping, base: Mapping, content: Mapping, celestial: Mapping |
     crit = float(base.get("bao", 0) or 0)
     regen = 0.0
     revive = 0.0
+    procs = {key: 0.0 for key in ("dodgeChance", "damageReduction", "reflectChance", "reflectPct",
+                                  "extraActionChance", "summonPct", "executePct", "comboAttackPct",
+                                  "takeDamageAttackPct", "onWinAttackPct", "victoryHealPct",
+                                  "fireScalingPct", "teamShieldPct")}
+    tag_counts: dict[str, int] = {}
     for aid, lv in (st.get("abilities") or {}).items():
         ab = ab_idx.get(aid)
         if not ab:
             continue
+        for tag in (ab.get("tags") or []):
+            tag_counts[str(tag)] = tag_counts.get(str(tag), 0) + max(1, int(lv or 1))
         fold = _fold_effect(ab.get("effect") or {})
         lv = max(1, int(lv or 1))
         atk += fold["atk"] * lv * mul
@@ -235,6 +234,8 @@ def run_stats(st: Mapping, base: Mapping, content: Mapping, celestial: Mapping |
         crit += fold["crit"] * lv * mul
         regen += fold["regen"] * lv * mul
         revive = max(revive, fold["revive"])
+        for key in procs:
+            procs[key] += fold[key] * lv * mul
     for bid in st.get("boons") or []:
         boon = boon_idx.get(bid)
         if not boon:
@@ -246,6 +247,8 @@ def run_stats(st: Mapping, base: Mapping, content: Mapping, celestial: Mapping |
         crit += fold["crit"]
         regen += fold["regen"]
         revive = max(revive, fold["revive"])
+        for key in procs:
+            procs[key] += fold[key]
     title = title_of(st)
     if title:
         atk += float(title.get("atk", 0) or 0)
@@ -265,6 +268,16 @@ def run_stats(st: Mapping, base: Mapping, content: Mapping, celestial: Mapping |
     crit += tr["crit"]
     regen += tr["regen"]
     revive = max(revive, tr["revive"])
+    atk += max(0.0, float(st.get("growthAttackPct", 0) or 0))
+    atk += max(0.0, procs["fireScalingPct"]) * tag_counts.get("火焰", 0)
+    if tag_counts.get("火焰", 0) >= 3:
+        atk += 0.08
+    if tag_counts.get("速度", 0) >= 3:
+        procs["dodgeChance"] += 0.04
+    if tag_counts.get("生存", 0) >= 3:
+        hp += 0.08
+    if tag_counts.get("召唤", 0) >= 3:
+        procs["summonPct"] += 0.08
     return {
         "atk": max(1, int(float(base.get("atk", 1) or 1) * atk)),
         "def": max(0, int(float(base.get("def", 0) or 0) * df)),
@@ -272,6 +285,19 @@ def run_stats(st: Mapping, base: Mapping, content: Mapping, celestial: Mapping |
         "bao": min(1.0, round(crit, 4)),
         "regen": round(regen, 4),
         "revive": round(revive, 4),
+        "dodgeChance": min(0.45, max(0.0, procs["dodgeChance"])),
+        "damageReduction": min(0.65, max(0.0, procs["damageReduction"])),
+        "reflectChance": min(0.45, max(0.0, procs["reflectChance"])),
+        "reflectPct": min(1.0, max(0.0, procs["reflectPct"])),
+        "extraActionChance": min(0.55, max(0.0, procs["extraActionChance"])),
+        "summonPct": max(0.0, procs["summonPct"]),
+        "executePct": max(0.0, procs["executePct"]),
+        "comboAttackPct": max(0.0, procs["comboAttackPct"]),
+        "takeDamageAttackPct": max(0.0, procs["takeDamageAttackPct"]),
+        "onWinAttackPct": max(0.0, procs["onWinAttackPct"]),
+        "victoryHealPct": max(0.0, procs["victoryHealPct"]),
+        "fireScalingPct": max(0.0, procs["fireScalingPct"]),
+        "teamShieldPct": max(0.0, procs["teamShieldPct"]),
         "atk_mult": round(atk, 3), "def_mult": round(df, 3), "hp_mult": round(hp, 3),
     }
 
@@ -324,6 +350,7 @@ def start_run(st: Mapping, doc: Any, base: Mapping, content: Mapping,
         "hp": int(base.get("hp", 1) or 1), "hp_max": int(base.get("hp", 1) or 1),
         "abilities": {}, "boons": [], "choices": [], "checkpoint": [],
         "marks": 0, "revived": False, "kills": 0, "started_at": float(now),
+        "growthAttackPct": 0.0,
         "celestial": celestial_of(now)["id"], "pending_node": 0, "log": [],
         "tier": tier,
     })
@@ -351,7 +378,7 @@ def _enemy_pool(world: Mapping, kind: str) -> list[dict]:
 def make_starmap(st: Mapping, content: Mapping, rng: random.Random) -> list[dict]:
     layer = int(st.get("layer", 0) or 0) + 1
     world = world_of(content, str(st.get("world") or ""))
-    if layer >= MAX_LAYERS:
+    if layer % 10 == 0:
         e = rng.choice(_enemy_pool(world, "boss"))
         return [{
             "type": "boss", "name": e.get("name") or "界主",
@@ -473,9 +500,24 @@ def resolve_node(st: Mapping, base: Mapping, content: Mapping, now: float,
                               "battle": False, "marks": 0, "msg": ""}
 
     if kind in ("battle", "elite", "boss"):
-        me = Unit("道友·劫境投影", stats["atk"], stats["def"], max(1, int(st2["hp"])), stats["bao"])
-        foe = enemy_unit(st2, node, stats, content, rng)
-        won, log, hp_left, _ = spar_full(me, foe, rng, max_rounds=30)
+        me = Fighter(
+            "道友·劫境投影", stats["atk"], stats["def"], max(1, int(st2["hp"])),
+            max(1, int(stats["hp"])), stats["bao"], effects={
+                "dodge_chance": stats["dodgeChance"],
+                "damage_reduction": stats["damageReduction"],
+                "reflect_chance": stats["reflectChance"],
+                "reflect_pct": stats["reflectPct"],
+                "extra_action_chance": stats["extraActionChance"],
+                "summon_pct": stats["summonPct"],
+                "execute_pct": stats["executePct"],
+                "combo_attack_pct": stats["comboAttackPct"],
+                "take_damage_attack_pct": stats["takeDamageAttackPct"],
+                "team_shield_pct": stats["teamShieldPct"],
+            })
+        me.effects["shield"] = int(round(stats["hp"] * stats["teamShieldPct"]))
+        foe_unit = enemy_unit(st2, node, stats, content, rng)
+        foe = Fighter.from_unit(foe_unit)
+        won, log, hp_left, _ = run_1v1(me, foe, rng, max_rounds=30).as_tuple()
         st2["hp"] = max(0, int(hp_left))
         result["battle"] = True
         result["log"] = log
@@ -501,6 +543,10 @@ def resolve_node(st: Mapping, base: Mapping, content: Mapping, now: float,
             result["banked"] = banked
             return st2, result
         st2["kills"] = int(st2.get("kills", 0)) + 1
+        recovery = {"battle": 0.05, "elite": 0.12, "boss": 0.08}[kind]
+        recovery += stats["victoryHealPct"]
+        st2["hp"] = min(int(stats["hp"]), int(st2["hp"]) + int(stats["hp"] * recovery + 0.5))
+        st2["growthAttackPct"] = float(st2.get("growthAttackPct", 0) or 0) + stats["onWinAttackPct"]
 
     marks = reward_of(st2, node, celestial)
     st2["marks"] = int(st2.get("marks", 0)) + marks
@@ -552,7 +598,7 @@ def resolve_node(st: Mapping, base: Mapping, content: Mapping, now: float,
                          f"已解锁 {TIERS[min(len(TIERS) - 1, int(st2.get('tier', 1)))]['code']} 难度。")
         return st2, result
 
-    if layer in (3, 6, 9):
+    if layer % 3 == 0:
         st2["phase"] = "checkpoint"
         st2["checkpoint"] = copy.deepcopy(CHECKPOINT_CHOICES)
         result["checkpoint"] = True
