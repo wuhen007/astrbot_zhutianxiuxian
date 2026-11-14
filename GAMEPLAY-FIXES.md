@@ -1,5 +1,7 @@
 # 五项玩法修复与回归验证
 
+> **历史记录（提交 b240a3c）**：仅记录先前五项缺陷修复时的范围和验证，不描述当前轮回剧情实现或最新整体验证。后续玩法移植与验证边界见 [GAMEPLAY-PARITY.md](GAMEPLAY-PARITY.md)；当前仓库入口见 [README.md](README.md)。
+
 代码位置：`Z:/dsh/python-port`；分支：`fix/gameplay-progress-and-yields`。
 基线：`6136b713598fcd291deae152a5508801c4c69e24`。本修复通过独立分支提交与推送，未部署到生产实例。
 原版对照固定为 `13c3b0445f35133a8d5d623a86c3aa264b1badbb`。此前审计报告及复现输出保留原样。
@@ -16,19 +18,16 @@
 
 ## 先红后绿证据
 
-- [轮回与采矿修复前](<../validation/progress-red.log>)：早期5项测试出现27次断言失败、5次错误，命中余额被清和缺少妖丹桶等问题。
-- [喂食与工坊修复前](<../validation/fix-economy-red.log>)：早期8项测试中6项失败。
-- [个人赐福修复前](<../validation/fix-sect-red.log>)：早期3项测试全部失败。
-- [最终统一回归日志](<../validation/fix-all-green.log>)：**24项测试全部通过，退出码0**。后续增加了30000兑换可达性、非字典旧状态容错，以及入口并发/回滚验证。
-- `git diff --check` 通过。
+- 修复前日志 `progress-red.log`、`fix-economy-red.log`、`fix-sect-red.log` 是本机审计产物，未随仓库发布；这里只保留当时结果摘要。
+- **当时的最终统一回归日志** `fix-all-green.log` 记录24项测试通过。该日志覆盖提交 b240a3c 的五项修复，不是当前整体验证；当前 48 项测试结果见 [GAMEPLAY-PARITY.md](GAMEPLAY-PARITY.md)。
+- 当时的 `git diff --check` 通过。
 
-从仓库根运行：
+从仓库根目录运行当前测试：
 
 ```bash
-PYTHONIOENCODING=utf-8 PYTHONPATH=Z:/dsh/validation/deps-core /c/Users/wuhen/.dsh/dsh-runtimes/dsh-primary-runtime/dependencies/python/python.exe -B -m unittest discover -s tests -p 'test_*.py' -v
+python -m unittest discover -s tests
 ```
 
-此环境使用隔离安装的pydantic和aiosqlite；换环境时安装对应依赖并使用当地Python路径。测试源码不依赖上述机器路径。
 
 测试文件：
 
@@ -40,6 +39,6 @@ PYTHONIOENCODING=utf-8 PYTHONPATH=Z:/dsh/validation/deps-core /c/Users/wuhen/.ds
 ## 兼容与验证边界
 
 - 旧活跃轮回档的`points`转换为待结算本局分，旧非活跃档余额保留。读取不直接写档，首次成功操作随原保存链路迁移。已被旧版本清掉的历史积分无法从现存档案恢复。
-- 五幕奖励及单局高评价门槛未调整；本次恢复累计消费能力，不扩充剧情。工坊收益提高和更多成员可领赐福会改变实际产量及宗门基金消耗。
+- 当时的五幕奖励与单局门槛没有调整；后续提交 a14d418 已将无尽轮回扩展为七幕分支。工坊收益提高和更多成员可领赐福会改变实际产量及宗门基金消耗。
 - 未部署到真实AstrBot，也未验证消息装饰器、权限、全框架并发或全部玩法。原仓库selfcheck此前受默认Chromium缺失阻塞，本轮没有把受阻的全量检查宣称通过。
-- 旧审计复现脚本断言“缺陷仍存在”，因此不能作为修复后的通过入口；它们和原输出保留作历史证据。使用上面的24项回归检查当前修复。
+- 旧审计复现脚本断言“缺陷仍存在”，因此不能作为修复后的通过入口；它们和原输出保留作历史证据。上述24项测试仅对应 b240a3c 阶段，当前整体验证见 [GAMEPLAY-PARITY.md](GAMEPLAY-PARITY.md)。
