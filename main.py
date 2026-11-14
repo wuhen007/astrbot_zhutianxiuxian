@@ -24196,15 +24196,14 @@ class ZhutianPlugin(Star):
     @filter.regex(r"^#剑与魔法帮助$")
     async def handle_sm_help_bare(self, event: AstrMessageEvent):
         """原版 rule 里 `#剑与魔法帮助` 是无空格连写形态。"""
-        # W34-fix：正文直接取 help_text（此前收集 _smart 输出会被转成图片组件，正文丢失）
-        body = sm_mod.help_text()
+        # W35：帮助正文出图（长文本排版优于 markdown），菜单按钮单独一条气泡跟随
+        async for r in self._smart(event, sm_mod.help_text(), "剑与魔法·帮助"):
+            yield r
         r_ = _uk_row([_uk_btn("sjm.sub", "📖世界观", a1="世界观", style="primary"),
                       _uk_btn("sjm.sub", "📊我的状态", a1="状态", style="primary"),
                       _uk_btn("sjm.sub", "🗺地图", a1="地图", style="primary")],
                      fallback="#剑与魔法 世界观 / 状态 / 地图", timeout=3600)
-        res = self._kb(event, body or "剑与魔法 · 帮助：", r_)
-        if res:
-            yield res
+        yield self._kb_next(event, "【剑与魔法·菜单】", r_, "#剑与魔法 世界观 / 状态 / 地图")
 
     # ---- 原版通用别名：按当前平行开局路由（此前未注册，导致 #我 / #背包 无回复）----
 
@@ -25810,10 +25809,10 @@ class ZhutianPlugin(Star):
             _uk_btn("tjge.wheel", "🎡 创造命运仙轮×1", a1="1", uid=uid),
             _uk_btn("tjfl.view", "🏯 天机符楼", uid="", style="secondary"),
         ], fallback="#天机阁兑换 天机符楼邀请函 / #创造命运仙轮*1 / #天机符楼", timeout=600)
-        res = self._kb(event, tjge_mod.list_text(), row)
-        if res is not None and _uk_avail():
-            res.use_markdown(True)
-        yield res if res is not None else event.plain_result(tjge_mod.list_text())
+        # W35：长商品表出图，按钮气泡跟随（交互事件自动降级文本）
+        async for r in self._smart(event, tjge_mod.list_text(), "天机阁"):
+            yield r
+        yield self._kb_next(event, "【天机阁·操作】", row, "兑换：#天机阁兑换 物品*数量")
 
     @filter.command(CMD_TJGE_EXCHANGE, "天机阁兑换 物品*数量")
     async def handle_tjge_exchange(self, event: AstrMessageEvent, arg: str = ""):
@@ -25884,10 +25883,10 @@ class ZhutianPlugin(Star):
             _uk_btn("tjge.buy", "🎫 兑换符楼邀请函", a1="天机符楼邀请函",
                     uid=uid, style="primary"),
         ], fallback="#天机阁 / #天机阁兑换 天机符楼邀请函", timeout=600)
-        res = self._kb(event, text, row)
-        if res is not None and _uk_avail():
-            res.use_markdown(True)
-        yield res if res is not None else event.plain_result(text)
+        # W35：商品表出图，按钮气泡跟随
+        async for r in self._smart(event, text, "天机符楼"):
+            yield r
+        yield self._kb_next(event, "【天机符楼·操作】", row, "兑换：#天机符楼兑换 物品*数量")
 
     @filter.command(CMD_TJFL_EXCHANGE, "天机符楼兑换 物品*数量")
     async def handle_tjfl_exchange(self, event: AstrMessageEvent, arg: str = ""):

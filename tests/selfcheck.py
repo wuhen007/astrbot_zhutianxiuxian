@@ -10202,6 +10202,12 @@ async def main():
     assert ".filter(Boolean)" not in open(PLUGIN / "core/other_shore_world.py", encoding="utf-8").read(), "JS 残留清除"
     assert "int(inv[gname])" in src340, "inv[gname]"
     assert 'str(self._msg_of(event) or "").strip()' in src340.split("async def handle_page_cmd")[1][:400], "page_cmd 回退"
+    # W35：长文本+按钮场景 → 出图 + 按钮气泡（图排板优于 markdown；交互事件 _smart 自动降级文本）
+    _sm_help350 = src340.split("async def handle_sm_help_bare")[1][:900]
+    assert "self._smart(event, sm_mod.help_text()" in _sm_help350, "帮助正文出图"
+    assert "self._kb_next(event, \"【剑与魔法·菜单】\"" in _sm_help350, "帮助菜单按钮气泡"
+    assert "self._smart(event, tjge_mod.list_text()" in src340, "天机阁商品表出图"
+    assert "self._smart(event, text, \"天机符楼\")" in src340, "符楼商品表出图"
     print("W34 时代推送+按钮铺开A类 ok")
 
     await db.close()
