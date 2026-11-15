@@ -26283,6 +26283,10 @@ class ZhutianPlugin(Star):
         inter = event.get_button_interaction()
         if not inter:
             return
+        # 第三方插件按钮放行：aid 带特定前缀（如肥鱼养成记 "dfy:"）的按钮由其
+        # 自身分发器处理，这里不认领也不回"按钮已失效"。
+        if str(getattr(inter, "action_id", "") or "").startswith("dfy:"):
+            return
         data = _uk_data(inter.data)
         act = str(data.get("act") or "")
         a1 = data.get("a1")
