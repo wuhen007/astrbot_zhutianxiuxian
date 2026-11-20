@@ -98,5 +98,11 @@
         "hint": "默认 2 小时 1000 年 → 一个时代约 20 小时；调小可让时代更替更快"
       }
     }
+  },
+  "LEGACY_IMPORT_DIR": {
+    "description": "原版存档目录（仅管理员导入）",
+    "type": "string",
+    "default": "",
+    "hint": "填写原版 resources/data 目录；#预检原版存档只读扫描，确认后导入并默认跳过已有角色。"
   }
 }

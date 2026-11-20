@@ -20,6 +20,7 @@ from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity,
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
+from .core import legacy_import as legacy_mod
 
 PLUGIN_DIR = Path(__file__).parent
 
@@ -408,6 +409,8 @@ CMD_AD_INIT_NO = "#取消诸天初始化"
 CMD_AD_NOTIFY = "#同步公告群"
 CMD_AD_NOTIFY_VIEW = "#查看公告群"
 CMD_AD_DIFFICULTY = "#选择难度"
+CMD_AD_IMPORT_LEGACY = "#预检原版存档"
+CMD_AD_IMPORT_LEGACY_OK = "#确认导入原版存档"
 # ---- W8-F2 时间线权柄（原版 WorldlineAuthority.js 8 条 rule，其中 3 条是状态别名）----
 CMD_WL = "#时间线权能"
 CMD_WL_ALIAS = "#古史状态"
@@ -1327,6 +1330,7 @@ class ZhutianPlugin(Star):
         self._adm_state: dict = adm_mod.state_of({})
         self._adm_difficulty: str = adm_mod.DEFAULT_DIFFICULTY
         self._adm_flags: dict = adm_mod.DIFFICULTIES[self._adm_difficulty]
+        self._legacy_import_report: dict | None = None
 
         # 物品索引：从指定类别表构建 名称→物品（同名以先出现者为准）
         self.item_index: dict[str, dict] = {}
@@ -6417,6 +6421,56 @@ class ZhutianPlugin(Star):
 
     def _adm_deny(self) -> str:
         return "此权柄唯管理员可执。"
+
+    @filter.command(CMD_AD_IMPORT_LEGACY, "预检原版玩家与纳戒 JSON 存档")
+    async def handle_ad_import_legacy(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not event.is_admin:
+            yield event.plain_result("原版存档导入仅限机器人管理员。")
+            return
+        source = str(self.config.get("LEGACY_IMPORT_DIR", "") or "").strip()
+        if not source:
+            yield event.plain_result("请先在插件配置 LEGACY_IMPORT_DIR 填写原版 resources/data 目录。")
+            return
+        report = legacy_mod.preflight(Path(source).expanduser())
+        self._legacy_import_report = report if report.get("ready") else None
+        lines = ["--- 原版存档预检 ---", f"目录：{report['source']}",
+                 f"玩家：{len(report['players'])} 人｜文件哈希：{len(report['source_sha256'])} 个"]
+        lines.extend(f"错误：{x}" for x in report["errors"][:8])
+        lines.extend(f"提示：{x}" for x in report["warnings"][:8])
+        if report.get("ready"):
+            lines.append(f"预检通过。默认跳过已有角色；核对并备份后，发送「{CMD_AD_IMPORT_LEGACY_OK}」导入。")
+        else:
+            lines.append("预检未通过，未导入任何数据。")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command(CMD_AD_IMPORT_LEGACY_OK, "确认导入预检通过的原版存档")
+    async def handle_ad_import_legacy_ok(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not event.is_admin:
+            yield event.plain_result("原版存档导入仅限机器人管理员。")
+            return
+        report = self._legacy_import_report
+        if not report or not report.get("ready"):
+            yield event.plain_result(f"没有待确认的预检结果，请先发送「{CMD_AD_IMPORT_LEGACY}」。")
+            return
+        try:
+            # 确认前重新扫描，避免预检后源文件变化仍导入旧快照。
+            fresh = legacy_mod.preflight(report["source"])
+            if fresh.get("source_sha256") != report.get("source_sha256") or not fresh.get("ready"):
+                self._legacy_import_report = None
+                yield event.plain_result("原版存档自预检后发生变化或校验失败；请重新预检。")
+                return
+            result = await legacy_mod.import_report(self.db, fresh)
+        except Exception as exc:
+            logger.exception(f"[zhutian] 原版存档导入失败：{exc}")
+            yield event.plain_result(f"导入失败，事务已回滚：{exc}")
+            return
+        self._legacy_import_report = None
+        await self._adm_note(event, f"原版存档导入：新增 {result['imported']} 人，跳过 {result['skipped']} 人")
+        yield event.plain_result(f"导入完成：新增 {result['imported']} 人，跳过已存在 {result['skipped']} 人。原版文件未修改。")
 
     @staticmethod
     def _adm_tail(event: AstrMessageEvent) -> str:
