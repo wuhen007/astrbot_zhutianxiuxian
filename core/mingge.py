@@ -154,6 +154,15 @@ def bonus(doc: PlayerDoc, key: str) -> float:
         return 0.0
 
 
+def signed_bonus(doc: PlayerDoc, key: str) -> float:
+    """读取可正可负的命格修正（突破成功率等）。"""
+    v = effects_of(doc).get(key, 0)
+    try:
+        return float(v) if not isinstance(v, bool) else float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def multiplier(doc: PlayerDoc, key: str) -> float:
     """direct-multiplier 类取值（乘法，缺省 1）。"""
     v = effects_of(doc).get(key, 1)

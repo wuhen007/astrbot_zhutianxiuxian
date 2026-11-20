@@ -3265,13 +3265,13 @@ class ZhutianPlugin(Star):
             return
         rate_bonus, cost_factor = era_mod.qi_mods(st)
         rate_bonus += calamity.karma_penalty(doc)          # W7-5c：业力缠身，破境艰难
-        mg_rate = mingge.bonus(doc, "境界突破成功率")     # 命格·破障通玄（W2-3）
+        mg_rate = mingge.signed_bonus(doc, "境界突破成功率")  # 命格·破障通玄（W2-3）
         ok, msg, d = cultivate.breakthrough(
             doc, self.content.table(doc.realm_table),
-            min(0.99, float(self._val("BREAKTHROUGH_SUCCESS_RATE", 1.0)) + mg_rate),
+            float(self._val("BREAKTHROUGH_SUCCESS_RATE", 1.0)),
             float(self._val("BREAKTHROUGH_FAIL_PENALTY", 0.3)),
             _random.Random(f"{doc.uid}:{doc.realm_index}:{int(time.time())}"),
-            cost_factor=cost_factor, rate_bonus=rate_bonus,
+            cost_factor=cost_factor, rate_bonus=rate_bonus, potential_bonus=mg_rate,
         )
         if ok and d.realm_index != doc.realm_index or ok and d.exp != doc.exp:
             await self.db.save_player(d.model_dump())
@@ -3297,6 +3297,7 @@ class ZhutianPlugin(Star):
         if blocked:
             yield event.plain_result(blocked)
             return
+        mingge_rate = mingge.signed_bonus(doc, "境界突破成功率")
         if body:
             rate_bonus, cost_factor = era_mod.body_mods(st)
         else:
@@ -3316,33 +3317,35 @@ class ZhutianPlugin(Star):
             if one_key:
                 msg, d, used = cultivate.one_key_body(
                     doc, table, rng, luck=luck, grass=grass if luck else 0,
-                    cost_factor=cost_factor, rate_bonus=rate_bonus, era_note=note)
+                    cost_factor=cost_factor, rate_bonus=rate_bonus,
+                    success_bonus=mingge_rate, era_note=note)
             else:
                 xueqi = float(doc.ext.get("xueqi", 0) or 0)
                 _good, msg, cost = cultivate.body_breakthrough(
                     doc, table, xueqi, rng, luck=luck,
-                    cost_factor=cost_factor, rate_bonus=rate_bonus)
+                    cost_factor=cost_factor, rate_bonus=rate_bonus,
+                    success_bonus=mingge_rate)
                 d = doc
                 if cost:
                     d.ext["xueqi"] = max(0.0, xueqi - cost)
-                used = 1 if luck else 0
+                used = 1 if luck and (_good or msg.startswith("炼体突破失败！")) else 0
                 msg = f"{note}\n{msg}"
         else:
             rate = min(0.99, float(self._val("BREAKTHROUGH_SUCCESS_RATE", 1.0))
-                       + mingge.bonus(doc, "境界突破成功率"))
+                       + mingge_rate)
             penalty = float(self._val("BREAKTHROUGH_FAIL_PENALTY", 0.3))
             if one_key:
                 msg, d, used = cultivate.one_key_break(
                     doc, self.content.table(doc.realm_table), rate, penalty, rng,
                     luck=luck, grass=grass if luck else 0,
-                    cost_factor=cost_factor, rate_bonus=rate_bonus, era_note=note)
+                    cost_factor=cost_factor, rate_bonus=rate_bonus, era_note=note,
+                    potential_bonus=mingge_rate)
             else:
-                if luck:
-                    rate = min(0.99, rate + (1 - rate) * 0.5)
                 _ok, msg, d = cultivate.breakthrough(
                     doc, self.content.table(doc.realm_table), rate, penalty, rng,
-                    cost_factor=cost_factor, rate_bonus=rate_bonus)
-                used = 1 if luck else 0
+                    cost_factor=cost_factor, rate_bonus=rate_bonus, luck=luck,
+                    potential_bonus=mingge_rate)
+                used = 1 if luck and _ok else 0
                 msg = f"{note}\n{msg}"
         async with self.db.transaction():
             if used:

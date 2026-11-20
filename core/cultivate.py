@@ -243,10 +243,14 @@ def breakthrough(
     rng: random.Random,
     cost_factor: float = 1.0,
     rate_bonus: float = 0.0,
+    potential_cost: int | None = None,
+    cost_reduction: float = 1.0,
+    potential_bonus: int = 0,
+    luck: bool = False,
 ) -> tuple[bool, str, PlayerDoc]:
-    """突破：修为达标即可尝试（累计制，成功不扣修为）；失败按比例损耗。
+    """练气突破：成功扣除修为与潜力；失败消耗修为并承受额外损失。
 
-    success_rate/fail_penalty 来自面板配置；原版境界表未含成功率字段。
+    success_rate/fail_penalty 为兼容参数；成功率依原版境界、时代和体质公式计算。
     cost_factor / rate_bonus 来自时代法则（W7-2，原版 Level.js 的 qiCostFactor / qiSuccessRate）。
     """
     if doc.state != "空闲":
@@ -259,7 +263,17 @@ def breakthrough(
     nxt = level_table[i]
     # 语义：境界表当前条目的 exp = 从该境界突破到下一境所需的累计修为
     base_req = int(level_table[doc.realm_index].get("exp", 0))
-    req = max(1, int(base_req * max(0.05, float(cost_factor)) + 0.999))
+    talent_cost, talent_rate = physique_breakthrough_bonus(doc)
+    if cost_reduction == 1.0:
+        cost_reduction = talent_cost
+    reduction = min(1.0, max(0.05, float(cost_reduction)))
+    req = max(1, int(round(base_req * reduction)))
+    req = max(1, int(req * max(0.05, float(cost_factor)) + 0.999))
+    need_potential = int(potential_cost if potential_cost is not None else
+                         player_breakthrough_potential_cost(doc, doc.realm_index + 1))
+    available_potential = max(0, int(float(doc.ext.get("potential", 0) or 0)))
+    if available_potential < need_potential:
+        return False, f"仙道潜力不足：本次突破需 {need_potential} 点（当前 {available_potential}）。", doc
     if doc.exp < req:
         era_note = f"（时代法则 ×{float(cost_factor):.1f}）" if abs(float(cost_factor) - 1.0) > 1e-9 else ""
         return False, (
@@ -268,9 +282,16 @@ def breakthrough(
         ), doc
 
     d = doc.model_copy(deep=True)
-    rate = min(0.99, max(0.01, float(success_rate) + float(rate_bonus)))
+    physique_bonus = max(-0.9, float(potential_bonus or 0)) + talent_rate
+    base_rate = max(0.01, 1.0 - (doc.realm_index + 1) / 60)
+    rate = max(0.01, base_rate + float(rate_bonus) + physique_bonus)
+    if luck:
+        rate += (1.0 - rate) * 0.5
+    rate = max(0.01, rate)
     if rng.random() < rate:
         d.realm_index = i
+        d.exp = max(0, d.exp - req)
+        d.ext["potential"] = max(0, available_potential - need_potential)
         e = level_table[min(i, len(level_table) - 1)]
         d.ext["base_attack"] = e.get("基础攻击", 0)
         d.ext["base_defense"] = e.get("基础防御", 0)
@@ -280,11 +301,58 @@ def breakthrough(
             f"攻击 {e.get('基础攻击', 0)} · 防御 {e.get('基础防御', 0)} · 血量 {e.get('基础血量', 0)}"
         ), d
 
-    lost = int(req * fail_penalty)
-    d.exp = max(0, d.exp - lost)
+    roll = rng.random()
+    loss_rate = 0.4 if roll > 0.9 else 0.2 if roll > 0.8 else 0.1 if roll > 0.7 else 0.05 if roll > 0.6 else 0.0
+    lost = int(req * loss_rate)
+    d.exp = max(0, d.exp - req - lost)
     return True, (
-        f"突破【{nxt['level']}】失败，气息紊乱，修为损耗 {lost} 点。\n当前修为：{d.exp}"
+        f"突破【{nxt['level']}】失败，消耗修为 {req}，额外损失 {lost} 点。\n当前修为：{d.exp}"
     ), d
+
+
+def breakthrough_potential_cost(level_id: int) -> int:
+    """原版 Level.js：境界 1-26 每次 2 点，27-41 每次 4 点，42+ 每次 8 点。"""
+    level_id = max(1, int(level_id))
+    return 2 if level_id <= 26 else 4 if level_id <= 41 else 8
+
+
+def player_breakthrough_potential_cost(doc: PlayerDoc, level_id: int) -> int:
+    """按命格效果修正潜力消耗，倍率钳制在原版允许的 0..3。"""
+    base = breakthrough_potential_cost(level_id)
+    try:
+        from .mingge import effects_of
+        effects = effects_of(doc)
+        reduction = max(0.0, float(effects.get("仙道潜力消耗减少", 0) or 0))
+        increase = max(0.0, float(effects.get("仙道潜力消耗增加", 0) or 0))
+    except (TypeError, ValueError):
+        reduction, increase = 0.0, 0.0
+    multiplier = min(3.0, max(0.0, 1.0 - reduction + increase))
+    adjusted = base * multiplier
+    return max(0, int(adjusted) if multiplier <= 1 else int(adjusted + 0.999999))
+
+
+PHYSIQUE_BREAKTHROUGH = {
+    "大成·荒古圣体": (0.75, 0.25), "混沌体": (0.85, 0.15),
+    "先天混沌圣体道胎": (0.65, 0.35), "大成·神王体": (0.80, 0.20),
+    "天妖体": (0.90, 0.10), "道胎": (0.95, 0.05),
+    "小成·荒古圣体": (0.70, 0.30), "小成·苍天霸体": (0.75, 0.25),
+    "大成·苍天霸体": (0.65, 0.35), "苍天霸体": (0.75, 0.25),
+    "重瞳": (0.85, 0.15), "先天圣体道胎": (0.60, 0.40),
+    "彼岸·命运神道体": (0.50, 0.50), "无相·万化天魔体": (0.50, 0.50),
+}
+
+
+def physique_breakthrough_bonus(doc: PlayerDoc) -> tuple[float, float]:
+    """返回原版体质突破消耗倍率、成功率加成。"""
+    root = doc.ext.get("linggen")
+    name = str(root.get("name", "")) if isinstance(root, dict) else ""
+    if name in PHYSIQUE_BREAKTHROUGH:
+        return PHYSIQUE_BREAKTHROUGH[name]
+    if "魔胎" in name:
+        return 0.90, 0.10
+    if "仙体" in name:
+        return 0.85, 0.15
+    return 1.0, 0.0
 
 
 def gate_state(doc: PlayerDoc, allowed: set[str]) -> str | None:
@@ -314,12 +382,15 @@ def body_breakthrough(
     luck: bool = False,
     cost_factor: float = 1.0,
     rate_bonus: float = 0.0,
+    potential_cost: int | None = None,
+    cost_reduction: float | None = None,
+    one_key: bool = False,
 ) -> tuple[bool, str, int]:
     """炼体突破（原版 Level.js 炼体支线直译，量级按 cost_scale 缩放）。
 
-    - 消耗血气 = 当前境界行 exp × cost_scale × 时代系数（向上取整）
-    - 成功率 = max(1%, 1 - (境界+1)/60) + success_bonus + 时代加成；luck 把失败部分减半
-    - 成功：境界 +1，扣全部消耗；失败：按 40%/20%/10%/0% 分档扣血气
+    - 消耗血气 = 当前境界行 exp × 体质倍率 × cost_scale × 时代系数（向上取整）
+    - 成功率 = max(1%, 1 - (境界+1)/60) + 体质 + 时代加成；luck 把失败部分减半
+    - 成功：境界 +1，扣全部消耗；失败：单次 40%/20%/10%/0%，一键额外含 5% 档
     返回 (是否成功, 文案, 应扣血气)。境界自增由本函数完成，扣费由调用方执行。
     """
     idx = int(getattr(doc, "physique_index", 0) or 0)
@@ -327,33 +398,41 @@ def body_breakthrough(
         return False, f"肉身已至【{table[-1]['level']}】，天地再无进境之路。", 0
     row, nxt = table[idx], table[idx + 1]
     factor = max(0.05, float(cost_factor))
-    cost = int(float(row.get("exp", 0) or 0) * cost_scale * factor + 0.999)
+    talent_cost, talent_rate = physique_breakthrough_bonus(doc)
+    if cost_reduction is not None:
+        talent_cost = min(1.0, max(0.05, float(cost_reduction)))
+    if potential_cost is None:
+        potential_cost = player_breakthrough_potential_cost(doc, idx + 1)
+    potential = max(0, int(float(doc.ext.get("potential", 0) or 0)))
+    if potential < potential_cost:
+        return False, f"仙道潜力不足：本次破体需 {potential_cost} 点（当前 {potential}）。", 0
+    cost = int(round(float(row.get("exp", 0) or 0) * talent_cost) * cost_scale * factor + 0.999)
     if xueqi < cost:
         return False, f"突破【{nxt['level']}】需血气 {cost:,}（当前 {int(xueqi):,}）。", 0
-    prob = max(0.01, 1 - (idx + 1) / 60) + max(-0.9, float(success_bonus or 0)) + float(rate_bonus)
+    prob = max(0.01, 1 - (idx + 1) / 60) + max(-0.9, float(success_bonus or 0)) + talent_rate + float(rate_bonus)
     if luck:
         prob += (1 - prob) * 0.5
-    prob = min(0.99, max(0.01, prob))
+    prob = max(0.01, prob)
     if rng.random() < prob:
         doc.physique_index = idx + 1
+        doc.ext["potential"] = max(0, potential - potential_cost)
         return True, (f"炼体突破成功，肉身升华！\n"
-                      f"【{row['level']}】→【{nxt['level']}】｜血气 -{cost:,}"), cost
+                      f"【{row['level']}】→【{nxt['level']}】｜血气 -{cost:,}｜潜力 -{potential_cost}"), cost
     roll = rng.random()
-    if roll > 0.9:
-        lost = int(cost * 0.4)
-    elif roll > 0.8:
-        lost = int(cost * 0.2)
-    elif roll > 0.7:
-        lost = int(cost * 0.1)
+    if one_key:
+        loss_rate = (0.4, 0.2, 0.1, 0.05, 0.0)[min(4, int(roll * 5))]
     else:
-        lost = 0
+        loss_rate = 0.4 if roll > 0.9 else 0.2 if roll > 0.8 else 0.1 if roll > 0.7 else 0.0
+    lost = int(cost * loss_rate)
     return False, ("炼体突破失败！" + (f"气血逆冲，损失 {lost:,} 血气。" if lost else "")), lost
 
 
 def physique_text(doc: PlayerDoc, table: list[dict]) -> str:
     row = physique_entry(doc, table)
     nxt = table[int(doc.physique_index) + 1] if int(doc.physique_index) < len(table) - 1 else None
-    cost = int(float(row.get("exp", 0) or 0) * BODY_COST_SCALE + 0.999)
+    cost_reduction, _ = physique_breakthrough_bonus(doc)
+    cost = int(round(float(row.get("exp", 0) or 0) * cost_reduction)
+               * BODY_COST_SCALE + 0.999)
     lines = [
         "--- 炼体 ---",
         f"境界：{row['level']}（第 {int(doc.physique_index) + 1} 重）",
@@ -362,7 +441,9 @@ def physique_text(doc: PlayerDoc, table: list[dict]) -> str:
     ]
     if nxt:
         lines.append(f"下境：{nxt['level']}｜突破耗血气 {cost:,}"
-                     f"｜成功率 ≥{max(1, int((1 - (int(doc.physique_index) + 1) / 60) * 100))}%")
+                     f"｜潜力 {player_breakthrough_potential_cost(doc, int(doc.physique_index) + 1)}"
+                     f"｜成功率 ≥{max(1, int((1 - (int(doc.physique_index) + 1) / 60
+                                                   + physique_breakthrough_bonus(doc)[1]) * 100))}%")
     else:
         lines.append("已至炼体顶点。")
     lines.append(f"突破：#炼体突破（原版语义：血气支付，失败气血逆冲）")
@@ -386,6 +467,7 @@ def one_key_break(
     cost_factor: float = 1.0,
     rate_bonus: float = 0.0,
     era_note: str = "",
+    potential_bonus: float = 0.0,
 ) -> tuple[str, PlayerDoc, int]:
     """一键突破（原版 OneKeyLevelUp 直译）。
 
@@ -405,9 +487,9 @@ def one_key_break(
         if luck and used >= grass:
             reason = "幸运草用尽"
             break
-        rate = min(0.99, success_rate + ((1 - success_rate) * 0.5 if luck else 0.0))
-        allowed, msg, nd = breakthrough(d, level_table, rate, fail_penalty, rng,
-                                        cost_factor=cost_factor, rate_bonus=rate_bonus)
+        allowed, msg, nd = breakthrough(d, level_table, success_rate, fail_penalty, rng,
+                                        cost_factor=cost_factor, rate_bonus=rate_bonus,
+                                        luck=luck, potential_bonus=potential_bonus)
         if not allowed:
             reason = msg.split("\n")[0]
             break
@@ -438,6 +520,7 @@ def one_key_body(
     cost_scale: float = BODY_COST_SCALE,
     cost_factor: float = 1.0,
     rate_bonus: float = 0.0,
+    success_bonus: float = 0.0,
     era_note: str = "",
 ) -> tuple[str, PlayerDoc, int]:
     """一键破体（原版 OneKeyMaxUp 直译）。返回 (文案, 新档案, 幸运草消耗)。
@@ -457,14 +540,22 @@ def one_key_body(
         if luck and used >= grass:
             reason = "幸运草用尽"
             break
+        need_potential = player_breakthrough_potential_cost(d, idx + 1)
+        potential = max(0, int(float(d.ext.get("potential", 0) or 0)))
+        if potential < need_potential:
+            reason = f"仙道潜力不足（需 {need_potential}，现有 {potential}）"
+            break
         xueqi = float(d.ext.get("xueqi", 0) or 0)
-        need = int(float(table[idx].get("exp", 0) or 0) * cost_scale * factor + 0.999)
+        talent_cost, _ = physique_breakthrough_bonus(d)
+        need = int(round(float(table[idx].get("exp", 0) or 0) * talent_cost)
+                    * cost_scale * factor + 0.999)
         if xueqi < need:
             reason = "血气不足"
             break
         good, _msg, cost = body_breakthrough(
             d, table, xueqi, rng, luck=luck, cost_scale=cost_scale,
-            cost_factor=cost_factor, rate_bonus=rate_bonus)
+            cost_factor=cost_factor, rate_bonus=rate_bonus,
+            success_bonus=success_bonus, one_key=True)
         if cost:
             d.ext["xueqi"] = max(0.0, xueqi - cost)
         if int(d.physique_index) > idx:

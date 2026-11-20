@@ -132,16 +132,23 @@ async def main():
     print("cultivate ok")
 
     # 8. 突破：需求取「当前境界」的 exp 字段；修为不足 / 成功 / 失败损耗
-    d7 = d6f
+    d7 = d6f.model_copy(deep=True)
+    d7.ext["potential"] = 100
     d7.exp = 499
     ok, _, d8 = cultivate.breakthrough(d7, level_table, 1.0, 0.3, _random.Random(1))
     assert not ok and d8.exp == 499, "修为不足不应突破"
     d8.exp = 500
     ok, msg, d9 = cultivate.breakthrough(d8, level_table, 1.0, 0.3, _random.Random(1))
-    assert ok and d9.realm_index == 1 and d9.exp == 500, msg  # 累计制不扣修为
+    assert ok and d9.realm_index == 1 and d9.exp == 0 and d9.ext["potential"] == 98, msg
+    class _BreakFail(_random.Random):
+        def __init__(self):
+            self.values = iter((0.999, 0.95))
+        def random(self):
+            return next(self.values)
+    d9.ext["potential"] = 100
     ok, msg, d10 = cultivate.breakthrough(
-        d9.model_copy(update={"exp": 5000}), level_table, 0.0, 0.3, _random.Random(1))
-    assert ok and d10.exp == 3500, msg  # 必败路径：损耗 30%×5000 = 1500
+        d9.model_copy(update={"exp": 10_000}), level_table, 0.0, 0.3, _BreakFail())
+    assert ok and d10.realm_index == 1 and d10.exp == 3_000, msg
     print("breakthrough ok")
 
 
@@ -2028,7 +2035,7 @@ async def main():
     # 16q. 双轨境界：炼体突破 + 属性聚合叠加（原版四体系求和，量级 ÷1000）
     body_table = store.table("Level/炼体境界")
     assert len(body_table) == 63 and body_table[0]["level"] == "莽夫"
-    bd = PlayerDoc(uid="body", name="肉身", realm_index=10, exp=0)
+    bd = PlayerDoc(uid="body", name="肉身", realm_index=10, exp=0, ext={"potential": 100})
     assert cultivate.physique_entry(bd, body_table)["level"] == "莽夫"
 
     # 血气不足拒绝
@@ -3214,7 +3221,8 @@ async def main():
 
     lv6 = store.table("Level/练气境界")
     blv6 = store.table("Level/炼体境界")
-    u6 = PlayerDoc(uid="w6", realm_index=0, exp=10 ** 9, ext={"xueqi": 10 ** 9})
+    u6 = PlayerDoc(uid="w6", realm_index=0, exp=10 ** 9,
+                   ext={"xueqi": 10 ** 9, "potential": 1000})
     txt6, u6b, used6 = cv.one_key_break(u6, lv6, 1.0, 0.3, _random.Random(1))
     assert u6b.realm_index > u6.realm_index and "结束原因" in txt6 and used6 == 0
     _t, u6c, used6b = cv.one_key_body(u6b, blv6, _random.Random(2), luck=True, grass=3)
