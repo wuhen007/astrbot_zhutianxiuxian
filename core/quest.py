@@ -52,6 +52,48 @@ def final_reward(level: int, realm: int) -> dict[str, int]:
     }
 
 
+def grant_completion_potential(doc: Any, today: str) -> tuple[int, bool]:
+    """发放原版每日任务完成潜力，并用日期凭证保证重复结算幂等。"""
+    ext = getattr(doc, "ext", None)
+    if not isinstance(ext, dict):
+        return 0, False
+    claims = ext.get("_rewardClaims")
+    if not isinstance(claims, dict):
+        claims = ext["_rewardClaims"] = {}
+    key = f"daily-task:{today}:potential"
+    prior = claims.get(key)
+    if isinstance(prior, dict):
+        try:
+            return max(0, int(prior.get("amount", 0) or 0)), False
+        except (TypeError, ValueError):
+            return 0, False
+
+    legacy = ext.get("legacy_source") if isinstance(ext.get("legacy_source"), dict) else {}
+    try:
+        secret_level = max(0, int(float(legacy.get("mijinglevel_id", 0) or 0)))
+        ancient_level = max(0, int(float(legacy.get("xiangulevel_id", 0) or 0)))
+    except (TypeError, ValueError):
+        secret_level = ancient_level = 0
+    if not secret_level and not ancient_level:
+        secret_level = max(0, int(getattr(doc, "realm_index", 0) or 0)) + 1
+        try:
+            from .xiangu import xg_level_of
+            ancient_level = max(0, int(xg_level_of(doc)))
+        except Exception:
+            ancient_level = 0
+
+    base = max(secret_level, ancient_level) * 10
+    try:
+        from .mingge import effects_of
+        bonus = float(effects_of(doc).get("仙道潜力收益", 0) or 0)
+    except (TypeError, ValueError):
+        bonus = 0.0
+    amount = max(0, int(base * max(0.0, 1.0 + bonus)))
+    ext["potential"] = max(0, int(float(ext.get("potential", 0) or 0))) + amount
+    claims[key] = {"amount": amount, "claimedAt": time.time()}
+    return amount, True
+
+
 def accept_record(rec: dict[str, Any] | None, uid: str, today: str) -> dict[str, Any]:
     """接取/刷新今日任务（原版 add_renwu + Object.assign 刷新）。"""
     base = rec or {"uid": uid, "level": 1, "exp": 0}

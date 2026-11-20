@@ -17800,32 +17800,42 @@ class ZhutianPlugin(Star):
         if err:
             yield event.plain_result(err)
             return
-        rec = await self.db.get_daily_task(doc.uid)
-        if not rec or not quest.is_today(rec, quest.date_key()):
-            yield event.plain_result(f"请先发送「{CMD_TASK_GET}」接取今日任务。")
-            return
-        if rec.get("renwu") == 2:
-            yield event.plain_result("今日奖励已经领取。")
-            return
-        if quest.all_done(rec):
-            yield event.plain_result("今日任务均已完成，请发送「#领取每日奖励」。")
-            return
-        realm = max(0, int(doc.realm_index))
-        msgs, new_rec, completed = quest.settle_submit(rec, realm)
-        if not msgs:
-            yield event.plain_result("你还有任务没完成哦~（进度见「#我的任务」）")
-            return
-        rew = quest.step_reward(new_rec["level"], realm) * completed
-        d = doc.model_copy(deep=True)
-        d.exp += rew
-        d.stones += rew
-        d.ext["xueqi"] = int(d.ext.get("xueqi", 0)) + rew
-        async with self.db.transaction():
-            await self.db.upsert_daily_task(new_rec)   # 先落任务（w 置 2，避免奖励灵石被误追踪）
-            await self.db.save_player(d.model_dump())
-        extra = ""
-        if new_rec.get("renwu") == 1:
-            extra = "\n今日任务全部完成！发「#领取每日奖励」领取终极奖励。"
+        async with self._pl_lock(doc.uid):
+            raw = await self.db.get_player(doc.uid)
+            if not raw:
+                yield event.plain_result(f"道友尚未踏入仙途，请发送「{CMD_START}」。")
+                return
+            doc = PlayerDoc(**raw)
+            rec = await self.db.get_daily_task(doc.uid)
+            if not rec or not quest.is_today(rec, quest.date_key()):
+                yield event.plain_result(f"请先发送「{CMD_TASK_GET}」接取今日任务。")
+                return
+            if rec.get("renwu") == 2:
+                yield event.plain_result("今日奖励已经领取。")
+                return
+            if quest.all_done(rec):
+                yield event.plain_result("今日任务均已完成，请发送「#领取每日奖励」。")
+                return
+            realm = max(0, int(doc.realm_index))
+            msgs, new_rec, completed = quest.settle_submit(rec, realm)
+            if not msgs:
+                yield event.plain_result("你还有任务没完成哦~（进度见「#我的任务」）")
+                return
+            rew = quest.step_reward(new_rec["level"], realm) * completed
+            d = doc.model_copy(deep=True)
+            d.exp += rew
+            d.stones += rew
+            d.ext["xueqi"] = int(d.ext.get("xueqi", 0)) + rew
+            potential_gain = 0
+            if new_rec.get("renwu") == 1 and rec.get("renwu") != 1:
+                potential_gain, _granted = quest.grant_completion_potential(d, new_rec["date"])
+            async with self.db.transaction():
+                await self.db.upsert_daily_task(new_rec)   # 先落任务（w 置 2，避免奖励灵石被误追踪）
+                await self.db.save_player(d.model_dump())
+            extra = ""
+            if new_rec.get("renwu") == 1:
+                extra = (f"\n今日任务全部完成！仙道潜力 +{potential_gain}，"
+                         "发「#领取每日奖励」领取终极奖励。")
         yield event.plain_result("\n".join(msgs) + extra)
         # W33：原版 DAILY_TASK_BUTTONS
         res = self._kb(event, "", _uk_row(
