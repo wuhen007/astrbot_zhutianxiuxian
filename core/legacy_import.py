@@ -11,6 +11,8 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
+from .wenxian import EXP_PER_LEVEL, MAX_LEVEL
+
 
 PLAYER_DIR_NAMES = ("xiuxian_player", "players")
 NAJIE_DIR_NAMES = ("xiuxian_najie", "najie", "inventory")
@@ -43,6 +45,58 @@ def _uid(raw: Mapping[str, Any], fallback: str) -> str:
     return fallback.replace("qg_", "").strip()
 
 
+def _normalize_wenxian(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, Mapping):
+        return None
+
+    claimed = sorted({
+        level for value in raw.get("claimed", []) if (level := _number(value, -1)) in range(1, MAX_LEVEL + 1)
+    }) if isinstance(raw.get("claimed"), list) else []
+    level = max(0, _number(raw.get("level", 0)), max(claimed, default=0))
+    total_exp = max(0, _number(raw.get("exp", 0)), level * EXP_PER_LEVEL)
+    total_exp = min(MAX_LEVEL * EXP_PER_LEVEL, total_exp)
+    level = min(MAX_LEVEL, total_exp // EXP_PER_LEVEL)
+    exp = min(EXP_PER_LEVEL - 1, total_exp - level * EXP_PER_LEVEL)
+    unlocked = raw.get("unlocked")
+    tasks = raw.get("tasks") if isinstance(raw.get("tasks"), Mapping) else {}
+    source_weekly = tasks.get("weekly") if isinstance(tasks.get("weekly"), Mapping) else {}
+    source_progress = source_weekly.get("progress") if isinstance(source_weekly.get("progress"), Mapping) else {}
+    weekly_progress = {
+        "daily_task": _number(source_progress.get("dailyTask", 0)),
+        "tianjiao": _number(source_progress.get("tianjiao", 0)),
+        "stone_market": _number(source_progress.get("stoneMarket", 0)),
+        "spirit_heart": _number(source_progress.get("spiritHeart", 0)),
+        "dungeon": _number(source_progress.get("dungeon", 0)),
+    }
+    trial = raw.get("trial") if isinstance(raw.get("trial"), Mapping) else {}
+    clue = raw.get("clue") or False
+    return {
+        "active": bool(unlocked) if isinstance(unlocked, bool) else bool(total_exp or claimed),
+        "clue": clue,
+        "step": 3 if trial.get("clueExplored") else 0,
+        "level": level,
+        "exp": exp,
+        "claimed": claimed,
+        "daily": {},
+        "weekly": {
+            "week": str(source_weekly.get("weekKey") or ""),
+            "prog": weekly_progress,
+            "claimed": bool(source_weekly.get("claimed")),
+        },
+        "trial": {
+            "dailyTasks": min(7, max(0, _number(trial.get("dailyTasks", 0)))),
+            "lastDailyTaskDate": str(trial.get("lastDailyTaskDate") or ""),
+            "innerWorldOpened": bool(trial.get("innerWorldOpened")),
+            "tianjiaoDefeated": bool(trial.get("tianjiaoDefeated")),
+            "clueExplored": bool(trial.get("clueExplored")),
+        },
+        "pendingExp": max(0, _number(raw.get("pendingExp", 0))),
+        "dungeonClueAttempts": min(30, max(0, _number(raw.get("dungeonClueAttempts", 0)))),
+        "lastDungeonClueDate": str(raw.get("lastDungeonClueDate") or ""),
+        "legacyTasks": dict(tasks),
+    }
+
+
 def normalize_player(raw: Mapping[str, Any], uid_hint: str) -> tuple[dict[str, Any], list[str]]:
     """把原版常见中文字段转换为 PlayerDoc 可保存的字典。"""
     uid = _uid(raw, uid_hint)
@@ -69,6 +123,9 @@ def normalize_player(raw: Mapping[str, Any], uid_hint: str) -> tuple[dict[str, A
         "occupation_level": max(0, _number(raw.get("occupation_level", 0))),
         "cultivation_efficiency": float(raw.get("修炼效率提升", 0) or 0),
     }
+    wenxian_state = _normalize_wenxian(raw.get("问仙令"))
+    if wenxian_state is not None:
+        state_map["wenxian"] = wenxian_state
     if isinstance(raw.get("灵根"), Mapping):
         state_map["linggen"] = dict(raw["灵根"])
     elif isinstance(raw.get("linggen"), list) and raw["linggen"]:
