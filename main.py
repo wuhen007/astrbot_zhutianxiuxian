@@ -9555,6 +9555,9 @@ class ZhutianPlugin(Star):
             return
         d = doc.model_copy(deep=True)
         d.ext["yuanshi"] = y2
+        wx = wenxian.system_of(d)
+        wenxian.record_weekly(wx, "stone_market", 1, now)
+        d.ext["wenxian"] = wx
         cost = consume["cost"]
         if cost["currency"] == "灵石":
             d.stones = max(0, d.stones - int(cost["amount"]))
@@ -13856,6 +13859,9 @@ class ZhutianPlugin(Star):
         d = doc.model_copy(deep=True)
         d.ext["hp"] = max(0, int(a_hp))
         tj_mod.mark_fight(d, now)
+        wx = wenxian.system_of(d)
+        wenxian.record_weekly(wx, "tianjiao", 1, now)
+        d.ext["wenxian"] = wx
         damage = max(0, min(foe_hp - int(b_hp), int(int(row["hp"]) * 0.4)))   # 单场至多削 40%
         if pct <= 0:
             damage = 0
@@ -17015,6 +17021,7 @@ class ZhutianPlugin(Star):
             "place": sess.place, "floor": sess.floor, "stones": sess.stones,
             "items": sess.items, "log": sess.log[-30:], "factor": sess.factor,
             "sect_name": sess.sect_name, "boss_kills": sess.boss_kills,
+            "dungeon": sess.dungeon,
         }
         if not sess.sect_name:  # 每日任务 3：秘境探索计数（宗门秘境不计，对齐原版"沉迷不计入"）
             await self.db.add_daily_secret(doc.uid)
@@ -17043,6 +17050,10 @@ class ZhutianPlugin(Star):
                 await self.db.add_items(doc.uid, drop_items)
             yield event.plain_result(f"{flavor}\n{text}")
             return
+        if sess.dungeon:
+            wx = wenxian.system_of(d)
+            wenxian.record_weekly(wx, "dungeon", 1, time.time())
+            d.ext["wenxian"] = wx
         d.state = "秘境中"
         grown = bloodline.grind(d)          # W8-B1a：每次成功寻宝打磨一处秘境
         mem_mod.add_sim(d)                   # W8-B5：真实秘境结算 +2% 模拟值

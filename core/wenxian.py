@@ -5,8 +5,8 @@
 - 每日任务（每项 500 exp，每日重置）：闭关 1 次 / 讨伐 1 次 / 炼丹 1 次
   （原版 spiritHeart 30 / tianjiao 1 / dungeon 3 → 按本插件动作映射，标注偏差）
 - 问仙试炼：持有线索后完成 7 日每日任务、开辟内景地、击败天骄、探索最终线索
-- 每周任务（3000 exp）：问仙令日常 3 天 / 每日修行任务 5 次 / 讨伐 3 次 / 炼丹 5 次
-  （原版 spiritHeart / tianjiao / stoneMarket / dungeon 周目标仍按现有模块简化）
+- 每周任务（3000 exp）：每日修行任务 5 次 / 讨伐天骄 5 次 / 源石坊购石 5 次 /
+  消耗心神 100 点 / 副本成功探索 20 次
 - 5 级节点大奖：仙道潜力 + 丹药
 """
 
@@ -28,11 +28,13 @@ DAILY_EXP = 500
 WEEKLY_EXP = 3000
 TRIAL_DAILY_TASK_TARGET = 7
 DAILY_GOALS = {"seclusion": 1, "raid": 1, "alchemy": 1}
-WEEKLY_GOALS = {"daily": 3, "daily_task": 5, "raid": 3, "alchemy": 5}
+WEEKLY_GOALS = {"daily_task": 5, "tianjiao": 5, "stone_market": 5,
+                "spirit_heart": 100, "dungeon": 20}
 
 DAILY_LABELS = {"seclusion": "闭关出关", "raid": "讨伐/战斗", "alchemy": "炼丹/打造"}
-WEEKLY_LABELS = {"daily": "领取问仙令每日任务(天)", "daily_task": "完成每日修行任务",
-                 "raid": "讨伐/战斗", "alchemy": "炼丹/打造"}
+WEEKLY_LABELS = {"daily_task": "完成每日修行任务", "tianjiao": "讨伐天骄",
+                 "stone_market": "源石坊购石", "spirit_heart": "消耗心神",
+                 "dungeon": "副本成功探索"}
 
 BONUS_REWARDS = {
     5: {"name": "初入仙途", "potential": 20},
@@ -139,10 +141,18 @@ def record_trial(w: dict, kind: str, now: float) -> dict:
 def record_daily_task_completion(w: dict, now: float) -> dict:
     """Record a completed daily quest for both the seven-day trial and weekly goal."""
     trial_result = record_trial(w, "daily", now)
-    week = weekly_of(w, now)
-    before = int(week["prog"].get("daily_task", 0) or 0)
-    week["prog"]["daily_task"] = min(WEEKLY_GOALS["daily_task"], before + 1)
-    return {**trial_result, "weeklyDailyTask": week["prog"]["daily_task"]}
+    week_result = record_weekly(w, "daily_task", 1, now)
+    return {**trial_result, "weeklyDailyTask": week_result["progress"]}
+
+
+def record_weekly(w: dict, kind: str, n: int = 1, now: float | None = None) -> dict:
+    """Record source-equivalent weekly progress, including before pass activation."""
+    if kind not in WEEKLY_GOALS:
+        return {"changed": False, "progress": 0}
+    week = weekly_of(w, time.time() if now is None else now)
+    before = int(week["prog"].get(kind, 0) or 0)
+    week["prog"][kind] = min(WEEKLY_GOALS[kind], before + max(0, int(n)))
+    return {"changed": week["prog"][kind] != before, "progress": week["prog"][kind]}
 
 
 def track(w: dict, kind: str, n: int = 1, now: float | None = None) -> None:
@@ -266,11 +276,6 @@ def claim_daily(w: dict, key: str, now: float) -> tuple[bool, str, dict]:
     if int(d["prog"].get(key, 0)) < DAILY_GOALS[key]:
         return False, f"「{DAILY_LABELS[key]}」未完成（{d['prog'].get(key, 0)}/{DAILY_GOALS[key]}）。", w
     d["claimed"] = list(d.get("claimed") or []) + [key]
-    # 每周任务「完成每日任务天数」：每天首次领每日任务时 +1
-    if not d.get("counted"):
-        wk = weekly_of(w, now)
-        wk["prog"]["daily"] = min(WEEKLY_GOALS["daily"], int(wk["prog"].get("daily", 0)) + 1)
-        d["counted"] = True
     lv, exp = add_exp(w, DAILY_EXP)
     return True, f"每日任务「{DAILY_LABELS[key]}」完成，问仙令经验 +{DAILY_EXP}（{lv} 级 {exp}/1000）。", w
 

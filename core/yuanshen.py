@@ -31,6 +31,8 @@ import time
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from . import wenxian
+
 # ---------------------------------------------------------------- 心神经脉
 
 HEART_ENTRY = 10              # 每次神游入场消耗
@@ -276,15 +278,20 @@ def heart_minutes_left(doc: Any, now: float | None = None) -> int:
 
 
 def consume_heart(doc: Any, cost: int, now: float | None = None) -> tuple[bool, int, int]:
-    cur, cap = heart_of(doc, now)
+    stamp = time.time() if now is None else float(now)
+    cur, cap = heart_of(doc, stamp)
     need = max(0, int(cost))
     if cur < need:
         return False, cur, cap
     st = ensure(doc)
     st["heart"]["cur"] = cur - need
     if int(st["heart"]["cur"]) < cap and float(st["heart"].get("last") or 0) <= 0:
-        st["heart"]["last"] = time.time() if now is None else float(now)
+        st["heart"]["last"] = stamp
     save(doc, st)
+    if need:
+        wx = wenxian.system_of(doc)
+        wenxian.record_weekly(wx, "spirit_heart", need, stamp)
+        doc.ext["wenxian"] = wx
     return True, cur - need, cap
 
 
