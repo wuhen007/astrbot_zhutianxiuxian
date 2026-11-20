@@ -2227,8 +2227,8 @@ class ZhutianPlugin(Star):
             {"title": "问仙令", "lines": [
                 (CMD_WXL, "通行证面板（激活后：等级/经验/任务）"),
                 (CMD_WXL_CLUE, "求取问仙线索（300 万灵石）"),
-                (CMD_WXL_EXPLORE, "循迹线索（3 处）"),
-                (CMD_WXL_ACT, "激活问仙令"),
+                (CMD_WXL_EXPLORE, "循迹线索（3 处，最后一处计入试炼）"),
+                (CMD_WXL_ACT, "完成 7 日任务、开辟内景地、击败天骄与最终寻迹后激活"),
                 (CMD_WXL_DAILY, "领取已完成的每日任务（每项 500 经验）"),
                 (f"{CMD_WXL_CLAIM} 等级", "领取升级奖励"),
                 (CMD_WXL_WEEKLY, "领取每周任务（3000 经验）"),
@@ -6915,6 +6915,12 @@ class ZhutianPlugin(Star):
             return
         w["clue"] = True
         w["step"] = int(wenxian.CLUE_STEPS)
+        w["trial"].update({
+            "dailyTasks": wenxian.TRIAL_DAILY_TASK_TARGET,
+            "innerWorldOpened": True,
+            "tianjiaoDefeated": True,
+            "clueExplored": True,
+        })
         ok, msg, w2 = wenxian.activate(w, int(target.realm_index))
         if not ok:
             yield event.plain_result(f"开启失败：{msg}")
@@ -9357,6 +9363,8 @@ class ZhutianPlugin(Star):
         if ok:
             d = doc.model_copy(deep=True)
             d.stones -= wenxian.CLUE_COST
+            if iw_mod.state_of(d) is not None:
+                wenxian.record_trial(w2, "inner-world", time.time())
             d.ext["wenxian"] = w2
             await self.db.save_player(d.model_dump())
         yield event.plain_result(msg)
@@ -13878,6 +13886,9 @@ class ZhutianPlugin(Star):
             done = set(d.ext.get("tianjiao_defeated") or [])
             done.add(row["name"])
             d.ext["tianjiao_defeated"] = sorted(done)
+            wx = wenxian.system_of(d)
+            wxl_trial = wenxian.record_trial(wx, "tianjiao", now)
+            d.ext["wenxian"] = wx
             cleared = tj_mod.clear_hatred(d, row["name"])
             fixed = tj_mod.repair_by_source(d, row["name"])
             cleared = int(cleared)
@@ -13893,6 +13904,8 @@ class ZhutianPlugin(Star):
                 lines.append(f"【污损复原】{fixed} 件被它污损的装备重焕灵光。")
             if cleared:
                 lines.append(f"旧怨已了，仇恨清零（原 {cleared}）。")
+            if wxl_trial["changed"]:
+                lines.append("问仙试炼：击败位面天骄印记已完成。")
             yield event.plain_result("\n".join(lines) + ("\n" + tail if tail else ""))
             return
 
@@ -15336,6 +15349,9 @@ class ZhutianPlugin(Star):
             return
         ok, msg = iw_mod.open_world(doc)
         if ok:
+            wx = wenxian.system_of(doc)
+            wenxian.record_trial(wx, "inner-world", time.time())
+            doc.ext["wenxian"] = wx
             await self.db.save_player(doc.model_dump())
         async for r in self._smart(event, msg, "开启内景地"):
             yield r
@@ -17827,8 +17843,12 @@ class ZhutianPlugin(Star):
             d.stones += rew
             d.ext["xueqi"] = int(d.ext.get("xueqi", 0)) + rew
             potential_gain = 0
+            trial_progress = None
             if new_rec.get("renwu") == 1 and rec.get("renwu") != 1:
                 potential_gain, _granted = quest.grant_completion_potential(d, new_rec["date"])
+                wx = wenxian.system_of(d)
+                trial_progress = wenxian.record_daily_task_completion(wx, time.time())
+                d.ext["wenxian"] = wx
             async with self.db.transaction():
                 await self.db.upsert_daily_task(new_rec)   # 先落任务（w 置 2，避免奖励灵石被误追踪）
                 await self.db.save_player(d.model_dump())
@@ -17836,6 +17856,11 @@ class ZhutianPlugin(Star):
             if new_rec.get("renwu") == 1:
                 extra = (f"\n今日任务全部完成！仙道潜力 +{potential_gain}，"
                          "发「#领取每日奖励」领取终极奖励。")
+                if trial_progress and trial_progress["trial"]["dailyTasks"]:
+                    t = trial_progress["trial"]
+                    extra += (f"\n问仙试炼：每日任务 {t['dailyTasks']}/{wenxian.TRIAL_DAILY_TASK_TARGET}；"
+                              f"本周完成每日修行任务 {trial_progress['weeklyDailyTask']}/"
+                              f"{wenxian.WEEKLY_GOALS['daily_task']}。")
         yield event.plain_result("\n".join(msgs) + extra)
         # W33：原版 DAILY_TASK_BUTTONS
         res = self._kb(event, "", _uk_row(

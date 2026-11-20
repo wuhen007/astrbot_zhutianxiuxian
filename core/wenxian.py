@@ -4,7 +4,9 @@
 - 通行证：1000 exp/级、上限 60 级；升级奖修为 800 万×1.12^level×波动
 - 每日任务（每项 500 exp，每日重置）：闭关 1 次 / 讨伐 1 次 / 炼丹 1 次
   （原版 spiritHeart 30 / tianjiao 1 / dungeon 3 → 按本插件动作映射，标注偏差）
-- 每周任务（3000 exp）：每日任务 3 天 / 讨伐 3 次 / 炼丹 5 次（原版 5 项 → 简化 3 项）
+- 问仙试炼：持有线索后完成 7 日每日任务、开辟内景地、击败天骄、探索最终线索
+- 每周任务（3000 exp）：问仙令日常 3 天 / 每日修行任务 5 次 / 讨伐 3 次 / 炼丹 5 次
+  （原版 spiritHeart / tianjiao / stoneMarket / dungeon 周目标仍按现有模块简化）
 - 5 级节点大奖：仙道潜力 + 丹药
 """
 
@@ -24,11 +26,13 @@ MIN_REALM = 5
 
 DAILY_EXP = 500
 WEEKLY_EXP = 3000
+TRIAL_DAILY_TASK_TARGET = 7
 DAILY_GOALS = {"seclusion": 1, "raid": 1, "alchemy": 1}
-WEEKLY_GOALS = {"daily": 3, "raid": 3, "alchemy": 5}
+WEEKLY_GOALS = {"daily": 3, "daily_task": 5, "raid": 3, "alchemy": 5}
 
 DAILY_LABELS = {"seclusion": "闭关出关", "raid": "讨伐/战斗", "alchemy": "炼丹/打造"}
-WEEKLY_LABELS = {"daily": "完成每日任务(天)", "raid": "讨伐/战斗", "alchemy": "炼丹/打造"}
+WEEKLY_LABELS = {"daily": "领取问仙令每日任务(天)", "daily_task": "完成每日修行任务",
+                 "raid": "讨伐/战斗", "alchemy": "炼丹/打造"}
 
 BONUS_REWARDS = {
     5: {"name": "初入仙途", "potential": 20},
@@ -62,6 +66,14 @@ def system_of(doc: Mapping) -> dict:
     w.setdefault("claimed", [])
     w.setdefault("daily", {})
     w.setdefault("weekly", {})
+    raw_trial = w.get("trial") if isinstance(w.get("trial"), dict) else {}
+    w["trial"] = {
+        "dailyTasks": min(TRIAL_DAILY_TASK_TARGET, max(0, int(raw_trial.get("dailyTasks", 0) or 0))),
+        "lastDailyTaskDate": str(raw_trial.get("lastDailyTaskDate") or ""),
+        "innerWorldOpened": bool(raw_trial.get("innerWorldOpened")),
+        "tianjiaoDefeated": bool(raw_trial.get("tianjiaoDefeated")),
+        "clueExplored": bool(raw_trial.get("clueExplored")),
+    }
     return w
 
 
@@ -82,8 +94,55 @@ def weekly_of(w: dict, now: float) -> dict:
     if d.get("week") != wk:
         d = {"week": wk, "prog": {k: 0 for k in WEEKLY_GOALS}, "claimed": False}
     d.setdefault("prog", {k: 0 for k in WEEKLY_GOALS})
+    for key, goal in WEEKLY_GOALS.items():
+        d["prog"][key] = min(goal, max(0, int(d["prog"].get(key, 0) or 0)))
     w["weekly"] = d
     return d
+
+
+def trial_complete(w: Mapping) -> bool:
+    trial = w.get("trial") if isinstance(w.get("trial"), Mapping) else {}
+    return bool(
+        w.get("clue")
+        and int(trial.get("dailyTasks", 0) or 0) >= TRIAL_DAILY_TASK_TARGET
+        and trial.get("innerWorldOpened")
+        and trial.get("tianjiaoDefeated")
+        and trial.get("clueExplored")
+    )
+
+
+def record_trial(w: dict, kind: str, now: float) -> dict:
+    """Record one source trial mark while the clue is held and the pass is locked."""
+    trial = w["trial"]
+    if not w.get("clue") or w.get("active"):
+        return {"changed": False, "trial": trial, "ready": trial_complete(w)}
+    changed = False
+    if kind == "daily":
+        today = _date_key(now)
+        if (trial["lastDailyTaskDate"] != today
+                and trial["dailyTasks"] < TRIAL_DAILY_TASK_TARGET):
+            trial["lastDailyTaskDate"] = today
+            trial["dailyTasks"] += 1
+            changed = True
+    elif kind == "inner-world" and not trial["innerWorldOpened"]:
+        trial["innerWorldOpened"] = True
+        changed = True
+    elif kind == "tianjiao" and not trial["tianjiaoDefeated"]:
+        trial["tianjiaoDefeated"] = True
+        changed = True
+    elif kind == "explore" and not trial["clueExplored"]:
+        trial["clueExplored"] = True
+        changed = True
+    return {"changed": changed, "trial": trial, "ready": trial_complete(w)}
+
+
+def record_daily_task_completion(w: dict, now: float) -> dict:
+    """Record a completed daily quest for both the seven-day trial and weekly goal."""
+    trial_result = record_trial(w, "daily", now)
+    week = weekly_of(w, now)
+    before = int(week["prog"].get("daily_task", 0) or 0)
+    week["prog"]["daily_task"] = min(WEEKLY_GOALS["daily_task"], before + 1)
+    return {**trial_result, "weeklyDailyTask": week["prog"]["daily_task"]}
 
 
 def track(w: dict, kind: str, n: int = 1, now: float | None = None) -> None:
@@ -119,8 +178,13 @@ def explore_clue(w: dict) -> tuple[bool, str, dict]:
     places = ("断崖古字", "荒村残碑", "云海仙门")
     if step < CLUE_STEPS:
         w["step"] = step + 1
+        trial_result = record_trial(w, "explore", time.time()) if w["step"] == CLUE_STEPS else None
+        suffix = ""
+        if trial_result and trial_result["ready"]:
+            suffix = "全部问仙试炼已完成，可发送 #激活问仙令。"
         return True, (f"循迹第 {step + 1}/{CLUE_STEPS} 处：你抵达【{places[step]}】，"
-                      + ("线索指向更深处的迷雾……" if step + 1 < CLUE_STEPS else "残图拼合完整——#激活问仙令！")), w
+                      + ("线索指向更深处的迷雾……" if step + 1 < CLUE_STEPS
+                         else "残图拼合完整。" + suffix)), w
     return False, "线索已探索完毕（#激活问仙令）。", w
 
 
@@ -133,6 +197,14 @@ def activate(w: dict, realm_index: int) -> tuple[bool, str, dict]:
         return False, "尚未获得问仙线索（#重金求取问仙线索）。", w
     if int(w.get("step", 0)) < CLUE_STEPS:
         return False, f"线索尚未探索完整（{w.get('step', 0)}/{CLUE_STEPS}，#探索问仙线索）。", w
+    if not trial_complete(w):
+        t = w["trial"]
+        lines = ["问仙试炼未完成：",
+                 f"· 每日任务 {t['dailyTasks']}/{TRIAL_DAILY_TASK_TARGET}",
+                 f"· 开辟内景地：{'已完成' if t['innerWorldOpened'] else '未完成'}",
+                 f"· 击败位面天骄：{'已完成' if t['tianjiaoDefeated'] else '未完成'}",
+                 f"· 探索最终线索：{'已完成' if t['clueExplored'] else '未完成'}"]
+        return False, "\n".join(lines), w
     w["active"] = True
     w["level"] = max(1, int(w.get("level", 0)))
     return True, (f"问仙令归位！当前等级 {w['level']}。\n"
@@ -221,8 +293,19 @@ def claim_weekly(w: dict, now: float) -> tuple[bool, str, dict]:
 def panel(w: dict, now: float) -> str:
     if not w.get("active"):
         state = "已获线索（#探索问仙线索）" if w.get("clue") else "未获线索（#重金求取问仙线索）"
-        return (f"--- 问仙令 · 未激活 ---\n状态：{state}\n"
-                f"流程：求取线索 → 探索 {CLUE_STEPS} 处 → #激活问仙令")
+        lines = ["--- 问仙令 · 未激活 ---", f"状态：{state}"]
+        if w.get("clue"):
+            t = w["trial"]
+            lines += ["【问仙试炼】",
+                      f"· 每日任务：{t['dailyTasks']}/{TRIAL_DAILY_TASK_TARGET}",
+                      f"· 开辟内景地：{'已完成' if t['innerWorldOpened'] else '未完成'}",
+                      f"· 击败位面天骄：{'已完成' if t['tianjiaoDefeated'] else '未完成'}",
+                      f"· 探索最终线索：{'已完成' if t['clueExplored'] else '未完成'}"]
+            lines.append("全部完成后发送 #激活问仙令。" if trial_complete(w)
+                         else "完成全部试炼后方可激活问仙令。")
+        else:
+            lines.append(f"流程：求取线索 → 探索 {CLUE_STEPS} 处 → 完成试炼 → #激活问仙令")
+        return "\n".join(lines)
     d = daily_of(w, now)
     wk = weekly_of(w, now)
     daily_lines = "\n".join(
