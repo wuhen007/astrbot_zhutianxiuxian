@@ -1,79 +1,67 @@
-# 诸天修仙 Python 插件
+# 诸天修仙
 
-AstrBot 群聊修仙插件，移植自 [Yunzai JS 原版](https://gitee.com/mo-wuming/zhutianxiuxian1.0)。本仓库是 AstrBot 专用移植，内容对应上游的 `python-port` 分支；上游 `master` 是 Yunzai JS 原始实现，不是 AstrBot 插件。
-
-玩家玩法说明见 [docs/游玩说明.md](docs/游玩说明.md)，指令以插件帮助页和当前生成的指令手册为准。移植范围、近期对照结果和未验证边界见 [GAMEPLAY-PARITY.md](GAMEPLAY-PARITY.md)。
+面向 AstrBot 的群聊文字修仙游戏。玩家可体验境界养成、秘境探索、战斗、职业与装备、宗门互动，以及诸天位面和长线剧情玩法。项目以 AstrBot 原生 Python 插件形式运行，玩法设定和部分内容参考[上游原作](https://gitee.com/mo-wuming/zhutianxiuxian1.0)。
 
 ## 安装
 
-可在 AstrBot WebUI 中填写本仓库地址直接安装，或手动克隆：
+AstrBot 版本要求：`>=4.0,<5`。
+
+在 AstrBot WebUI 的插件管理中使用仓库地址安装：
+
+```text
+https://github.com/wuhen007/astrbot_zhutianxiuxian
+```
+
+也可以手动克隆到插件目录：
 
 ```bash
 git clone https://github.com/wuhen007/astrbot_zhutianxiuxian.git \
   AstrBot/data/plugins/astrbot_zhutianxiuxian
 ```
 
-插件标识由 `metadata.yaml` 的 `name` 和 `main.py` 注册名共同指定，均为 `astrbot_zhutianxiuxian`。数据库与面板使用固定的 `zhutian` 数据目录名，插件改名不会改变已有数据位置。
+安装后重启 AstrBot。升级前建议备份插件数据目录；插件会在启动时检查并执行 SQLite 数据库迁移。
 
-依赖由 AstrBot 环境提供，包括 `pydantic`、`jinja2`、`aiosqlite`、`pillow` 和 `playwright`。插件启动时加载 JSON 内容表、执行 SQLite 迁移并注册指令。当前数据库版本为 v17。
+## 开始游玩
 
-## 项目结构
+在群聊中发送 `#踏入仙途` 阅读序章并选择降临方向，再按提示发送 `#降临 修仙界` 创建角色。之后可用以下指令开始：
 
-```text
-.
-├── main.py                   AstrBot 指令注册、消息处理、生命周期任务
-├── core/                      玩法与领域逻辑
-│   ├── combat/                战斗引擎、技能和战斗配置
-│   ├── endless.py             无尽劫境
-│   ├── reinc_state.py         无尽轮回分支剧情状态机
-│   ├── reincarnation_data.json 原版轮回场景、职业、队友、怪物与结局数据
-│   ├── projection_story.py    诸天投影事件条件与效果
-│   ├── projection_events.json 原版投影事件数据
-│   ├── auction.py             星阁竞拍及玩家拍卖状态逻辑
-│   ├── xiangu.py              仙古地图和秘境状态
-│   └── xiangu_npc.py          NPC 交互与生态移动
-├── infra/                     SQLite、内容加载、渲染等宿主设施
-├── data/                      游戏配置、内容表与帮助信息
-├── templates/                 面板图片模板
-└── tests/                     离线回归测试及工具
-```
+- `#修仙状态`：查看角色状态与当前行动。
+- `#修仙签到`：领取每日签到奖励。
+- `#闭关 120分钟`、`#出关`：开始并结算闭关修炼。
+- `#突破`、`#炼体突破`：推进练气或炼体境界。
+- `#获取每日任务`、`#我的任务`、`#提交每日任务`：接取、查看和提交每日任务。
+- `#进入仙古秘境`、`#秘境探索`：进入仙古秘境并继续探索。
 
-本项目不是对上游所有平台能力和全部玩法的逐项等价移植；跨服、网页系统、皮肤上传及部分协作玩法不在当前范围。具体边界以 [GAMEPLAY-PARITY.md](GAMEPLAY-PARITY.md) 和各模块说明为准。
+`#修仙帮助` 查看帮助目录，`#基础帮助` 查看常用修仙指令。不同系统有单独的帮助页，实际参数和解锁条件以机器人回复为准。更多入门流程见[玩家指南](docs/游玩说明.md)。
 
-## 开发与验证
+## 功能
 
-使用安装了项目依赖的 Python 环境运行：
+- 角色创建、练气与炼体成长、命格、灵根和功法。
+- 闭关、任务、秘境、Boss、PVP 与队伍挑战。
+- 职业、采集、炼丹、锻造、装备和物品交易。
+- 宗门、师徒、道侣、拍卖及其他群体玩法。
+- 位面探索、诸天事件、无尽劫境和无尽轮回等长线内容。
+
+功能入口和开放条件以当前帮助页为准；本项目不承诺覆盖上游原作的所有玩法或其他平台功能。
+
+## 配置与数据
+
+- `ACCESS_CONTROL.WHITELIST_GROUPS`：限制可使用插件的群号；留空时不按群号限制。
+- `RENDER_ENABLE`：控制图片面板渲染。启用需要可用的 Playwright/Chromium 环境；渲染不可用时相关面板会回退到文本输出。
+- 数据库与面板文件使用固定的 `zhutian` 数据目录名，修改插件仓库名或内部标识不会改变这一路径；升级前请备份 AstrBot 的插件数据。
+
+## 开发验证
+
+在已安装项目依赖的 Python 环境中运行：
 
 ```bash
+python -m pip install -r requirements.txt
 python -m unittest discover -s tests
-python -m py_compile main.py core/*.py
+python -m compileall -q main.py core infra
 python -m json.tool data/help/help.json > /dev/null
 git diff --check
 ```
 
-如需生成指令手册：
+## 许可
 
-```bash
-python tests/gen_manual.py 指令手册.md
-```
-
-部分旧版 `tests/selfcheck.py` 会执行浏览器渲染检查；需安装与 Playwright 匹配的 Chromium。它不是本次回归测试的替代物，浏览器缺失时应单独记录渲染检查未完成。
-
-## 开发约定
-
-- `core/` 尽量保持独立于 AstrBot；消息适配、授权和持久化由 `main.py` 处理。
-- 数据库结构变更通过 `infra/db.py` 的迁移链升级，不原地改写已发布结构。
-- 全服共享状态使用 `db.calamity_lock`；玩家档案并发修改使用对应玩家锁。
-- 保留明确的兼容层时，在模块文档中标清其用途；不要把历史简化或历史计划当作当前实现。
-- 上游对照以本次实际使用的固定源码版本为准；同步上游后重新核对差异和测试。
-
-## 文档索引
-
-- [玩家游玩说明](docs/游玩说明.md)
-- [最近玩法移植与验证边界](GAMEPLAY-PARITY.md)
-- [此前五项修复记录](GAMEPLAY-FIXES.md)：历史记录，不代表当前轮回剧情范围或全部测试状态
-- [MD 按钮交互改造方案](docs/MD按钮交互改造方案.md)：调研提案，不是当前功能承诺
-
-## 许可与声明
-
-仅供学习交流与小范围使用。玩法与数值版权属于上游原版作者。
+软件许可见 [LICENSE](LICENSE)。原作与内容来源见上游项目说明。
