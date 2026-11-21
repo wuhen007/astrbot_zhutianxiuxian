@@ -1,17 +1,19 @@
 # 诸天修仙 Python 插件
 
-AstrBot 群聊修仙插件，移植自 [Yunzai JS 原版](https://gitee.com/mo-wuming/zhutianxiuxian1.0)。Python 插件位于 `python-port` 分支；`master` 用于跟踪上游 JS，不要把它作为 AstrBot 插件安装。
+AstrBot 群聊修仙插件，移植自 [Yunzai JS 原版](https://gitee.com/mo-wuming/zhutianxiuxian1.0)。本仓库是 AstrBot 专用移植，内容对应上游的 `python-port` 分支；上游 `master` 是 Yunzai JS 原始实现，不是 AstrBot 插件。
 
 玩家玩法说明见 [docs/游玩说明.md](docs/游玩说明.md)，指令以插件帮助页和当前生成的指令手册为准。移植范围、近期对照结果和未验证边界见 [GAMEPLAY-PARITY.md](GAMEPLAY-PARITY.md)。
 
 ## 安装
 
-可在 AstrBot WebUI 中安装仓库并选择 `python-port` 分支，或手动克隆该分支：
+可在 AstrBot WebUI 中填写本仓库地址直接安装，或手动克隆：
 
 ```bash
-git clone -b python-port https://gitee.com/yesu666/zhutianxiuxian1.0.git \
+git clone https://github.com/wuhen007/astrbot_plugin_xiuxian.git \
   AstrBot/data/plugins/astrbot_plugin_zhutian
 ```
+
+插件内部标识（`metadata.yaml` 的 `name`）仍为 `astrbot_plugin_zhutian`，安装目录名请保持一致，以免既有的 `plugin_data` 数据失效。
 
 依赖由 AstrBot 环境提供，包括 `pydantic`、`jinja2`、`aiosqlite`、`pillow` 和 `playwright`。插件启动时加载 JSON 内容表、执行 SQLite 迁移并注册指令。当前数据库版本为 v17。
 
