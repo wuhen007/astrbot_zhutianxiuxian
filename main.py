@@ -1295,10 +1295,10 @@ ITEM_TABLES = (
 
 
 @register(
-    "astrbot_plugin_zhutian",
+    "astrbot_zhutianxiuxian",
     "wuhen",
     "诸天万界修仙（Python 重构版）",
-    "v0.1.0",
+    "0.1.0",
     "",
 )
 class ZhutianPlugin(Star):

@@ -9,11 +9,11 @@ AstrBot 群聊修仙插件，移植自 [Yunzai JS 原版](https://gitee.com/mo-w
 可在 AstrBot WebUI 中填写本仓库地址直接安装，或手动克隆：
 
 ```bash
-git clone https://github.com/wuhen007/astrbot_plugin_xiuxian.git \
-  AstrBot/data/plugins/astrbot_plugin_zhutian
+git clone https://github.com/wuhen007/astrbot_zhutianxiuxian.git \
+  AstrBot/data/plugins/astrbot_zhutianxiuxian
 ```
 
-插件内部标识（`metadata.yaml` 的 `name`）仍为 `astrbot_plugin_zhutian`，安装目录名请保持一致，以免既有的 `plugin_data` 数据失效。
+插件标识由 `metadata.yaml` 的 `name` 和 `main.py` 注册名共同指定，均为 `astrbot_zhutianxiuxian`。数据库与面板使用固定的 `zhutian` 数据目录名，插件改名不会改变已有数据位置。
 
 依赖由 AstrBot 环境提供，包括 `pydantic`、`jinja2`、`aiosqlite`、`pillow` 和 `playwright`。插件启动时加载 JSON 内容表、执行 SQLite 迁移并注册指令。当前数据库版本为 v17。
 
