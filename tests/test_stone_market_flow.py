@@ -122,6 +122,19 @@ class StoneMarketFlowTests(unittest.TestCase):
         self.assertIn("源石净支出 330,000", yuanshi.ledger_text(y2))
         self.assertFalse(yuanshi.continue_peeling(y2, random.Random(1), now + 86_400)[0])
 
+    def test_mingge_source_income_bonus_applies_to_cut_return(self):
+        now = 1_800_000_000.0
+        stone = {"no": 1, "price": 100_000, "name": "纯净源", "outcome": "pure",
+                 "ratio": 1.0, "item": None, "danger": False, "surface": "源气"}
+        y = yuanshi.system_of(PlayerDoc(uid="bonus", ext={"yuanshi": {"amount": 1_000_000}}))
+        self.assertTrue(yuanshi.purchase_stone(y, "地字号", [stone], 1, 0, now)[0])
+        before = y["amount"]
+        ok, _msg, y, settlement = yuanshi.cut_pending(
+            y, "one", "普通", 0, random.Random(1), now, source_bonus=0.25)
+        self.assertTrue(ok)
+        self.assertEqual(settlement["source"], 125_000)
+        self.assertEqual(y["amount"], before + 125_000)
+
 
 if __name__ == "__main__":
     unittest.main()

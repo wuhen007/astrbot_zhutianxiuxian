@@ -64,7 +64,7 @@
       "SHOP_BUY_MARKUP": {
         "description": "坊市售价系数",
         "type": "float",
-        "default": 2.0,
+        "default": 1.2,
         "hint": "购买价 = 物品出售价 × 该系数"
       },
       "SPAR_COOLDOWN_SECONDS": {

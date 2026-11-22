@@ -239,12 +239,18 @@ def mine_yield_full(
 
 
 def talisman_make(
-    fufang: Mapping, occ_level: int, qty: int
+    fufang: Mapping, occ_level: int, qty: int, bonus: float = 0.0,
+    rng: random.Random | None = None,
 ) -> tuple[bool, str, int]:
-    """制符（对齐 zhizuo_fu：符师专属、必成）。返回 (ok, 提示, 数量)。"""
+    """制符必成，命格制符加成按概率追加产物。返回 (ok, 提示, 数量)。"""
     if int(occ_level) < int(fufang.get("level_limit", 0) or 0):
         return False, f"需达「符师{fufang.get('level_limit')}重境」方可制作", 0
-    return True, "", max(1, int(qty))
+    rng = rng or random.Random()
+    amount = max(1, int(qty)) * max(0.0, 1.0 + float(bonus or 0))
+    whole = int(amount)
+    if amount > whole and rng.random() < amount - whole:
+        whole += 1
+    return True, "", whole
 
 
 def forge_rate(tuzhi_rate: float, occ_level: int, exp_table: Sequence[Mapping]) -> float:

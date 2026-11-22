@@ -236,7 +236,7 @@ def offer_seed(doc: Any, st: dict, seed_name: str, rng: Callable[[], float]) -> 
                 idx = i
                 break
         if idx < 0:
-            return False, f"未找到名为“{seed_name}”的道种，使用 #查看道种 查看列表", {}
+            return False, f"未找到名为「{seed_name}」的道种，使用 #查看道种 查看列表", {}
     else:
         idx = next((i for i, s in enumerate(seeds)
                     if isinstance(s, dict) and s.get("品质") == "普通"), 0)
@@ -350,12 +350,12 @@ def arena_text(doc: Any, st: dict, world: dict, round_id: str, now_ms: float,
         "【仙古秘境·大事件！】", "",
         "═══════════════════", "仙古擂台 横空出世！", "═══════════════════", "",
         "仙古秘境深处，一块古老的擂台浮现于虚空之中。先贤曾在此论道比剑，"
-        "今日再现，诸位修士皆可参与，夺得“仙古第一”之名！", "",
+        "今日再现，诸位修士皆可参与，夺得「仙古第一」之名！", "",
         f"由{getattr(doc, 'name') or '修士'}率先踏上擂台，引动古阵运转！", "",
         "【参与方式】使用 #参与仙古擂台 报名",
         "【对决方式】#秘境攻击 [名字]",
         "", "擂台持续：30 分钟",
-        "胜者将获得丰厚道韵奖励及“本轮仙古第一”冠冕（解锁终极造化地）！"])
+        "胜者将获得丰厚道韵奖励及「本轮仙古第一」冠冕（解锁终极造化地）！"])
     return "\n".join([
         "【仙古擂台·开启！】", "",
         f"{getattr(doc, 'name') or '修士'}踏上擂台，引动古阵！",

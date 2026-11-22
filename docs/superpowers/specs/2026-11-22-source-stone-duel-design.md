@@ -33,7 +33,8 @@ Port the original five-stone source appraisal duel against three NPC opponents i
 ## User Output
 
 - Menu displays current source balance, each NPC's title, fee, base wager, maximum exposure, current cooldown, and pending-session status.
-- Start displays both stone batches, surface clues, occupation insight where applicable, available resonances, fee, wager, valid command form, and remaining selection time.
+- Start displays the player's five stones, surface clues, occupation insight where applicable, available resonances, fee, wager, valid command form, and remaining selection time. Keep the NPC stone batch hidden until settlement, matching the original command output.
+- Settlement reveals both selected three-stone cuts and their values/resonances.
 - Settlement displays selected stones and NPC stones, cut values, resonance, result, stake, net result, and updated source balance.
 
 ## Validation At Push

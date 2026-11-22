@@ -27,6 +27,7 @@
 from __future__ import annotations
 from .clock import day_key
 
+import math
 import random
 import time
 from typing import Any, Mapping
@@ -139,12 +140,21 @@ def _physique_mult(doc: Any) -> float:
 def costs_of(doc: Any, node_idx: int) -> dict[str, int]:
     """单次悟道消耗。潜力/修为/血气/灵石按 levelSum；寿元按节点表。"""
     ls = _level_sum(doc)
+    base_shouyuan = int(DAO_NODES[node_idx]["shouyuan"])
+    try:
+        from .mingge import effects_of
+        effects = effects_of(doc)
+        shouyuan_mult = min(3.0, max(0.0,
+            1.0 - float(effects.get("悟道寿元消耗减少", 0) or 0)
+            + float(effects.get("悟道寿元消耗增加", 0) or 0)))
+    except (TypeError, ValueError):
+        shouyuan_mult = 1.0
     return {
         "potential": 100 * (node_idx + 1),
         "exp": 2_000 * ls * ls,
         "xueqi": 2_000 * ls * ls,
         "stones": 10_000 * ls,
-        "shouyuan": int(DAO_NODES[node_idx]["shouyuan"]),
+        "shouyuan": int(math.ceil(base_shouyuan * shouyuan_mult)),
     }
 
 
@@ -231,6 +241,16 @@ def attempt(doc: PlayerDoc, inv: Mapping[str, int], now: float | None = None,
         dao_mult = e["dao_multiplier"]
     except Exception:
         dao_mult = 1.0
+    try:
+        from .mingge import signed_bonus as _mingge_bonus
+        dao_mult *= max(0.0, 1.0 + _mingge_bonus(doc, "悟道收益"))
+    except (TypeError, ValueError):
+        pass
+    try:
+        from .plane_events import sign_bonus as _sign_bonus
+        dao_mult *= 1.0 + _sign_bonus(doc, "悟道收益", now)
+    except (TypeError, ValueError):
+        pass
     won = rng.random() < chance
     st["count"] = int(st["count"]) + 1
     st["last_at"] = now
@@ -247,7 +267,13 @@ def attempt(doc: PlayerDoc, inv: Mapping[str, int], now: float | None = None,
                       f"灵石 -{c['stones'] - refund_stones:,}（潜力与寿元不退）"
                       + ("｜古茶护道，损失减半" if use_tea else "")), delta
 
-    insight_p = min(INSIGHT_CAP, INSIGHT_BASE + (INSIGHT_TEA if use_tea else 0.0))
+    try:
+        from .mingge import signed_bonus as _mingge_bonus
+        fate_insight = _mingge_bonus(doc, "顿悟概率")
+    except (TypeError, ValueError):
+        fate_insight = 0.0
+    insight_p = min(INSIGHT_CAP, INSIGHT_BASE + (INSIGHT_TEA if use_tea else 0.0)
+                    + fate_insight)
     epiphany = rng.random() < insight_p
     try:
         from . import trib as _tb

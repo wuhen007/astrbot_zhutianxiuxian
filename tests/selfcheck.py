@@ -1,5 +1,6 @@
 """M0 自检：迁移 + 玩家文档往返 + 内容表加载。直接运行，断言失败即非零退出。"""
 import asyncio
+import json
 import sys
 import tempfile
 import time
@@ -178,6 +179,10 @@ async def main():
     assert ok and d.stones == 600 and gain == {"凝气丹": 2}, msg
     ok, _, _, _ = items_mod.buy(buyer, item, 999, 2.0)
     assert not ok, "灵石不足应失败"
+    zero_price_item = {"name": "零价帝兵", "出售价": 0, "稀有度": 10}
+    assert items_mod.item_buy_price(zero_price_item, 1.2) == 0
+    ok, msg, unchanged, zero_gain = items_mod.buy(buyer, zero_price_item, 1, 1.2)
+    assert not ok and unchanged is buyer and not zero_gain and buyer.stones == 1000, msg
 
     inv_doc = buyer
     async with db.transaction():
@@ -419,10 +424,19 @@ async def main():
     ok, msg, d17b, _ = items_mod.use_item(d16b, daoxin, 2, 1000)
     assert d17b.ext["potential"] == 500 and d17b.ext["heart"] == 10 and d17b.ext["daoxin"] == 6, msg
     assert d17b.ext["buffs"]["lucky"]["times"] == 10, msg
-    # 器灵/真器：依赖未开放系统，拒绝且不消耗
+    # 器灵丹提升炼器天赋；真器丹暂存下一炉容量
+    from core import duanzao as dz_pills
     qiling = {"name": "凡品器灵丹", "class": "丹药", "type": "器灵", "天赋": 20}
-    ok, msg, _, consume = items_mod.use_item(d17b, qiling, 1, 1000)
-    assert not ok and not consume, msg
+    forge_doc = PlayerDoc(uid="pill_forge", ext={
+        "occupation": "炼器师",
+        dz_pills.EXT_KEY: {"built": True, "talent": 100},
+    })
+    ok, msg, forge_doc, consume = items_mod.use_item(forge_doc, qiling, 1, 1000)
+    assert ok and consume and dz_pills.state_of(forge_doc)["talent"] == 120, msg
+    trueqi = {"name": "帝品真器丹", "class": "丹药", "type": "锻造上限",
+              "额外数量": 10}
+    ok, msg, forge_doc, consume = items_mod.use_item(forge_doc, trueqi, 1, 1000)
+    assert ok and consume and dz_pills.capacity(dz_pills.state_of(forge_doc), forge_doc) == 20, msg
     print("pill buffs ok")
 
     # 15e. 职业体系：等级曲线 / 采药采矿产出 / 制符 / 炼器成功率
@@ -2820,7 +2834,7 @@ async def main():
     ok, exp, msg = alch.craft({**recipe, "rate": 0.0}, 0, _random.Random(1), 2)
     assert not ok and exp == 600, msg        # rate=0 全败，失败经验 300×2
     assert abs(alch.success_rate(recipe, 5) - 1.0) < 1e-9
-    # 原版 zhizuo_dan 语义：必成 + 品质分档（craft_pills；craft 保留给锻造掷骰）
+    # 炼丹逐炉检定；成功率 100% 时按品质分档
     rq = {"name": "辟谷丹", "rate": 1.0, "level_limit": 0, "exp": [100, 300], "materials": []}
     buckets, exp = alch.craft_pills(rq, 0, _random.Random(1), 1)
     assert set(buckets) <= {"凡品", "极品", "仙品"} and sum(buckets.values()) == 1 and exp == 100
@@ -3262,8 +3276,10 @@ async def main():
     hi6 = PlayerDoc(uid="w6hi", realm_index=25, ext={"occupation": "侠客"})
     ok, _m, nd6, gift6 = bl.tiandao_gift(hi6, 1_800_000_000.0, 1.0)
     assert ok and gift6["秘境之匙"] >= 2 and not bl.tiandao_gift(nd6, 1_800_000_000.0, 1.0)[0]
-    assert len(bl.LOTTERY_POOL) == 41
-    ok, _m, td6, lot6 = bl.lottery(bl.grant_tickets(hi6), 2, _random.Random(3))
+    lottery_pool6 = json.load(open(PLUGIN / "data/item/每日抽奖列表.json", encoding="utf-8"))
+    assert len(lottery_pool6) == 42
+    ok, _m, td6, lot6 = bl.lottery(
+        bl.grant_tickets(hi6), 2, _random.Random(3), pool=lottery_pool6)
     assert ok and td6.ext["lottery_tickets"] == 1 and lot6
     print("breakthrough & blessing & lottery ok")
 
@@ -3317,9 +3333,11 @@ async def main():
         "daofaxianshu": 2, "daofaxianshu_endtime": (n6 + 86400) * 1000, "daofa_days": 6})
     ok, _m, d7b, it7 = df.gift(d7, n6, 1.0)
     assert ok and d7b.ext["daofa_days"] == 1 and it7.get("超越宝盒") == 5
-    one = bl.lottery(bl.grant_tickets(PlayerDoc(uid="a", ext={})), 1, _random.Random(5))[3]
+    lottery_pool9 = json.load(open(PLUGIN / "data/item/每日抽奖列表.json", encoding="utf-8"))
+    one = bl.lottery(bl.grant_tickets(PlayerDoc(uid="a", ext={})), 1,
+                     _random.Random(5), pool=lottery_pool9)[3]
     two = bl.lottery(bl.grant_tickets(PlayerDoc(uid="a", ext={})), 1,
-                     _random.Random(5), per_draw=2)[3]
+                     _random.Random(5), per_draw=2, pool=lottery_pool9)[3]
     assert sum(two.values()) > sum(one.values())
     print("daofa subscription ok")
 
@@ -3411,6 +3429,11 @@ async def main():
     fq = build_fighter(dq, "甲", 1_000, 1_000, 10_000, 0.1, {})
     assert abs(float(fq.effects.get("dmg_dealt_mult", 1.0)) - 1.10) < 1e-9
     assert fq.atk > 1_000 and fq.tags["prof_stage"] == "出神入化"
+    fate_fighter = build_fighter(PlayerDoc(uid="fate_combat", ext={
+        "mingge": {"effects": {"速度": 60, "复活概率": 0.1}}}),
+        "命格修士", 100, 100, 1000, 0.0, {})
+    assert fate_fighter.tags["speed"] == 160
+    assert fate_fighter.effects["revive"]["pr"] == 0.1
     # ③ 技能装配链路：build_fighter 挂 id + 注册表有内置项 + on_turn 真被触发
     assert "prof_echo" in fq.skills and "dual_echo" in fq.skills
     assert csk.get("prof_echo") is not None
@@ -4591,6 +4614,19 @@ async def main():
     okh, txt36h = ys36.inner_cultivate(d36c, 20, t36, _random.Random(3))
     assert okh and "内景地修炼" in txt36h
     assert ys36.cur_of(d36c) < 5_000_000
+    d36e = PlayerDoc(uid="w8ys5", name="命格内景", realm_index=30,
+                     stones=iw36.OPEN_COST, ext={
+        "mingge": {"effects": {"内景地消耗倍率": 0.8, "内景地收益": 0.3,
+                                "元神修炼加成": 0.2}}})
+    ys36.save(d36e, {**ys36.ensure(d36e), "level": 0, "cur": 1_000_000,
+                     "max": 1_000_000})
+    iw36.open_world(d36e)
+    assert ys36.inner_cost(d36e) == 120_000
+    class _Win36:
+        def random(self):
+            return 0.0
+    okh2, txt36i = ys36.inner_cultivate(d36e, 1, t36, _Win36())
+    assert okh2 and "450,000" in txt36i
     print("W8-B2b yuanshen & spirit universe ok")
 
 
@@ -4862,7 +4898,7 @@ async def main():
     no_set = eq38.aggregate(d38, level_table, lambda n: lookup38.get(n))
     assert with_set.atk >= no_set.atk * 10       # 套装层 ×20
     d38.ext["equipment"]["法宝"] = "云月之莲"
-    f38 = lo38.build_fighter(d38, "岁云", 100000, 100000, 1000000, 0.1, lookup38)
+    f38 = lo38.build_fighter(d38, "岁云", 100000, 100000, 1000000, 0.1, lookup38.get)
     assert f38.tags["linggen_name"] == "岁云剑尊" and f38.tags["suiyun_stage"] == 5
     assert float(f38.eff("dmg_dealt_mult", 1.0)) >= 2.0
     assert f38.effects["revive"]["times"] == 3
@@ -5492,14 +5528,14 @@ async def main():
     ok_b42, _ = trib42.trib_run(tower42, stats42, _Lose42())
     assert not ok_a42 and not ok_b42 and tower42.exp > base42b.exp
     d42d = PlayerDoc(uid="w8xt3", name="闭关", realm_index=10,
-                     state="闭关中", state_start=t42, ext={})
-    d42e = d42d.model_copy(deep=True)
-    st42 = xt42.state_of(d42e, t42)
-    st42["current"] = "混沌钟"
-    xt42.save(d42e, st42)
+                     state="闭关中", state_start=t42,
+                     ext={"cultivate_time_multiplier": 1.0})
+    d42e = PlayerDoc(uid="w8xt4", name="闭关至宝", realm_index=10,
+                     state="闭关中", state_start=t42,
+                     ext={"cultivate_time_multiplier": 0.7})
     ok42, _, out_d42 = cul42.end_cultivate(d42d, t42 + 120 * 60, 100, 7200)
     ok42, _, out_e42 = cul42.end_cultivate(d42e, t42 + 120 * 60, 100, 7200)
-    assert ok42 and out_e42.exp > out_d42.exp
+    assert ok42 and out_d42.exp == 12_000 and out_e42.exp == 15_000
     drops42 = [xt42.roll_drop(_random.Random(i)) for i in range(200)]
     assert all(x is None or set(x) <= set(xt42.SIGILS) for x in drops42) and any(drops42)
     assert "先天至宝" in xt42.panel(d42, w42, t42)
@@ -8764,10 +8800,13 @@ async def main():
     ok120, msg120, d120d = pe120.war_fund(d120, cal120, 50, {"源石": 100})
     assert ok120 and d120d.get("源石") == -50, msg120
     assert "个人战功 +100" in msg120, msg120
-    shop120 = pe120.war_shop(None, {"圣地战功商店": [{"name": "柳神法拓本", "price": 3000, "desc": "疗伤"}]})
+    shop120 = pe120.war_shop(None, {"version": 1, "products": [
+        {"name": "柳神法拓本", "price": 3000, "description": "疗伤"}]})
     assert "柳神法拓本" in shop120
     ok120, msg120, d120d = pe120.war_exchange(d120, cal120, "柳神法拓本",
-                                              {"圣地战功商店": [{"name": "柳神法拓本", "price": 3000, "desc": ""}]})
+                                              {"version": 1, "products": [
+                                                  {"name": "柳神法拓本", "price": 3000,
+                                                   "description": ""}]})
     assert ok120 and d120d.get("柳神法拓本") == 1, msg120
 
     # 游商
@@ -8778,8 +8817,10 @@ async def main():
     assert ok120 and d120d.get("源石") == -1_200_000, msg120
     ok120, msg120, d120d = pe120.buy(d120, pe120.BLACK_GOODS, 2, {"源石": 5_000_000}, "源石")
     assert ok120 and d120d.get("叩仙丹") == 1, msg120
-    ok120, msg120 = pe120.ask_sign(d120, "问道签")
-    assert ok120 and "问道签" in msg120, msg120
+    stones_before_sign120 = d120.stones
+    ok120, msg120 = pe120.ask_sign(d120, "问道签", time.time())
+    assert ok120 and "悟道收益 +10%" in msg120
+    assert d120.stones == stones_before_sign120 - pe120.XIANGZI_COST
     ok120, msg120 = pe120.ask_sign(d120, "偏签")
     assert not ok120 and "用法" in msg120, msg120
 
@@ -10251,7 +10292,7 @@ async def main():
     assert "other_shore_world, relic as relic_mod" in src340, "other_shore_world 已导入"
     assert "async def handle_endless_meta_no" in src340, "保留道碑 handler"
     assert '"pup.keep": ("handle_page_cmd"' in src340 and '"tb.info": ("handle_page_cmd"' in src340, "act 名误作方法名"
-    assert "import json\nimport random" in src340, "顶层 json"
+    assert "import json" in src340 and "import random" in src340, "顶层 json/random"
     assert "event.get_button_interaction():" in src340.split("async def _smart")[1][:800], "_smart 交互守卫"
     assert "def seed_detail_text(doc: Any" in open(PLUGIN / "core/xiangu_dao.py", encoding="utf-8").read(), "seed_detail_text +doc"
     assert ".filter(Boolean)" not in open(PLUGIN / "core/other_shore_world.py", encoding="utf-8").read(), "JS 残留清除"

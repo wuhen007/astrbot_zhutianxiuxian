@@ -363,22 +363,40 @@ def reshape(doc: Any, inv: Mapping[str, int], now: float | None = None,
     if have < RESHAPE_QTY:
         return _no(f"道基重塑需【{RESHAPE_ITEM}】×{RESHAPE_QTY}（现有 {have}），"
                    "九天十地·五行州可得。")
-    if int(getattr(doc, "stones", 0) or 0) < RESHAPE_STONES:
-        return _no(f"道基重塑需灵石 {RESHAPE_STONES:,}（现有 {int(getattr(doc, 'stones', 0) or 0):,}）。")
-    doc.stones = int(getattr(doc, "stones", 0) or 0) - RESHAPE_STONES
+    try:
+        from .mingge import effects_of
+        fate = effects_of(doc)
+        multiplier = min(3.0, max(0.0,
+            1.0 - float(fate.get("修复本源代价减少", 0) or 0)
+            + float(fate.get("修复本源代价增加", 0) or 0)))
+    except (TypeError, ValueError):
+        multiplier = 1.0
+    cost = int(math.ceil(RESHAPE_STONES * multiplier))
+    if int(getattr(doc, "stones", 0) or 0) < cost:
+        return _no(f"道基重塑需灵石 {cost:,}（现有 {int(getattr(doc, 'stones', 0) or 0):,}）。")
+    doc.stones = int(getattr(doc, "stones", 0) or 0) - cost
     left = _write_wounds(doc, st, st["wounds"] - 1.0, "道基重塑", -1.0, now)
     st = state_of(doc, now)
     st["reshapes"] = int(st["reshapes"]) + 1
     save(doc, st)
     return _ok(f"【道基重塑】以 5 枚【{RESHAPE_ITEM}】为薪柴，五行流转，道基弥合——\n"
-               f"道伤 -1（当前 {left:.1f}）｜消耗灵石 {RESHAPE_STONES:,}",
+               f"道伤 -1（当前 {left:.1f}）｜消耗灵石 {cost:,}",
                {RESHAPE_ITEM: -RESHAPE_QTY})
 
 
 def repair_cost(doc: Any, w: float, eff: float) -> int:
     """原版 `UserHome.js:439`：Σ(四轨等级)×基数×(1+道伤×0.5)÷功法效率。"""
     lv = int(getattr(doc, "realm_index", 0) or 0) + int(getattr(doc, "physique_index", 0) or 0) + 2
-    return max(1, math.ceil(lv * REPAIR_BASE * (1 + max(0.0, w) * 0.5) / max(0.01, eff)))
+    try:
+        from .mingge import effects_of
+        effects = effects_of(doc)
+        multiplier = (1.0 - float(effects.get("修复道伤代价减少", 0) or 0)
+                      + float(effects.get("修复道伤代价增加", 0) or 0))
+    except (TypeError, ValueError):
+        multiplier = 1.0
+    multiplier = min(3.0, max(0.0, multiplier))
+    return max(1, math.ceil(lv * REPAIR_BASE * (1 + max(0.0, w) * 0.5)
+                            / max(0.01, eff) * multiplier))
 
 
 def repair_efficiency(doc: Any) -> tuple[float, str]:
@@ -520,11 +538,16 @@ def prove(doc: Any, reg: dict[str, Any], now: float | None = None,
         return *_no("【天心印记·帝路断绝】当世已有天心印记执掌者，你既非五大特殊体质，"
                     "又无道友护道——请 #护法 @道友 为你立下 1 小时护道法阵，"
                     "或待印记易主。"), reg
-    if int(getattr(doc, "exp", 0) or 0) < PROVE_COST or _xueqi(doc) < PROVE_COST:
-        return *_no(f"证道需修为与血气各 {PROVE_COST:,}（当前 "
+    try:
+        from .mingge import signed_bonus
+        prove_cost = max(1, math.ceil(PROVE_COST * max(0.0, 1.0 - signed_bonus(doc, "证道修为减少"))))
+    except (TypeError, ValueError):
+        prove_cost = PROVE_COST
+    if int(getattr(doc, "exp", 0) or 0) < prove_cost or _xueqi(doc) < prove_cost:
+        return *_no(f"证道需修为与血气各 {prove_cost:,}（当前 "
                     f"{int(getattr(doc, 'exp', 0) or 0):,} / {_xueqi(doc):,}）。"), reg
-    doc.exp = int(getattr(doc, "exp", 0) or 0) - PROVE_COST
-    _set_xueqi(doc, _xueqi(doc) - PROVE_COST)
+    doc.exp = int(getattr(doc, "exp", 0) or 0) - prove_cost
+    _set_xueqi(doc, _xueqi(doc) - prove_cost)
     mult = ROUTE_DIFFICULTY[route]
     chance = max(0.12, 0.62 / mult)
     waves = 0

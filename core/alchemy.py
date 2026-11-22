@@ -67,23 +67,30 @@ QUALITY_TIERS = ("凡品", "极品", "仙品")
 
 def craft_pills(
     recipe: Mapping, alchemy_lv: int, rng: random.Random, qty: int = 1,
-    quality_bonus: float = 0.0,
+    quality_bonus: float = 0.0, success_bonus: float = 0.0,
+    rate_level: int | None = None,
 ) -> tuple[dict[str, int], int]:
-    """原版炼丹语义（必成 + 品质分档）。返回 (产物分桶, 新经验)。
+    """逐炉检定成功率，成功炉再按品质分档；返回 (产物分桶, 新经验)。
 
     对齐 apps/Occupation/Occupation.js zhizuo_dan：
-    - 特殊丹（SPECIAL_DIRECT）→ {"": qty} 直接得原丹；
+    - 特殊丹（SPECIAL_DIRECT）→ {"": 成功炉数} 直接得原丹；
     - 其余掷品质：凡品阈值 = clamp(0.1 + 炼丹等级×3%, 0, 0.95)（等级越高凡品越少），
       未过阈值再以 40% 出仙品，否则极品 → {"凡品": n, "极品": m, ...}。
-    经验按配方 exp[0] × 数量（必成无失败经验）。
+    经验按配方 exp[0]/exp[1] 分别结算成功/失败炉。
     """
-    ok_n = max(1, int(qty))
+    total = max(1, int(qty))
     name = str(recipe.get("name", "?"))
-    exp_gain = int(recipe.get("exp", [0, 0])[0]) * ok_n
+    rate = min(1.0, max(0.0, success_rate(recipe, alchemy_lv if rate_level is None else rate_level)
+                         + float(success_bonus or 0)))
+    ok_n = total if rate >= 1 else sum(1 for _ in range(total) if rng.random() < rate)
+    fail_n = total - ok_n
+    exp_row = recipe.get("exp") or [0, 0]
+    exp_gain = int(exp_row[0] or 0) * ok_n + int(exp_row[1] or 0) * fail_n
     if name in SPECIAL_DIRECT:
-        return {"": ok_n}, exp_gain
+        return ({"": ok_n} if ok_n else {}), exp_gain
     # quality_bonus（命格·炼丹品质，W4-2）：抬升非凡品门槛 → 凡品更少
-    fanpin = max(0.0, min(0.95, 0.1 + max(0, alchemy_lv) * 3 / 100 + max(0.0, float(quality_bonus or 0))))
+    fanpin = max(0.0, min(0.95, 0.1 + max(0, alchemy_lv) * 3 / 100
+                          + float(quality_bonus or 0)))
     counts: dict[str, int] = {}
     for _ in range(ok_n):
         r1, r2 = rng.random(), rng.random()
@@ -106,7 +113,7 @@ def craft(
     逐次掷骰；材料扣减由调用方在事务中完成（这里只算结果与经验）。
     """
     lv = level_of(alchemy_exp)
-    rate = min(1.0, success_rate(recipe, lv) + max(0.0, float(success_bonus or 0)))
+    rate = min(1.0, max(0.0, success_rate(recipe, lv) + float(success_bonus or 0)))
     ok_n = sum(1 for _ in range(max(1, qty)) if rng.random() < rate)
     fail_n = qty - ok_n
     exp_gain = int(recipe.get("exp", [0, 0])[0]) * ok_n + int(recipe.get("exp", [0, 0])[1]) * fail_n

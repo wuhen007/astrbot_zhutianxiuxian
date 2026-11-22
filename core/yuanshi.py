@@ -6,7 +6,7 @@
 - 名称/表面线索：70% 真实线索 + 30% 误导（原版 makeSignal 0.52 真，此处放宽便于体验）
 - 源石为本插件自建数值货币（ext["yuanshi"]，原版为独立资源）
 - 石园购买、每日免费勘石、天师辨伪、三种切法和层剥回购均持久保存在玩家源石状态。
-- 简化：石王多人助切、石师对决（五选三）、石相克制和地形对齐仍未移植。
+- 简化：石师对决（五选三）、石相克制和地形对齐仍未移植；镇园石王为群本地每周事件，不共享跨群参与或状态。
 """
 
 from __future__ import annotations
@@ -209,7 +209,8 @@ def _record_market_result(y: dict, pending: Mapping, now: float, *, source: int 
 
 
 def cut_pending(y: dict, method: str, occupation: str, stones_have: int,
-                rng: random.Random, now: float) -> tuple[bool, str, dict, dict]:
+                rng: random.Random, now: float,
+                source_bonus: float = 0.0) -> tuple[bool, str, dict, dict]:
     """Apply a cut method to the persisted pending stone; mutations are returned in y/settlement."""
     state = market_state(y, now)
     pending = state.get("pending")
@@ -243,21 +244,24 @@ def cut_pending(y: dict, method: str, occupation: str, stones_have: int,
                 "finished": False, "extra_cost": extra, "gains": {},
             }
 
-    return _finish_pending_cut(y, state, pending, method, extra, rng, now)
+    return _finish_pending_cut(y, state, pending, method, extra, rng, now, source_bonus)
 
 
-def continue_peeling(y: dict, rng: random.Random, now: float) -> tuple[bool, str, dict]:
+def continue_peeling(y: dict, rng: random.Random, now: float,
+                     source_bonus: float = 0.0) -> tuple[bool, str, dict]:
     state = market_state(y, now)
     pending = state.get("pending")
     if not isinstance(pending, dict) or pending.get("phase") != "peeling":
         return False, "当前没有等待决断的切石异象。", {}
     ok, text, _, settlement = _finish_pending_cut(
-        y, state, pending, "layered", pending.get("extra_cost") or {}, rng, now)
+        y, state, pending, "layered", pending.get("extra_cost") or {}, rng, now,
+        source_bonus)
     return ok, text, settlement
 
 
 def _finish_pending_cut(y: dict, state: dict, pending: dict, method: str,
-                        extra: Mapping, rng: random.Random, now: float):
+                        extra: Mapping, rng: random.Random, now: float,
+                        source_bonus: float = 0.0):
     stone = pending["stone"]
     garden = str(pending["garden"])
     cfg = GARDENS[garden]
@@ -283,6 +287,7 @@ def _finish_pending_cut(y: dict, state: dict, pending: dict, method: str,
             gains[str(stone["item"])] = 1
     else:
         source = int(int(stone["price"]) * float(stone.get("ratio", 0) or 0) / cfg["rate"])
+    source = max(0, int(source * max(0.0, 1.0 + float(source_bonus or 0))))
     y["amount"] = int(y.get("amount", 0) or 0) + source
     _record_market_result(y, pending, now, source=source, item=next(iter(gains), ""),
                           empty=empty, extra=extra)
@@ -510,6 +515,18 @@ def _record(y: dict, garden: str, price: int, currency: str,
         y["cuts"] = int(y.get("cuts", 0) or 0) + 1
 
 
+def record_duel_ledger(y: dict, now: float, *, price: int, source: int,
+                       name: str, extra: Mapping | None = None) -> None:
+    """Append duel accounting without counting it as a stone purchase/cut."""
+    ledger = list(y.get("ledger") or [])
+    ledger.append({
+        "t": float(now), "garden": "源术对决", "price": int(price), "cur": "源石",
+        "source": int(source), "item": "", "name": str(name), "empty": False,
+        "cut": False, "extra": dict(extra or {}), "refund": 0, "refund_cur": "",
+    })
+    y["ledger"] = ledger[-LEDGER_KEEP:]
+
+
 def ledger_text(y: Mapping) -> str:
     ledger = list(y.get("ledger") or [])
     if not ledger:
@@ -548,6 +565,15 @@ def ledger_text(y: Mapping) -> str:
     lines.append(f"连续空石：{int(y.get('empty_streak', 0) or 0)} 块")
     if items:
         lines.append("所得奇珍：" + "、".join(f"{k}×{v}" for k, v in items.items()))
+    duel = y.get("duel") if isinstance(y.get("duel"), Mapping) else {}
+    duels = sum(int(duel.get(key, 0) or 0) for key in ("wins", "losses", "draws"))
+    if duels:
+        lines.append(
+            f"源术对决 {duels} 场（胜/负/平 {int(duel.get('wins', 0) or 0)}/"
+            f"{int(duel.get('losses', 0) or 0)}/{int(duel.get('draws', 0) or 0)}）｜"
+            f"净收益 {int(duel.get('net', 0) or 0):+,} 源石｜"
+            f"累计切源 {int(duel.get('total_cut_source', 0) or 0):,}｜"
+            f"单局最高 {int(duel.get('peak_cut_source', 0) or 0):,}")
     return "\n".join(lines)
 
 

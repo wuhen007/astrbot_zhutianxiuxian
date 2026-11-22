@@ -12,8 +12,10 @@ shortcut: 未做维度壁垒（上苍之上/永恒未知之地等无方图位面
 
 from __future__ import annotations
 from .clock import day_key
+from . import timed_action
 
 import copy
+import math
 import time
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -318,17 +320,21 @@ def begin_travel(doc: Any, target: str, data: Mapping, now: float,
     if xueqi < q["xueqi"]:
         return False, f"横渡【{target}】需血气 {q['xueqi']:,}（当前 {int(xueqi):,}）。"
 
+    time_multiplier = timed_action.multiplier(doc, now)
+    travel_minutes = max(1, math.ceil(q["minutes"] * time_multiplier))
+
     doc.exp = int(doc.exp) - q["exp"]
     doc.ext["xueqi"] = xueqi - q["xueqi"]
     doc.state = "穿梭中"
     doc.state_start = now
     st["travel"] = {
         "from": src, "to": target, "depart": float(now),
-        "arrive": float(now) + q["minutes"] * 60, "minutes": q["minutes"],
+        "arrive": float(now) + travel_minutes * 60, "minutes": travel_minutes,
+        "time_multiplier": time_multiplier,
     }
     return True, (f"【穿梭·{src} → {target}】\n"
                  f"你斩断周身空间涟漪，踏入星空古路。\n"
-                 f"预计 {q['minutes']} 分钟后抵达，消耗修为 {q['exp']:,}、血气 {q['xueqi']:,}。\n"
+                 f"预计 {travel_minutes} 分钟后抵达，消耗修为 {q['exp']:,}、血气 {q['xueqi']:,}。\n"
                  f"抵达后发送「#抵达」落位。")
 
 

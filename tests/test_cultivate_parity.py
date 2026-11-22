@@ -71,6 +71,33 @@ class BreakthroughParityTests(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual(loss, 5)
 
+    def test_chaos_bell_shortens_planned_cultivation_without_double_multiplying_yield(self):
+        doc = PlayerDoc(uid="clock-cultivate", ext={
+            "xtzb": {"current": "混沌钟", "owned": ["混沌钟"]}})
+        ok, message, started = cultivate.start_cultivate(doc, 30, 7200)
+        self.assertTrue(ok)
+        self.assertIn("预计实时时长 21 分钟", message)
+
+        ok, _, settled = cultivate.end_cultivate(
+            started, started.state_start + 21 * 60, 20, 7200)
+
+        self.assertTrue(ok)
+        self.assertEqual(settled.exp, 600)
+        self.assertNotIn("cultivate_minutes", settled.ext)
+
+    def test_east_emperor_bell_shortens_work_and_credits_elapsed_work_minutes(self):
+        doc = PlayerDoc(uid="clock-work", ext={
+            "xtzb": {"current": "东皇钟", "owned": ["东皇钟"]}})
+        ok, message, started = cultivate.start_work(doc, 30)
+        self.assertTrue(ok)
+        self.assertIn("预计实时时长 24 分钟", message)
+
+        ok, _, settled = cultivate.end_work(
+            started, started.state_start + 24 * 60, 10)
+
+        self.assertTrue(ok)
+        self.assertEqual(settled.stones, 300)
+
 
 if __name__ == "__main__":
     unittest.main()

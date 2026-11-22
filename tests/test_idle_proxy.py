@@ -82,6 +82,49 @@ class IdleProxyTests(unittest.TestCase):
             with self.subTest(raw=raw), self.assertRaises(ValueError):
                 idle_proxy.parse_duration(raw)
 
+    def test_innate_treasure_shortens_both_proxy_tracks_without_reducing_planned_yield(self):
+        doc = self.eligible_doc()
+        doc.ext["xtzb"] = {"current": "混沌钟", "owned": ["混沌钟"]}
+        _, _, formed = idle_proxy.condense_spirit(doc)
+        _, spirit_message, formed = idle_proxy.start_herb_proxy(
+            formed, 1_000, 60, "timed-spirit")
+        self.assertEqual(idle_proxy.state_of(formed)["spirit"]["task"]["ends_at"], 3_520)
+        self.assertIn("预计实时时长 42 分钟", spirit_message)
+        formed.ext["xtzb"]["current"] = ""
+        ok, spirit_result, _ = idle_proxy.finish_herb_proxy(
+            formed, 1_000 + 42 * 60, ZeroRandom(), [])
+        self.assertTrue(ok)
+        self.assertEqual(spirit_result["minutes"], 60)
+
+        deity_doc = PlayerDoc(uid="timed-deity", realm_index=21,
+                              ext={"occupation": "采药师",
+                                   "xtzb": {"current": "东皇钟", "owned": ["东皇钟"]},
+                                   "idle_proxy": {"spirit": {"tier": 0, "exp": 0,
+                                                               "task": None},
+                                                  "deity": {"tier": 1, "exp": 0,
+                                                            "injured_until": 0,
+                                                            "task": None}}})
+        _, deity_message, deity_doc = idle_proxy.start_deity_herb_proxy(
+            deity_doc, 2_000, 60, "timed-deity")
+        self.assertEqual(idle_proxy.deity_state_of(deity_doc)["task"]["ends_at"], 4_880)
+        self.assertIn("预计实时时长 48 分钟", deity_message)
+        ok, deity_result, _ = idle_proxy.finish_deity_herb_proxy(
+            deity_doc, 2_000 + 48 * 60, ZeroRandom(), [])
+        self.assertTrue(ok)
+        self.assertEqual(deity_result["minutes"], 60)
+
+    def test_early_proxy_settlement_credits_only_elapsed_time_at_accelerated_rate(self):
+        doc = self.eligible_doc()
+        doc.ext["xtzb"] = {"current": "混沌钟", "owned": ["混沌钟"]}
+        _, _, formed = idle_proxy.condense_spirit(doc)
+        _, _, formed = idle_proxy.start_herb_proxy(formed, 1_000, 60, "early-timed")
+
+        ok, result, _ = idle_proxy.finish_herb_proxy(
+            formed, 1_000 + 21 * 60, ZeroRandom(), [])
+
+        self.assertTrue(ok)
+        self.assertEqual(result["minutes"], 30)
+
     def test_overdue_penalty_recalculates_occupation_from_source_snapshot(self):
         source = PlayerDoc(uid="overdue", ext={"occupation_level": 10, "occupation_exp": 500})
         settled = source.model_copy(deep=True)

@@ -115,6 +115,12 @@ def aggregate(
         base_def += float(prow.get("基础防御", 0) or 0)
         base_hp += float(prow.get("基础血量", 0) or 0)
         bao += float(prow.get("基础暴击", 0) or 0)
+    try:
+        from .mingge import signed_bonus
+        from .linggen import ORIGIN_SCALE
+        base_hp += max(0.0, signed_bonus(doc, "生命本源额外")) * ORIGIN_SCALE
+    except (TypeError, ValueError):
+        pass
 
     enhance = enhance or {}
     tainted_slots = set((doc.ext.get("tainted") or {}).keys()) if isinstance(doc.ext.get("tainted"), dict) else set()
@@ -131,6 +137,17 @@ def aggregate(
         )
         if item.get("type") == "帝兵" and imperial and name in imperial:
             mult *= 2.0  # 认主帝兵：属性加成翻倍
+        if name == "大罗剑胎":
+            lg = doc.ext.get("linggen") or {}
+            is_supreme = (isinstance(lg, Mapping)
+                          and ("至尊" in str(lg.get("name") or "")
+                               or "至尊" in str(lg.get("type") or "")))
+            key, fallback = (("至尊体全属性倍率", 15.0) if is_supreme
+                             else ("其他灵根全属性倍率", 7.5))
+            try:
+                mult *= max(0.0, float(item.get(key, fallback) or fallback))
+            except (TypeError, ValueError):
+                pass
         for key, acc in (("atk", "atk"), ("def", "def"), ("HP", "hp")):
             f, r = _split(item.get(key))
             flat[acc] += f * mult

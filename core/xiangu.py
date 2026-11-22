@@ -751,9 +751,9 @@ def render_grid(map_st: Mapping, doc: Any, gains: Mapping | None = None) -> str:
     rng_range = divine_range(doc)
     px, py = map_st["pos"]["x"], map_st["pos"]["y"]
     lines = [f"═══ {frag.get('name', '未知区域')} · {map_st['w']}×{map_st['h']} · 神识感知中 ═══",
-             f"👤 {getattr(doc, 'name', '') or '修士'} | {realm_name(xg_level_of(doc))} | "
-             f"神识: {rng_range}格 | 💎 道韵: {int((gains or {}).get('daoyun', 0) or 0)}",
-             f"📍 区域：{frag.get('zone', '?')} | 危险：{'★' * max(1, int(frag.get('risk', 0.2) * 5))}",
+             f"👤 {getattr(doc, 'name', '') or '修士'}｜{realm_name(xg_level_of(doc))}｜"
+             f"神识：{rng_range}格｜💎 道韵：{int((gains or {}).get('daoyun', 0) or 0)}",
+             f"📍 区域：{frag.get('zone', '?')}｜危险：{'★' * max(1, int(frag.get('risk', 0.2) * 5))}",
              ""]
     for y in range(int(map_st["h"])):
         row = ""

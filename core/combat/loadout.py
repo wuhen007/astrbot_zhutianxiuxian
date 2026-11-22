@@ -139,6 +139,34 @@ def build_fighter(
     orb = linggen.orb_of(lg)
     if orb > 0:
         f.effects["orb"] = orb
+    dodge = control_dodge = damage_reduction = orb_flat = 0.0
+    for item_name in (getattr(doc, "ext", {}).get("equipment") or {}).values():
+        item = item_lookup(item_name)
+        if not item:
+            continue
+        item_dodge = max(0.0, float(item.get("闪避率", 0) or 0))
+        damage_reduction += max(0.0, float(item.get("元神伤害减免", 0) or 0))
+        orb_flat += max(0.0, float(item.get("神力", 0) or 0))
+        if float(item.get("低血护盾", 0) or 0) > 0:
+            f.effects["low_hp_shield_ratio"] = max(
+                float(f.eff("low_hp_shield_ratio", 0) or 0),
+                float(item["低血护盾"]))
+            f.effects["low_hp_shield_threshold"] = max(
+                float(f.eff("low_hp_shield_threshold", 0) or 0),
+                float(item.get("低血阈值", 0.3) or 0.3))
+        if float(item.get("首次免控", 0) or 0) > 0:
+            f.effects["first_control_immunity"] = True
+            control_dodge += item_dodge
+        else:
+            dodge += item_dodge
+    if dodge:
+        f.effects["dodge_chance"] = min(0.45, dodge)
+    if control_dodge:
+        f.effects["dodge_after_control"] = min(0.45, control_dodge)
+    if damage_reduction:
+        f.effects["damage_reduction"] = min(0.65, damage_reduction)
+    if orb_flat:
+        f.effects["orb_damage_flat"] = orb_flat
     # 身份挂载：开场镇杀 / 岁云裁决 / 帝骑助战 依据
     f.tags["auth_of"] = authority_mod.authority_of(doc)
     f.tags["auth21"] = authority_mod.authority_21(doc)
@@ -160,6 +188,23 @@ def build_fighter(
             "used": False,
         }
         f.tags["battle_skills"] = [str(s.get("name")) for s in battle_skills]
+    try:
+        from ..mingge import signed_bonus as _mingge_bonus
+        f.tags["speed"] = max(1, 100 + int(_mingge_bonus(doc, "速度")))
+        revive_chance = min(1.0, max(0.0, _mingge_bonus(doc, "复活概率")))
+        if revive_chance:
+            revive = f.effects.get("revive")
+            if isinstance(revive, dict):
+                raw = revive.get("pr")
+                prior = 1.0 if raw is None else float(raw)
+                revive["pr"] = min(1.0, max(0.0, prior + revive_chance))
+            else:
+                f.effects["revive"] = {
+                    "name": "命格·涅槃余烬", "ratio": 0.3, "pr": revive_chance,
+                    "msg": "命火未熄，真灵复燃", "used": False,
+                }
+    except (TypeError, ValueError):
+        pass
     equip_skill_pool(f, doc, skill_tables)
     skills.ensure_builtin()
     # W8-A1 诸天遗珍：增伤/减伤/汲取/开战护盾（暴击率已在 equipment.aggregate 里并入 bao）

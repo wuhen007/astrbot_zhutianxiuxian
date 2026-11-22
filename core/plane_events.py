@@ -12,9 +12,7 @@
   胜战功 +12 败 -6 且气血归 1）→ #投入战资 源石*N（战功 +2N、军资累计）；
   军资达 1000 触发轮末奖励（战功 +30 全站队者）。个人战功 ext["sect_war"]。
   #战功商店 表取 data/圣地战功商店.json，#战功兑换 名称 扣战功发物品。
-- 游商：不做位面坐标校验（原文需抵达坐标，本移植折算为每日限量）：
-  白须仙翁（唯一百分比装备×3，源石计价）、黑衣神秘人（神药/潜力丹/禁物）、
-  绝美仙子（问道/历练/寻缘签，50 万灵石，24h 红尘仙缘签效果待挂）。
+- 游商：不做位面坐标校验；仙翁拓本进入装备索引，求签收益记入玩家 24h 状态。
 """
 
 from __future__ import annotations
@@ -29,16 +27,21 @@ from .player import PlayerDoc
 FUND_GOAL = 1000
 
 IMPERIAL_GOODS: tuple[tuple[str, int, str], ...] = (
-    ("仙尊战袍·拓本", 1_200_000, "全属性 +18%（唯一百分比）"),
-    ("弑帝枪·拓本", 1_500_000, "攻击 +25%（唯一百分比）"),
-    ("万劫不侵钟·拓本", 1_800_000, "防御 +25%（唯一百分比）"),
+    ("仙尊战袍·拓本", 1_200_000, "全属性 +18%"),
+    ("弑帝枪·拓本", 1_500_000, "攻击 +25%"),
+    ("万劫不侵钟·拓本", 1_800_000, "防御 +25%"),
 )
 BLACK_GOODS: tuple[tuple[str, int, str], ...] = (
     ("九转天药", 600_000, "元神大涨"),
-    ("叩仙丹", 400_000, "仙道潜力 +50"),
-    ("诸天禁物·断念", 900_000, "来历不明的禁物"),
+    ("叩仙丹", 400_000, "仙道潜力 +10"),
 )
 XIANGZI_SIGNS = ("问道签", "历练签", "寻缘签")
+SIGN_EFFECTS = {
+    "问道签": ("悟道收益", "悟道收益 +10%"),
+    "历练签": ("副本出金率", "副本出金率 +10%"),
+    "寻缘签": ("奇遇概率", "秘境奇遇概率 +10%"),
+}
+SIGN_DURATION = 24 * 3600
 XIANGZI_COST = 500_000
 
 
@@ -137,22 +140,30 @@ def war_fund(doc: PlayerDoc, calamity: dict[str, Any], qty: int,
     return True, msg, {"源石": -qty}
 
 
+def _war_products(content: Any) -> list[Mapping[str, Any]]:
+    if isinstance(content, Mapping):
+        rows = content.get("products", content.get("圣地战功商店", []))
+    else:
+        rows = content
+    return [r for r in rows if isinstance(r, Mapping)] if isinstance(rows, list) else []
+
+
 def war_shop(doc: Any, content: Mapping[str, Any]) -> str:
-    rows = content.get("圣地战功商店") if isinstance(content.get("圣地战功商店"), list) else []
+    rows = _war_products(content)
     if not rows:
         return "--- 战功商店 ---\n（商店表暂空——#战功兑换 名称 仍可尝试）"
     lines = ["--- 战功商店 ---"]
     for r in rows[:12]:
         if isinstance(r, dict):
             lines.append(f"· {r.get('name', '?')}｜{int(r.get('price', 0) or 0):,} 战功"
-                         f"｜{r.get('desc', '')}")
+                         f"｜{r.get('description', r.get('desc', ''))}")
     lines.append("兑换：#战功兑换 名称")
     return "\n".join(lines)
 
 
 def war_exchange(doc: PlayerDoc, calamity: Mapping[str, Any], name: str,
                  content: Mapping[str, Any]) -> tuple[bool, str, dict[str, int]]:
-    rows = content.get("圣地战功商店") if isinstance(content.get("圣地战功商店"), list) else []
+    rows = _war_products(content)
     row = next((r for r in rows if isinstance(r, dict) and str(r.get("name")) == (name or "").strip()), None)
     if row is None:
         return False, "战功商店无此物——#战功商店 查看列表。", {}
@@ -171,14 +182,14 @@ def war_exchange(doc: PlayerDoc, calamity: Mapping[str, Any], name: str,
 def merchant_text() -> str:
     lines = ["--- 白须仙翁（唯一百分比装备）---"]
     lines += [f"· #{i + 1} {n}｜{p:,} 源石｜{d}" for i, (n, p, d) in enumerate(IMPERIAL_GOODS)]
-    lines.append("购买：#购买仙翁商品 编号（源石计价，每日不限但看缘分刷新）")
+    lines.append("购买：#购买仙翁商品 编号（源石计价）")
     lines.append("")
-    lines.append("--- 黑衣神秘人（神药与禁物）---")
+    lines.append("--- 黑衣神秘人（神药与潜力丹）---")
     lines += [f"· #{i + 1} {n}｜{p:,} 源石｜{d}" for i, (n, p, d) in enumerate(BLACK_GOODS)]
     lines.append("购买：#购买黑市商品 编号")
     lines.append("")
     lines.append("--- 绝美仙子（红尘仙缘签）---")
-    lines.append(f"· #求取问道签|历练签|寻缘签（{XIANGZI_COST:,} 灵石，24h 缘签）")
+    lines.append(f"· #求取问道签|历练签|寻缘签（{XIANGZI_COST:,} 灵石，效果持续 24 小时）")
     return "\n".join(lines)
 
 
@@ -197,14 +208,33 @@ def buy(doc: PlayerDoc, catalog: tuple[tuple[str, int, str], ...], idx: int,
     return True, f"【仙缘一掷】{name} 已入纳戒——{desc}。", {name: 1}
 
 
-def ask_sign(doc: PlayerDoc, sign: str) -> tuple[bool, str]:
+def ask_sign(doc: PlayerDoc, sign: str, now: float | None = None) -> tuple[bool, str]:
     sign = (sign or "").strip()
     if sign not in XIANGZI_SIGNS:
         return False, "用法：#求取问道签 / #求取历练签 / #求取寻缘签。"
     if int(getattr(doc, "stones", 0) or 0) < XIANGZI_COST:
-        return False, f"求签需灵石 {XIANGZI_COST:,}（原 200 万源石折算）。"
-    doc.stones = int(getattr(doc, "stones", 0) or 0) - XIANGZI_COST
-    eff = {"问道签": "悟道收益 +10%", "历练签": "副本出金率 +10%",
-           "寻缘签": "奇遇概率 +10%"}[sign]
-    return True, (f"【红尘仙缘签 · {sign}】仙子莞尔，一签入手——24 小时内 {eff}。\n"
-                  "（缘签效果挂接在后续版本生效，先收好签文）")
+        return False, f"求签需灵石 {XIANGZI_COST:,}（当前 {int(getattr(doc, 'stones', 0) or 0):,}）。"
+    now = time.time() if now is None else float(now)
+    key, label = SIGN_EFFECTS[sign]
+    raw_active = doc.ext.get("red_dust_signs")
+    active = dict(raw_active) if isinstance(raw_active, Mapping) else {}
+    active[key] = {"bonus": 0.1, "expires_at": now + SIGN_DURATION, "name": sign}
+    doc.ext["red_dust_signs"] = active
+    doc.stones -= XIANGZI_COST
+    return True, (f"【红尘仙缘签·{sign}】一签入手：{label}，持续 24 小时。"
+                  f"已消耗灵石 {XIANGZI_COST:,}，剩余 {doc.stones:,}。")
+
+
+def sign_bonus(doc: Any, effect: str, now: float | None = None) -> float:
+    now = time.time() if now is None else float(now)
+    ext = getattr(doc, "ext", {})
+    signs = ext.get("red_dust_signs", {}) if isinstance(ext, Mapping) else {}
+    row = signs.get(effect) if isinstance(signs, Mapping) else None
+    if not isinstance(row, Mapping):
+        return 0.0
+    try:
+        if float(row.get("expires_at", 0) or 0) <= now:
+            return 0.0
+        return max(0.0, float(row.get("bonus", 0) or 0))
+    except (TypeError, ValueError):
+        return 0.0

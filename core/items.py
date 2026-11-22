@@ -67,7 +67,7 @@ def set_lock(doc, name: str, on: bool) -> tuple[bool, str]:
 
 
 def item_buy_price(item: dict[str, Any], markup: float) -> int:
-    return max(1, math.ceil(float(item.get("出售价", 0)) * markup))
+    return max(0, math.ceil(float(item.get("出售价", 0)) * markup))
 
 
 def shop_page(
@@ -90,6 +90,8 @@ def buy(
     if qty < 1:
         return False, "至少购买 1 件。", doc, {}
     unit = item_buy_price(item, markup)
+    if unit <= 0:
+        return False, f"「{item.get('name', '该物品')}」为非卖品。", doc, {}
     total = unit * qty
     if doc.stones < total:
         return False, (
@@ -107,7 +109,12 @@ def sell(doc, item: dict[str, Any], qty: int) -> tuple[bool, str, Any]:
     """出售给系统：按出售价回收。"""
     if qty < 1:
         return False, "至少出售 1 件。", doc
-    total = int(float(item.get("出售价", 0)) * qty)
+    try:
+        from .mingge import multiplier
+        price_mult = multiplier(doc, "出售价格倍率")
+    except (TypeError, ValueError):
+        price_mult = 1.0
+    total = int(float(item.get("出售价", 0)) * qty * price_mult)
     if total <= 0:
         return False, f"「{item['name']}」无人收购（出售价为 0）。", doc
     d = doc.model_copy(deep=True)
@@ -132,6 +139,7 @@ def use_item(
     - HP/HPp 气血回复（固定值 / 上限比例），需调用方传聚合后 max_hp
     - linggen / type=天资洗炼  天资洗炼：重摇灵根（如 天命轮回丹、神心丹）
     - type=闭关/凝仙/炼神/仙缘/神赐/魔道值/入魔  品质丹 buff（ext["buffs"]，次数消耗制）
+    - type=器灵/锻造上限  炼器天赋提升 / 下次开炉扩容（需已评测炼器师）
     - potential/heart/wudao/xingyun/道心  直投累计字段
     - shouyuan / type=寿命  增寿丹药（W7-0：同日耐药递减，见 lifespan.grant_pill）
     """
@@ -232,7 +240,40 @@ def use_item(
         d.ext["modao"] = int(d.ext.get("modao", 0) or 0) + int(item["modao"]) * qty
         parts.append(f"{qty} 道魔气入体：魔道值 +{int(item['modao']) * qty}（当前 {d.ext['modao']}）")
     elif t in ("器灵", "锻造上限"):
-        return False, f"「{name}」的效果需炼器/锻造格子系统（后续开放），暂无法服用。", doc, False
+        from . import duanzao as _dz
+
+        st = _dz.state_of(d)
+        if str(d.ext.get("occupation") or "") != "炼器师" or not st.get("built"):
+            return False, f"「{name}」需炼器师完成能力评测后使用；本次未消耗物品。", doc, False
+        if qty != 1:
+            return False, f"「{name}」每次限用 1 颗；本次未消耗物品。", doc, False
+        if int(st.get("status") or 0) == 1:
+            return False, f"锻炉炼制中不能使用「{name}」；本次未消耗物品。", doc, False
+
+        if t == "器灵":
+            try:
+                increase = int(item.get("天赋") or 0)
+            except (TypeError, ValueError):
+                increase = 0
+            talent = int(st.get("talent") or 0)
+            new_talent = min(_dz.MAX_TALENT, talent + increase)
+            if increase <= 0:
+                return False, f"「{name}」的炼器天赋数值无效；本次未消耗物品。", doc, False
+            if new_talent <= talent:
+                return False, f"炼器天赋已达上限 {_dz.MAX_TALENT}；本次未消耗物品。", doc, False
+            st["talent"] = new_talent
+            parts.append(f"炼器天赋 +{new_talent - talent}（当前 {new_talent}/{_dz.MAX_TALENT}）")
+        else:
+            try:
+                bonus = int(item.get("额外数量") or 0)
+            except (TypeError, ValueError):
+                bonus = 0
+            if not 1 <= bonus <= _dz.MAX_FURNACE_BONUS:
+                return False, f"「{name}」的扩容量无效；本次未消耗物品。", doc, False
+            if int(st.get("furnace_bonus") or 0) > 0:
+                return False, "已有待用真器丹效果，需先成功开炉；本次未消耗物品。", doc, False
+            st["furnace_bonus"] = bonus
+            parts.append(f"下一次成功开炉容量 +{bonus}，出炉后消耗")
     if buffs:
         d.ext["buffs"] = buffs
 

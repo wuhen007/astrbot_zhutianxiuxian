@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import functools
 import json
+import math
 import random
 import re
 import secrets
 import time
+from contextlib import AsyncExitStack
 from pathlib import Path
 
 from astrbot.api import AstrBotConfig, logger
@@ -30,6 +32,9 @@ from .core import rankings
 from .core import idle_proxy as idle_proxy_mod
 from .core import selfdao as selfdao_mod
 from .core.clock import day_key
+from .core import timed_action as timed_action_mod
+from .core import stone_king as stone_king_mod
+from .core import source_duel as source_duel_mod
 
 PLUGIN_DIR = Path(__file__).parent
 PLUGIN_NAME = "astrbot_zhutianxiuxian"
@@ -274,6 +279,10 @@ CMD_STONE_CUT_SEALED = "#封源切法"
 CMD_STONE_CONTINUE = "#继续切"
 CMD_STONE_BUYBACK = "#石坊回购"
 CMD_STONE_EXCHANGE = "#源石兑换"
+CMD_STONE_KING_VIEW = "#镇园石王"
+CMD_STONE_KING_JOIN = "#石王助切"
+CMD_SOURCE_DUEL = "#源石坊对决"
+CMD_SOURCE_DUEL_CHOICE = "#对决选石"
 CMD_EVIL_SLAY = "#镇魂"
 CMD_EVIL_DISPOSE = "#处置"
 CMD_EVIL_MAGIC = "#修炼魔功"
@@ -1331,7 +1340,7 @@ ITEM_TABLES = (
     PLUGIN_NAME,
     "wuhen",
     "诸天万界修仙（Python 重构版）",
-    "0.1.2",
+    "0.1.3",
     "",
 )
 class ZhutianPlugin(Star):
@@ -1348,6 +1357,7 @@ class ZhutianPlugin(Star):
         self.db = DataBase(plugin_data_dir / "zhutian.db")
         self._last_cmd_ts: dict[str, float] = {}   # 同人指令去抖：防连发时整档互相覆盖（双倍签到/丢奖励）
         self._profile_name_lock = asyncio.Lock()
+        self._stone_king_lock = asyncio.Lock()
         self.panel_dir = plugin_data_dir / "panels"
         self.render_on = bool(config.get("RENDER_ENABLE", True))
         # shortcut: 数据表暂从插件目录读取（随代码分发），表多体积大后改放 StarTools 数据目录
@@ -1377,6 +1387,7 @@ class ZhutianPlugin(Star):
 
         # 物品索引：从指定类别表构建 名称→物品（同名以先出现者为准）
         self.item_index: dict[str, dict] = {}
+        self.sell_item_index: dict[str, dict] = {}
         dupes = 0
         for t in ITEM_TABLES:
             table = self.content.table("item/" + t)
@@ -1385,10 +1396,23 @@ class ZhutianPlugin(Star):
             for e in table:
                 if not isinstance(e, dict) or not e.get("name") or "class" not in e:
                     continue
+                current = self.sell_item_index.get(e["name"])
+                if current is None or float(e.get("出售价", 0) or 0) > float(current.get("出售价", 0) or 0):
+                    self.sell_item_index[e["name"]] = e
                 if e["name"] in self.item_index:
                     dupes += 1
                     continue
                 self.item_index[e["name"]] = e
+        limited_pills = self.content.table("Timelimit/限定丹药")
+        if isinstance(limited_pills, list):
+            for item in limited_pills:
+                if (isinstance(item, dict) and item.get("name")
+                        and "class" in item):
+                    self.item_index.setdefault(item["name"], item)
+                    current = self.sell_item_index.get(item["name"])
+                    if (current is None or float(item.get("出售价", 0) or 0)
+                            > float(current.get("出售价", 0) or 0)):
+                        self.sell_item_index[item["name"]] = item
         # W8-C4：锻炉材料九维专用索引（item_index 中"材料列表"可能先占同名条目）
         self._furn_mats = {
             e["name"]: e for e in (self.content.table("item/锻造材料") or [])
@@ -1401,11 +1425,12 @@ class ZhutianPlugin(Star):
             "inner": [e for e in (self.content.table("item/星阁内场拍卖行") or [])
                       if isinstance(e, dict) and e.get("name")],
         }
+        shop_table = self.content.table("item/商店/商品列表")
         self.shop_stock = [
-            e for t in ("item/常驻", "item/限定")
-            for e in (self.content.table(t) if isinstance(self.content.table(t), list) else [])
+            e for e in (shop_table if isinstance(shop_table, list) else [])
             if isinstance(e, dict) and e.get("name")
         ]
+        self.shop_item_index = {e["name"]: e for e in self.shop_stock}
         logger.info(f"[zhutian] 物品索引 {len(self.item_index)} 条（去重 {dupes}），坊市货架 {len(self.shop_stock)} 件")
 
         # 仙宠图鉴按 id 索引（进阶形态 = id+1，对齐原版）
@@ -2284,8 +2309,11 @@ class ZhutianPlugin(Star):
             cap = int(self._val("CULTIVATE_MAX_MINUTES", 7200))
             period = 30
             planned = doc.ext.get("cultivate_minutes")
-            elapsed = max(0.0, (time.time() - doc.state_start) / 60)
-            counted = min(elapsed, float(planned) if planned else float(cap), float(cap))
+            now = time.time()
+            elapsed = max(0.0, (now - doc.state_start) / 60)
+            credited = timed_action_mod.credited_minutes(
+                doc.state_start, now, doc.ext.get("cultivate_time_multiplier", 1.0))
+            counted = min(float(credited), float(planned) if planned else float(cap), float(cap))
             floored = int(counted // period) * period
             gongfa_bonus = 0
             for gname in (doc.ext.get("gongfa") or []):
@@ -2308,8 +2336,11 @@ class ZhutianPlugin(Star):
         elif doc.state == "降妖中":
             period = cultivate.WORK_PERIOD
             planned = doc.ext.get("work_minutes")
-            elapsed = max(0.0, (time.time() - doc.state_start) / 60)
-            counted = min(elapsed, float(planned) if planned else float(period * cultivate.WORK_CYCLES),
+            now = time.time()
+            elapsed = max(0.0, (now - doc.state_start) / 60)
+            credited = timed_action_mod.credited_minutes(
+                doc.state_start, now, doc.ext.get("work_time_multiplier", 1.0))
+            counted = min(float(credited), float(planned) if planned else float(period * cultivate.WORK_CYCLES),
                           float(period * cultivate.WORK_CYCLES))
             floored = int(counted // period) * period
             note = f"降妖中（已 {int(elapsed)} 分钟"
@@ -2610,6 +2641,10 @@ class ZhutianPlugin(Star):
                 (f"{CMD_STONE_BUY} 序号 [档位]", "购石后选择切法；层层剥石可回购异象"),
                 (f"{CMD_STONE_LEDGER} / #源石坊记录", "源石坊收支、连续空石与奇珍记录"),
                 (f"{CMD_STONE_EXCHANGE} 数量", "源石兑灵石（汇率 10）"),
+                (CMD_STONE_KING_VIEW, "查看本群本周镇园石王与助切人数"),
+                (CMD_STONE_KING_JOIN, "本群投入 300,000 源石助切；3 人开切，各群状态独立"),
+                (CMD_SOURCE_DUEL, "NPC 源术对决；石料费开局扣除，五分钟内五选三"),
+                (f"{CMD_SOURCE_DUEL_CHOICE} 1 3 5 [平注/加注/豪赌]", "选择三石并结算；胜负平按切源与押注结算"),
             ]},
             {"title": "位面天骄", "lines": [
                 (CMD_TJ_LIST, "八位天骄：在世/轮回中、气血、赏格"),
@@ -2735,7 +2770,7 @@ class ZhutianPlugin(Star):
             {"title": "炼丹锻造", "lines": [
                 (CMD_RECIPES, "开放配方（简要）"),
                 ("#丹药配方", "全量丹方总览（出图）"),
-                ("#符道配方", "符方总览（制符后续开放）"),
+                ("#符道配方", "符方总览；符师可用 #制作符箓 制作"),
                 (f"{CMD_CRAFT} 丹药名 数量", "炼丹"),
                 (CMD_ALCHEMY_LV, "炼丹等级"),
                 ("#丹药效果", "当前生效丹药 buff"),
@@ -3252,7 +3287,8 @@ class ZhutianPlugin(Star):
         import random as _random
         ok, msg, d, items = blessing.lottery(
             doc, count, _random.Random(f"{doc.uid}:lottery:{time.time_ns()}"),
-            per_draw=2 if daofa.active(doc, time.time()) else 1)
+            per_draw=2 if daofa.active(doc, time.time()) else 1,
+            pool=self.content.table("item/每日抽奖列表"))
         if ok:
             async with self.db.transaction():
                 await self.db.save_player(d.model_dump())
@@ -3261,7 +3297,7 @@ class ZhutianPlugin(Star):
 
     @filter.command(CMD_LOTTERY)
     async def handle_lottery(self, event: AstrMessageEvent, arg: str = ""):
-        """每日抽奖：#每日抽奖 次数（原版 41 项等概率）。"""
+        """每日抽奖：#每日抽奖 次数（数据表每行等概率）。"""
         import re as _re
         if not self._allowed(event):
             return
@@ -3360,7 +3396,7 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         rate = int(self._val("CULTIVATE_EXP_PER_MIN", 20))
-        # 原版效率等式（player_efficiency）：加法聚合 1 + 灵根eff + 功法修炼加成 + 辟谷丹
+        # 原版效率等式：加法聚合灵根、功法、命格与辟谷丹加成。
         gongfa_bonus = 0
         for gname in (doc.ext.get("gongfa") or []):
             g = self.item_index.get(gname) or {}
@@ -3369,12 +3405,14 @@ class ZhutianPlugin(Star):
             except (TypeError, ValueError):
                 pass
         ling_bonus = linggen.eff_of(doc)
+        mingge_bonus = mingge.signed_bonus(doc, "修炼加成")
         buffs = doc.ext.get("buffs") or {}
         big = buffs.get("biguan") if isinstance(buffs.get("biguan"), dict) else {}
         biguan_bonus = float(big.get("bonus", 0) or 0)
         # 对齐原版 biguan_jiesuan：每周期基础修为 = size(默认10) × 境界id × 效率乘区
         base_per_min = int(self._val("CULTIVATE_EXP_PER_REALM", 10)) * (max(0, doc.realm_index) + 1)
-        eff_rate = max(1, int(base_per_min * (1 + ling_bonus + gongfa_bonus + biguan_bonus)))
+        eff_rate = max(1, int(base_per_min * (1 + ling_bonus + gongfa_bonus
+                                               + mingge_bonus + biguan_bonus)))
         # 魔头禁术：魂印缠身 → 闭关效率 -30%
         brand_mult = motou.brand_penalty(motou.state_of(doc), time.time())
         if brand_mult < 1.0:
@@ -3401,7 +3439,10 @@ class ZhutianPlugin(Star):
         big = buffs.get("biguan") if isinstance(buffs.get("biguan"), dict) else {}
         biguan_bonus = float(big.get("bonus", 0) or 0)
         base_per_min = int(self._val("WORK_STONES_PER_REALM", 15)) * (max(0, doc.realm_index) + 1)
-        return max(1, int(base_per_min * (1 + linggen.eff_of(doc) + gongfa_bonus + biguan_bonus) * 0.5))
+        efficiency = (1 + linggen.eff_of(doc) + gongfa_bonus
+                      + mingge.signed_bonus(doc, "修炼加成") + biguan_bonus)
+        income = max(0.0, 1 + mingge.signed_bonus(doc, "灵石收益"))
+        return max(1, int(base_per_min * efficiency * income * 0.5))
 
     async def _work_run(self, event: AstrMessageEvent, planned: int | None):
         """降妖开始（原版 PlayerControl.Dagong）：封印/气血校验 + 15 分钟档定时动作。"""
@@ -3590,11 +3631,11 @@ class ZhutianPlugin(Star):
     async def handle_shop(self, event: AstrMessageEvent, page: str = "1"):
         if not self._allowed(event):
             return
-        markup = float(self._val("SHOP_BUY_MARKUP", 2.0))
+        markup = float(self._val("SHOP_BUY_MARKUP", 1.2))
         page_items, pages, cur = items.shop_page(self.shop_stock, int(page or 1), 10, markup)
         if self.render_on and page_items:
             shop_data = {
-                "title": "坊市", "sub": "常驻 · 限定", "footer": "诸天修仙",
+                "title": "坊市", "sub": "商品列表", "footer": "诸天修仙",
                 "cur": cur, "pages": pages,
                 "rows": [{"name": e["name"], "cls": e.get("class", "?"),
                           "typ": e.get("type", "") or "—",
@@ -3622,12 +3663,16 @@ class ZhutianPlugin(Star):
             yield event.plain_result("格式：#购买 名字 数量（数量可省略）")
             return
         qty = max(1, qty)
-        item = self.item_index.get(item_name)
+        lookup = (self.shop_item_index if mode == "buy" else
+                  self.sell_item_index if mode == "sell" else self.item_index)
+        item = lookup.get(item_name)
         if not item:
-            yield event.plain_result(f"坊市与行囊中都找不到「{item_name}」。")
+            message = (f"坊市货架中没有「{item_name}」。" if mode == "buy"
+                       else f"坊市与行囊中都找不到「{item_name}」。")
+            yield event.plain_result(message)
             return
         inv = await self.db.get_inventory(doc.uid)
-        markup = float(self._val("SHOP_BUY_MARKUP", 2.0))
+        markup = float(self._val("SHOP_BUY_MARKUP", 1.2))
 
         if mode == "buy":
             ok, msg, d, gain = items.buy(doc, item, qty, markup)
@@ -5587,13 +5632,18 @@ class ZhutianPlugin(Star):
             yield event.plain_result(why)
             return
         d = doc.model_copy(deep=True)
+        now = time.time()
+        time_multiplier = timed_action_mod.multiplier(d, now)
         d.stones -= shenjie.SHENJIE_STONES
         d.state = "神界中"
-        d.state_start = time.time()
+        d.state_start = now
         d.ext["shenjie_date"] = today
+        d.ext["shenjie_time_multiplier"] = time_multiplier
         await self.db.save_player(d.model_dump())
         yield event.plain_result(
-            f"神界之门开启，你踏入其中历练 {shenjie.SHENJIE_MINUTES} 分钟。\n"
+            f"神界之门开启，你踏入其中历练 {shenjie.SHENJIE_MINUTES} 分钟"
+            + (f"（预计实时时长 {math.ceil(shenjie.SHENJIE_MINUTES * time_multiplier)} 分钟）" if time_multiplier < 1 else "")
+            + ".\n"
             f"归来后发「{CMD_SHENJIE_END}」结算。"
         )
 
@@ -5608,11 +5658,15 @@ class ZhutianPlugin(Star):
         if doc.state != "神界中":
             yield event.plain_result("道友并未在神界历练。")
             return
-        elapsed = max(0.0, (time.time() - doc.state_start) / 60)
-        floored = int(elapsed // shenjie.SHENJIE_MINUTES) * shenjie.SHENJIE_MINUTES
+        now = time.time()
+        elapsed = max(0.0, (now - doc.state_start) / 60)
+        multiplier = doc.ext.get("shenjie_time_multiplier", 1.0)
+        credited = timed_action_mod.credited_minutes(doc.state_start, now, multiplier)
+        floored = int(credited // shenjie.SHENJIE_MINUTES) * shenjie.SHENJIE_MINUTES
         d = doc.model_copy(deep=True)
         d.state = "空闲"
         d.state_start = 0.0
+        d.ext.pop("shenjie_time_multiplier", None)
         if floored < shenjie.SHENJIE_MINUTES:
             await self.db.save_player(d.model_dump())
             yield event.plain_result(f"神界历练不足 {shenjie.SHENJIE_MINUTES} 分钟，空手而归（可稍后再归）。")
@@ -8484,7 +8538,7 @@ class ZhutianPlugin(Star):
         async with self.db.transaction():
             await self.db.save_player(d.model_dump())
             await self.db.add_items(doc.uid, {thing: 1})
-        yield event.plain_result(f"兑换成功！获得[{thing}]，剩余 {pts - cost} 积分。")
+        yield event.plain_result(f"兑换成功！获得「{thing}」，剩余 {pts - cost} 积分。")
 
     @filter.command(CMD_RECAST, "神兵重铸")
     async def handle_recast(self, event: AstrMessageEvent, old_name: str = "", new_name: str = ""):
@@ -9923,6 +9977,345 @@ class ZhutianPlugin(Star):
 
     # ---- B4：源石坊赌石 ----
 
+    @filter.command(CMD_STONE_KING_VIEW, "查看本群本周奇石")
+    async def handle_stone_king_view(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        group_id = str(event.get_group_id() or "")
+        if not group_id:
+            yield event.plain_result("镇园石王只在群聊中开放。")
+            return
+        group_scope = f"{event.get_platform_id() or 'unknown'}:{group_id}"
+        async with self._stone_king_lock:
+            async with self.db.calamity_lock:
+                calamity_state = await self.db.get_calamity()
+                state, changed = stone_king_mod.state_for(
+                    calamity_state, group_scope, time.time(),
+                    random.Random(secrets.randbits(128)))
+                if changed:
+                    await self.db.save_calamity(calamity_state)
+                text = stone_king_mod.view_text(state, group_id)
+        yield event.plain_result(text)
+
+    @filter.command(CMD_STONE_KING_JOIN, "投入源石参与本群镇园石王助切")
+    async def handle_stone_king_join(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        group_id = str(event.get_group_id() or "")
+        if not group_id:
+            yield event.plain_result("镇园石王只在群聊中开放。")
+            return
+        group_scope = f"{event.get_platform_id() or 'unknown'}:{group_id}"
+        uid = str(event.get_sender_id())
+        now = time.time()
+        message = ""
+
+        async with self._stone_king_lock:
+            async with self.db.calamity_lock:
+                calamity_state = await self.db.get_calamity()
+                state, _ = stone_king_mod.state_for(
+                    calamity_state, group_scope, now,
+                    random.Random(secrets.randbits(128)))
+                lock_uids = sorted({uid, *(str(row.get("uid", ""))
+                                            for row in state.get("participants", []))})
+
+            async with AsyncExitStack() as locks:
+                for lock_uid in lock_uids:
+                    await locks.enter_async_context(self._pl_lock(lock_uid))
+
+                async with self.db.calamity_lock:
+                    calamity_state = await self.db.get_calamity()
+                    state, _ = stone_king_mod.state_for(
+                        calamity_state, group_scope, now,
+                        random.Random(secrets.randbits(128)))
+                    async with self.db.transaction():
+                        raw = await self.db.get_player(uid)
+                        if not raw:
+                            message = "尚无修仙档案，请先踏入仙途后再参与。"
+                        else:
+                            player_doc = PlayerDoc(**raw)
+                            yuanshi_state = yuanshi.system_of(player_doc)
+                            balance = int(yuanshi_state.get("amount", 0) or 0)
+                            if balance < stone_king_mod.CONTRIBUTION:
+                                message = (f"参与助切需要 {stone_king_mod.CONTRIBUTION:,} 源石，"
+                                           f"当前 {balance:,}。")
+                            else:
+                                joined, reason = stone_king_mod.join(
+                                    state, uid, player_doc.name or uid)
+                                if not joined:
+                                    message = reason
+                                else:
+                                    yuanshi_state["amount"] = balance - stone_king_mod.CONTRIBUTION
+                                    ledger = list(yuanshi_state.get("ledger") or [])
+                                    ledger.append({
+                                        "t": now, "garden": "镇园石王", "price": stone_king_mod.CONTRIBUTION,
+                                        "cur": "源石", "source": 0, "item": "", "name": "助切投入",
+                                        "empty": False, "cut": False,
+                                        "extra": {"group_id": group_id,
+                                                  "platform_id": str(event.get_platform_id() or ""),
+                                                  "event": "contribution"},
+                                        "refund": 0, "refund_cur": "",
+                                    })
+                                    yuanshi_state["ledger"] = ledger[-yuanshi.LEDGER_KEEP:]
+                                    player_doc.ext["yuanshi"] = yuanshi_state
+                                    await self.db.save_player(player_doc.model_dump())
+
+                                    result = None
+                                    if len(state["participants"]) >= stone_king_mod.TARGET:
+                                        result = stone_king_mod.resolve(
+                                            state, random.Random(secrets.randbits(128)))
+                                    calamity_state.setdefault("stone_king_groups", {})[group_scope] = state
+
+                                    if result is not None:
+                                        reward_lines = []
+                                        for participant in state["participants"]:
+                                            participant_uid = str(participant["uid"])
+                                            participant_raw = await self.db.get_player(participant_uid)
+                                            if not participant_raw:
+                                                continue
+                                            participant_doc = PlayerDoc(**participant_raw)
+                                            participant_yuanshi = yuanshi.system_of(participant_doc)
+                                            payout = int(result["outcome"].get("source", 0) or 0)
+                                            participant_yuanshi["amount"] = int(
+                                                participant_yuanshi.get("amount", 0) or 0) + payout
+                                            reward_ledger = list(participant_yuanshi.get("ledger") or [])
+                                            reward_ledger.append({
+                                                "t": now, "garden": "镇园石王", "price": 0,
+                                                "cur": "源石", "source": payout,
+                                                "item": (result["item"]["name"]
+                                                         if result["item_winner"]
+                                                         and str(result["item_winner"]["uid"]) == participant_uid
+                                                         else ""),
+                                                "name": result["outcome"]["name"], "empty": False,
+                                                "cut": False,
+                                                "extra": {"group_id": group_id,
+                                                          "platform_id": str(event.get_platform_id() or ""),
+                                                          "event": "settlement"},
+                                                "refund": 0, "refund_cur": "",
+                                            })
+                                            participant_yuanshi["ledger"] = reward_ledger[-yuanshi.LEDGER_KEEP:]
+                                            participant_doc.ext["yuanshi"] = participant_yuanshi
+                                            if result["outcome"].get("damage"):
+                                                hp_max = self._stats(participant_doc).hp
+                                                hp_now = min(float(participant_doc.ext.get("hp", hp_max)), hp_max)
+                                                damage = math.floor(hp_max * float(result["outcome"]["damage"]))
+                                                participant_doc.ext["hp"] = max(1, hp_now - damage)
+                                            await self.db.save_player(participant_doc.model_dump())
+                                            if (result["item"] and result["item_winner"]
+                                                    and str(result["item_winner"]["uid"]) == participant_uid):
+                                                await self.db.add_items(participant_uid, {
+                                                    result["item"]["name"]: int(result["item"].get("amount", 1))})
+                                                reward_lines.append(
+                                                    f"{participant['name']} 额外获得【{result['item']['name']}】×{result['item'].get('amount', 1)}")
+                                            reward_lines.append(
+                                                f"{participant['name']}：源石 +{payout:,}")
+                                        await self.db.save_calamity(calamity_state)
+                                        message = "\n".join([
+                                            f"【镇园石王·{result['king']['name']}开切】",
+                                            f"结果：{result['outcome']['name']}",
+                                            ("凶机爆发，所有参与者损失 20% 上限血量。"
+                                             if result["outcome"].get("damage") else "石中神华照亮整座神城。"),
+                                            *reward_lines,
+                                        ])
+                                    else:
+                                        await self.db.save_calamity(calamity_state)
+                                        message = (f"投入 {stone_king_mod.CONTRIBUTION:,} 源石参与本群助切；"
+                                                   f"当前人数 {len(state['participants'])}/{stone_king_mod.TARGET}。")
+
+        yield event.plain_result(message)
+
+    @filter.regex(r"^#源石坊对决(?:\s*[1-3])?$")
+    @_serialized_player_command
+    async def handle_source_duel(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        message = self._msg_of(event).strip()
+        match = re.fullmatch(r"#源石坊对决\s*([1-3])?", message)
+        npc_id = int(match.group(1)) if match and match.group(1) else None
+        now = time.time()
+        y = yuanshi.system_of(doc)
+        duel_state = source_duel_mod.duel_state(y, doc.ext.get("legacy_source"))
+        session, expired = source_duel_mod.active_session(y, now)
+        if expired:
+            d = doc.model_copy(deep=True)
+            d.ext["yuanshi"] = y
+            async with self.db.transaction():
+                await self.db.save_player(d.model_dump())
+            doc = d
+
+        if npc_id is None:
+            balance = int(y.get("amount", 0) or 0)
+            cooldown = source_duel_mod.cooldown_left(y, now)
+            lines = ["【神城源术对决】", f"当前源石：{balance:,}"]
+            for npc in source_duel_mod.NPCS:
+                max_risk = int(npc["stone_fee"]) + int(npc["wager"]) * 3
+                lines.extend([
+                    f"{npc['id']}. {npc['name']}·{npc['title']}",
+                    f"   石料费 {npc['stone_fee']:,}｜平注 {npc['wager']:,}｜最大风险 {max_risk:,} 源石",
+                ])
+            if session:
+                left = max(0, math.ceil(float(session["expires_at"]) - now))
+                npc = source_duel_mod.get_npc(session["npc_id"])
+                lines.append(f"当前对决：{npc['name']}｜剩余 {left} 秒；请用「#对决选石 1 3 5」完成本局。")
+            elif cooldown:
+                lines.append(f"调息冷却：{source_duel_mod.format_remaining(cooldown)}")
+            else:
+                lines.append("发送 #源石坊对决1 / 2 / 3 挑战对应人物。石料费开局即扣，超时不退。")
+            yield event.plain_result("\n".join(lines))
+            return
+
+        if session:
+            npc = source_duel_mod.get_npc(session["npc_id"])
+            yield event.plain_result(f"你已有与{npc['name']}的未完成对决，请先发送「#对决选石 1 3 5」。")
+            return
+        cooldown = source_duel_mod.cooldown_left(y, now)
+        if cooldown:
+            yield event.plain_result(f"源术对决耗费心神，请{source_duel_mod.format_remaining(cooldown)}后再来。")
+            return
+        npc = source_duel_mod.get_npc(npc_id)
+        if not npc:
+            yield event.plain_result("对手编号只能选择 1、2 或 3。")
+            return
+        fee = int(npc["stone_fee"])
+        wager = int(npc["wager"])
+        balance = int(y.get("amount", 0) or 0)
+        if balance < fee + wager:
+            yield event.plain_result(
+                f"挑战{npc['name']}需验资 {fee + wager:,} 源石（石料费 {fee:,} + 平注 {wager:,}），"
+                f"当前 {balance:,}。")
+            return
+
+        session = source_duel_mod.create_session(
+            npc_id, {"occupation": doc.ext.get("occupation"),
+                     "occupation_level": doc.ext.get("occupation_level", 1)},
+            now, secrets.token_hex(16))
+        duel_state["session"] = session
+        duel_state["net"] = int(duel_state.get("net", 0) or 0) - fee
+        y["amount"] = balance - fee
+        yuanshi.record_duel_ledger(
+            y, now, price=fee, source=0, name=f"挑战{npc['name']}石料费",
+            extra={"event": "duel_fee", "npc": npc["name"]})
+        d = doc.model_copy(deep=True)
+        d.ext["yuanshi"] = y
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+
+        lines = [
+            f"【神城源术对决·{npc['name']}】", f"{npc['name']}：「{npc['opening']}」",
+            "双方各选五石中的三块；石料费已扣，超时不退。",
+            f"石料费 {fee:,} 源石｜本局平注 {wager:,} 源石｜选择时可选平注/加注/豪赌。", "",
+        ]
+        for stone in session["player_stones"]:
+            lines.append(f"{stone['id']}.【{stone['name']}】{stone['appearance']}")
+            lines.append(f"   表象：{stone['clue']}")
+            if stone.get("insight"):
+                lines.append(f"   {stone['insight']}")
+        available_resonances = [row for row in source_duel_mod.RESONANCES
+                                if all(name in {s['name'] for s in session['player_stones']}
+                                       for name in row['stones'])]
+        if available_resonances:
+            lines.append("")
+            lines.append("本局可成石相：" + "；".join(
+                f"【{row['name']}】{' + '.join(row['stones'])}（+{round((row['multiplier'] - 1) * 100)}%）"
+                for row in available_resonances))
+        lines.append("")
+        lines.append(f"五分钟内发送「#对决选石 1 3 5 平注」结算（剩余源石 {y['amount']:,}）。")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.regex(r"^#对决选石(?:\s+.*)?$")
+    @_serialized_player_command
+    async def handle_source_duel_choice(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        parts = self._msg_of(event).strip().split()
+        if len(parts) not in (4, 5):
+            yield event.plain_result("用法：#对决选石 序号1 序号2 序号3 [平注/加注/豪赌]。")
+            return
+        try:
+            choices = [int(value) for value in parts[1:4]]
+        except ValueError:
+            yield event.plain_result("请选择 1 至 5 的三个不同序号。")
+            return
+        stake_mode = parts[4] if len(parts) == 5 else "平注"
+        now = time.time()
+        y = yuanshi.system_of(doc)
+        duel_state = source_duel_mod.duel_state(y, doc.ext.get("legacy_source"))
+        session, expired = source_duel_mod.active_session(y, now)
+        if not session:
+            if expired:
+                d = doc.model_copy(deep=True)
+                d.ext["yuanshi"] = y
+                async with self.db.transaction():
+                    await self.db.save_player(d.model_dump())
+                yield event.plain_result("选石时间已过，石料费不退；请重新发起对决。")
+            else:
+                yield event.plain_result("当前没有等待选石的源术对决。")
+            return
+        try:
+            result = source_duel_mod.resolve_session(session, choices, stake_mode, now)
+        except ValueError as exc:
+            yield event.plain_result(str(exc))
+            return
+        settlement = result["settlement"]
+        balance = int(y.get("amount", 0) or 0)
+        if balance < settlement["wager"]:
+            yield event.plain_result(
+                f"加注验资不足：当前 {balance:,} 源石，本次「{stake_mode}」还需 "
+                f"{settlement['wager']:,} 源石；本局仍可重新选择。")
+            return
+
+        y["amount"] = balance - settlement["wager"] + settlement["credit"]
+        duel_state["session"] = None
+        duel_state["cooldown_until"] = now + source_duel_mod.SOURCE_DUEL_COOLDOWN_SECONDS
+        duel_state["wins"] = int(duel_state.get("wins", 0) or 0) + int(result["result"] == "win")
+        duel_state["losses"] = int(duel_state.get("losses", 0) or 0) + int(result["result"] == "lose")
+        duel_state["draws"] = int(duel_state.get("draws", 0) or 0) + int(result["result"] == "draw")
+        duel_state["net"] = int(duel_state.get("net", 0) or 0) + settlement["credit"] - settlement["wager"]
+        duel_state["total_cut_source"] = int(duel_state.get("total_cut_source", 0) or 0) + result["player_source"]
+        duel_state["peak_cut_source"] = max(
+            int(duel_state.get("peak_cut_source", 0) or 0), int(result["player_source"]))
+        yuanshi.record_duel_ledger(
+            y, now, price=settlement["wager"], source=settlement["credit"],
+            name=f"{result['npc']['name']}·{result['result']}",
+            extra={"event": "duel_settlement", "result": result["result"],
+                   "stake": result["stake_mode"], "npc": result["npc"]["name"],
+                   "player_source": result["player_source"], "npc_source": result["npc_source"]})
+        d = doc.model_copy(deep=True)
+        d.ext["yuanshi"] = y
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+
+        lines = ["【源术对决·三石尽开】", "你的三块源石："]
+        lines.extend(source_duel_mod.format_cut(result["player_cuts"],
+                                                result["player_base_source"],
+                                                result["player_source"],
+                                                result["player_resonance"]))
+        lines.append("")
+        lines.append(f"{result['npc']['name']}的三块源石：")
+        lines.extend(source_duel_mod.format_cut(result["npc_cuts"],
+                                                result["npc_base_source"],
+                                                result["npc_source"],
+                                                result["npc_resonance"]))
+        result_text = {
+            "win": f"你赢下对决，收回本方押注并夺得{result['npc']['name']}的押注与双方切源。",
+            "lose": f"你输掉对决，本方押注和切出的{result['player_source']:,}斤源尽归{result['npc']['name']}。",
+            "draw": "双方切源价值相同，各自收回押注并保留本方切源。",
+        }[result["result"]]
+        net = settlement["net"]
+        net_label = "本局净收益" if net >= 0 else "本局净损失"
+        lines.extend(["", result_text,
+                      f"石料费：{settlement['fee']:,} 源石｜押注：{settlement['wager']:,} 源石（{stake_mode}）",
+                      f"{net_label}：{abs(net):,} 源石｜当前源石：{y['amount']:,}"])
+        yield event.plain_result("\n".join(lines))
+
     @filter.command(CMD_STONE_MARKET, "源石坊")
     @_serialized_player_command
     async def handle_stone_market(self, event: AstrMessageEvent, garden: str = ""):
@@ -10068,7 +10461,7 @@ class ZhutianPlugin(Star):
         seed = f"{d.uid}:stone:{pending.get('purchased_at', 0)}:{pending.get('garden', '')}:{method}"
         ok, msg, y, settlement = yuanshi.cut_pending(
             y, method, str(d.ext.get("occupation") or ""), d.stones,
-            random.Random(seed), now,
+            random.Random(seed), now, mingge.signed_bonus(d, "源石收益"),
         )
         if not ok:
             yield event.plain_result(msg)
@@ -10118,7 +10511,8 @@ class ZhutianPlugin(Star):
         y = yuanshi.system_of(d)
         pending = yuanshi.market_state(y, now).get("pending") or {}
         ok, msg, settlement = yuanshi.continue_peeling(
-            y, random.Random(f"{d.uid}:stone:continue:{pending.get('purchased_at', 0)}"), now)
+            y, random.Random(f"{d.uid}:stone:continue:{pending.get('purchased_at', 0)}"), now,
+            mingge.signed_bonus(d, "源石收益"))
         if not ok:
             yield event.plain_result(msg)
             return
@@ -17614,13 +18008,43 @@ class ZhutianPlugin(Star):
             found = dungeon.find(sess.dungeon, self.content.table)
             if found:
                 pool = dungeon.pool_of(found[0]) or pool
-        sess, me, flavor, fled = secret.explore(
-            sess, base, me, pool, rng, sect_mode=bool(sess.sect_name), me_fighter=me_fighter,
-            treasure_bonus=mingge.bonus(doc, "寻宝加成"),
-            buff=_buff, protect=_protect,
-            loot_rates=era_mod.seal_rates(await self._era_state()),
-            loot_bonus=int(daofa.card_bonus(doc, time.time()).get("loot", 0) or 0),
-        )
+        speed_bonus = max(0.0, min(1.0, mingge.signed_bonus(doc, "秘境加速") / 100))
+        explored_steps = secret.exploration_steps(rng, speed_bonus)
+        extra_floor = explored_steps > 1
+        flavors: list[str] = []
+        loot_rates = era_mod.seal_rates(await self._era_state())
+        dungeon_bonus = pe_mod.sign_bonus(doc, "副本出金率", time.time())
+        if loot_rates:
+            loot_rates = tuple(min(1.0, max(0.0, rate * (1 + dungeon_bonus)))
+                               for rate in loot_rates)
+        loot_bonus = int(daofa.card_bonus(doc, time.time()).get("loot", 0) or 0)
+        treasure_bonus = max(-0.95, mingge.signed_bonus(doc, "寻宝加成")
+                             + mingge.signed_bonus(doc, "灵石收益"))
+        luck_bonus = max(-1.0, min(1.0, mingge.signed_bonus(doc, "幸运值") / 100))
+        for step in range(explored_steps):
+            if step:
+                me_fighter = _build_fighter(
+                    doc, me.name, st.atk, st.defense, me.hp, st.bao, self.item_index.get,
+                    skill_tables={
+                        "atk": self.content.table("item/技能组/攻击技能") or [],
+                        "def": self.content.table("item/技能组/防御技能") or [],
+                        "heal": self.content.table("item/技能组/治疗技能") or [],
+                        "boost": self.content.table("item/技能组/灵根增幅技能") or [],
+                    },
+                )
+                me_fighter.hp = me.hp
+            sess, me, step_flavor, fled = secret.explore(
+                sess, base, me, pool, rng, sect_mode=bool(sess.sect_name), me_fighter=me_fighter,
+                treasure_bonus=treasure_bonus, luck_bonus=luck_bonus,
+                buff=_buff, protect=_protect, loot_rates=loot_rates, loot_bonus=loot_bonus,
+            )
+            flavors.append(step_flavor)
+            if fled:
+                break
+        if extra_floor and len(flavors) > 1:
+            flavors.insert(0, "【命格·秘境加速】灵机流转，本次额外探索一层。")
+        flavor = "\n".join(flavors)
+        explored_steps = len([x for x in flavors if not x.startswith("【命格·秘境加速】")])
         if used_arrays:
             flavor = "【阵法·" + "、".join(used_arrays) + "】阵纹复苏，笼罩战场！\n" + flavor
         d = doc.model_copy(deep=True)
@@ -17633,9 +18057,12 @@ class ZhutianPlugin(Star):
             "dungeon": sess.dungeon,
         }
         if not sess.sect_name:  # 每日任务 3：秘境探索计数（宗门秘境不计，对齐原版"沉迷不计入"）
-            await self.db.add_daily_secret(doc.uid)
+            for _ in range(explored_steps):
+                await self.db.add_daily_secret(doc.uid)
         # 剧情人物邂逅（战败/传送脱身不触发）
-        enc = None if fled else story_npc.meet(s, sess.place, sess.floor, time.time(), rng)
+        enc = None if fled else story_npc.meet(
+            s, sess.place, sess.floor, time.time(), rng,
+            pe_mod.sign_bonus(doc, "奇遇概率", time.time()))
         drop_items: dict[str, int] = {}
         if enc:
             flavor = flavor + "\n" + str(enc.get("text") or "")
@@ -17661,11 +18088,13 @@ class ZhutianPlugin(Star):
             return
         if sess.dungeon:
             wx = wenxian.system_of(d)
-            wenxian.record_weekly(wx, "dungeon", 1, time.time())
+            wenxian.record_weekly(wx, "dungeon", explored_steps, time.time())
             d.ext["wenxian"] = wx
         d.state = "秘境中"
-        grown = bloodline.grind(d)          # W8-B1a：每次成功寻宝打磨一处秘境
-        mem_mod.add_sim(d)                   # W8-B5：真实秘境结算 +2% 模拟值
+        grown = None
+        for _ in range(explored_steps):
+            grown = bloodline.grind(d)      # W8-B1a：每层成功寻宝打磨一处秘境
+            mem_mod.add_sim(d)               # W8-B5：每层结算 +2% 模拟值
         if drop_items:
             async with self.db.transaction():
                 await self.db.save_player(d.model_dump())
@@ -18223,13 +18652,15 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         lv = alchemy.level_of(int(doc.ext.get("alchemy_exp", 0)))
-        lines = [f"--- 炼丹配方（炼丹 {lv} 级，开放 {len(self.craftable)} 条｜必成）---"]
+        lines = [f"--- 炼丹配方（炼丹 {lv} 级，开放 {len(self.craftable)} 条｜显示炼制成功率）---"]
+        success_bonus = mingge.signed_bonus(doc, "炼丹成功率")
         for r in self.craftable[:12]:
             mats = "+".join(f"{m['name']}×{m['amount']}" for m in r["materials"])
             lock = f"（需{r['level_limit']}级）" if r.get("level_limit") else ""
             mode = self.craft_mode.get(r["name"], "direct")
             out = "直接产出" if mode == "direct" else "凡品/极品/仙品"
-            lines.append(f"· {r['name']}{lock}：{mats}｜{out}")
+            rate = min(1.0, max(0.0, alchemy.success_rate(r, lv) + success_bonus))
+            lines.append(f"· {r['name']}{lock}：{mats}｜成功率 {rate:.0%}｜{out}")
         async for _r in self._smart(event, "\n".join(lines)):
             yield _r
     @filter.command(CMD_CRAFT, "炼丹")
@@ -18269,8 +18700,12 @@ class ZhutianPlugin(Star):
         rng = _random.Random(f"{doc.uid}:{pill_name}:{qty}:{time.time()}")
         buckets, new_exp = alchemy.craft_pills(
             recipe, occ_lv, rng, qty,
-            quality_bonus=mingge.bonus(doc, "炼丹品质"),   # 命格（W4-2）：凡品更少
-        )  # 品质阈值用职业等级（原版 dengjixiuzheng）
+            quality_bonus=mingge.signed_bonus(doc, "炼丹品质"),
+            success_bonus=mingge.signed_bonus(doc, "炼丹成功率"),
+            rate_level=lv,
+        )
+        made = sum(buckets.values())
+        failed = qty - made
         d = doc.model_copy(deep=True)
         d.ext["alchemy_exp"] = new_exp
         gain: dict[str, int] = {}
@@ -18295,13 +18730,17 @@ class ZhutianPlugin(Star):
         occ_note = ""
         if doc.ext.get("occupation") == "炼丹师":
             olv, oexp = self._ensure_occ(doc)
-            gain_exp = int((recipe.get("exp") or [0, 0])[0]) * qty
+            exp_row = recipe.get("exp") or [0, 0]
+            gain_exp = int(exp_row[0] or 0) * made + int(exp_row[1] or 0) * failed
             nlv2, nexp2 = occupation.add_exp(olv, oexp, gain_exp, self.occ_exp_table)
             d.ext["occupation_level"] = nlv2
             d.ext["occupation_exp"] = nexp2
             await self.db.save_player(d.model_dump())
             occ_note = f"\n职业经验 +{gain_exp}" + (f"，升到 {nlv2} 级！" if nlv2 > olv else "")
-        text = f"丹炉火候正好，炼成：{'、'.join(parts)}。"
+        result_text = ("丹炉火候正好" if failed == 0 else
+                       "丹炉尽力运转，但仍有炉次炸炉" if made == 0 else
+                       f"丹炉结算完成（成功 {made} 炉、失败 {failed} 炉）")
+        text = f"{result_text}：{'、'.join(parts) if parts else '本次无丹药产出'}。"
         yield event.plain_result(f"{text}\n累计经验 {new_exp}{lv_note}{occ_note}")
 
     @filter.command(CMD_ALCHEMY_LV, "炼丹等级")
@@ -18591,8 +19030,9 @@ class ZhutianPlugin(Star):
         fz = [r for r in (self.content.table("occupation/制符列表") or [])
               if isinstance(r, dict) and r.get("name")]
         async for r in self._recipe_overview(
-            event, "诸天修仙 · 符道配方总览", fz, {}, "#符道配方",
-            note="制符系统后续开放，配方先览"):
+            event, "诸天修仙 · 符道配方总览", fz,
+            {str(r["name"]): "direct" for r in fz}, "#符道配方",
+            note="符师可用 #制作符箓 配方名 [数量] 制作"):
             yield r
 
     @filter.command("#丹药效果", "查看丹药效果")
@@ -18605,7 +19045,7 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         buffs = doc.ext.get("buffs") or {}
-        lines = ["丹药效果:"]
+        lines = ["--- 丹药效果 ---"]
         big = buffs.get("biguan") or {}
         if isinstance(big, dict) and float(big.get("times", 0) or 0) > 0:
             lines.append(f"· 辟谷丹药力{float(big.get('bonus', 0)) * 100:.0f}% 药效{int(float(big['times']))}次")
@@ -18768,22 +19208,29 @@ class ZhutianPlugin(Star):
         d = doc.model_copy(deep=True)
         d.state = action
         d.state_start = time.time()
+        time_multiplier = timed_action_mod.multiplier(d, d.state_start)
         d.ext["action_minutes"] = t
-        return True, f"现在开始{action}{t}分钟，完成后发对应「#结束{action[:2]}」结算。", d
+        d.ext["action_time_multiplier"] = time_multiplier
+        timing = (f"预计实时时长 {math.ceil(t * time_multiplier)} 分钟" if time_multiplier < 1
+                  else f"{t}分钟")
+        return True, f"现在开始{action}{t}分钟（{timing}），完成后发对应「#结束{action[:2]}」结算。", d
 
     def _timed_action_end(self, doc: PlayerDoc, action: str, period: int, cycles: int) -> tuple[bool, int, PlayerDoc]:
         """结算采集时长：实际分钟按周期向下取整，不足一个周期 0 收益。"""
         if doc.state != action:
             return False, 0, doc
         cap = period * cycles
-        elapsed = max(0.0, (time.time() - doc.state_start) / 60)
+        now = time.time()
+        credited = timed_action_mod.credited_minutes(
+            doc.state_start, now, doc.ext.get("action_time_multiplier", 1.0))
         planned = doc.ext.get("action_minutes")
-        counted = min(elapsed, float(planned) if planned else float(cap), float(cap))
+        counted = min(float(credited), float(planned) if planned else float(cap), float(cap))
         floored = int(counted // period) * period
         d = doc.model_copy(deep=True)
         d.state = "空闲"
         d.state_start = 0.0
         d.ext.pop("action_minutes", None)
+        d.ext.pop("action_time_multiplier", None)
         return True, floored, d
 
     @filter.command(CMD_PLANT, "采药")
@@ -19123,7 +19570,9 @@ class ZhutianPlugin(Star):
             yield event.plain_result(f"符道秘录中无「{fu_name}」记载。发「#符道配方」查看。")
             return
         lv, _ = self._ensure_occ(doc)
-        ok, why, n = occupation.talisman_make(fufang, lv, max(1, int(qty or 1)))
+        ok, why, n = occupation.talisman_make(
+            fufang, lv, max(1, int(qty or 1)), mingge.signed_bonus(doc, "制符加成"),
+            random.Random(f"{doc.uid}:talisman:{fu_name}:{qty}:{time.time_ns()}"))
         if not ok:
             yield event.plain_result(why)
             return
@@ -22311,10 +22760,12 @@ class ZhutianPlugin(Star):
             idx = 0
         inv = await self.db.get_inventory(doc.uid)
         ok, msg, delta = pe_mod.buy(doc, pe_mod.IMPERIAL_GOODS, idx, inv, "源石")
+        if ok and pe_mod.IMPERIAL_GOODS[idx - 1][0] not in self.item_index:
+            ok, msg, delta = False, "该商品尚无可用物品定义，暂停售卖，未扣除源石。", {}
         await self._pe_save(doc, delta)
         yield event.plain_result(msg)
 
-    @filter.command(CMD_PE_HEIM, "黑衣神秘人（神药与禁物总览）")
+    @filter.command(CMD_PE_HEIM, "黑衣神秘人（已开放神药与潜力丹）")
     async def handle_pe_heim(self, event: AstrMessageEvent):
         yield event.plain_result(pe_mod.merchant_text())
 
@@ -22332,10 +22783,12 @@ class ZhutianPlugin(Star):
             idx = 0
         inv = await self.db.get_inventory(doc.uid)
         ok, msg, delta = pe_mod.buy(doc, pe_mod.BLACK_GOODS, idx, inv, "源石")
+        if ok and pe_mod.BLACK_GOODS[idx - 1][0] not in self.item_index:
+            ok, msg, delta = False, "该商品尚无可用物品定义，暂停售卖，未扣除源石。", {}
         await self._pe_save(doc, delta)
         yield event.plain_result(msg)
 
-    @filter.command(CMD_PE_XIANZI, "求取问道签|历练签|寻缘签（50万灵石）")
+    @filter.command(CMD_PE_XIANZI, "求取问道签|历练签|寻缘签（50万灵石，24小时效果）")
     async def handle_pe_xianzi(self, event: AstrMessageEvent, arg: str = ""):
         if not self._allowed(event):
             return
@@ -22343,8 +22796,9 @@ class ZhutianPlugin(Star):
         if err:
             yield event.plain_result(err)
             return
-        ok, msg = pe_mod.ask_sign(doc, arg)
-        await self._pe_save(doc)
+        ok, msg = pe_mod.ask_sign(doc, arg, time.time())
+        if ok:
+            await self._pe_save(doc)
         yield event.plain_result(msg)
 
     # ------------------------------------------------ W18-F1：金银坊
@@ -27487,7 +27941,7 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         inv = await self.db.get_inventory(doc.uid)
-        list_text, total, sellable = sa_mod.preview(doc, inv, self.item_index.get)
+        list_text, total, sellable = sa_mod.preview(doc, inv, self.sell_item_index.get)
         if not sellable:
             yield event.plain_result("纳戒里没有可出售的物品（关键道具与不可交易物除外）。")
             return
@@ -27516,7 +27970,7 @@ class ZhutianPlugin(Star):
             yield event.plain_result("当前没有待确认的一键出售，请先 #一键出售。")
             return
         inv = await self.db.get_inventory(doc.uid)
-        msg, stones, delta = sa_mod.execute(doc, inv, sellable, self.item_index.get)
+        msg, stones, delta = sa_mod.execute(doc, inv, sellable, self.sell_item_index.get)
         async with self.db.transaction():
             await self.db.save_player(doc.model_dump())
             for n, q in (delta or {}).items():

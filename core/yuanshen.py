@@ -240,7 +240,25 @@ def heart_max(doc: Any, st: Mapping | None = None) -> int:
     lv = st.get("level")
     base = HEART_BASE_MAX + (0 if lv is None else int(lv) * HEART_LEVEL_BONUS)
     base += max(0, int(st.get("extra_max", 0) or 0))
-    return max(HEART_BASE_MAX, min(HEART_HARD_CAP, base))
+    try:
+        from .mingge import bonus
+        fate_extra = int(bonus(doc, "心神额外上限"))
+    except (TypeError, ValueError):
+        fate_extra = 0
+    return max(HEART_BASE_MAX, min(HEART_HARD_CAP + fate_extra, base + fate_extra))
+
+
+def heart_cost(doc: Any, base: int) -> int:
+    """命格修正神游心神消耗；倍率归零可免除成本。"""
+    try:
+        from .mingge import effects_of
+        effects = effects_of(doc)
+        multiplier = min(3.0, max(0.0,
+            1.0 - float(effects.get("心神消耗减少", 0) or 0)
+            + float(effects.get("心神消耗增加", 0) or 0)))
+    except (TypeError, ValueError):
+        multiplier = 1.0
+    return max(0, int(math.ceil(max(0, int(base)) * multiplier)))
 
 
 def heart_of(doc: Any, now: float | None = None) -> tuple[int, int]:
@@ -624,7 +642,7 @@ def panel(doc: Any, now: float | None = None) -> str:
     lv = level_of(doc)
     lines = ["═══ 精神宇宙·神识云游 ═══",
              f"元神：【{level_name(doc)}】｜{cur_of(doc):,}/{max_of(doc):,}",
-             f"心神：{cur}/{cap}｜每次神游消耗 {HEART_ENTRY} 点（每 {HEART_RECOVER_SECONDS // 60} 分钟恢复 1 点）",
+             f"心神：{cur}/{cap}｜每次神游消耗 {heart_cost(doc, HEART_ENTRY)} 点（每 {HEART_RECOVER_SECONDS // 60} 分钟恢复 1 点）",
              "每层完成有限观想后，需以元神战胜守关残魂；主动 #归位 保留全部收获。",
              "─────────────────────"]
     for place in PLACES:
@@ -633,7 +651,7 @@ def panel(doc: Any, now: float | None = None) -> str:
         best = "、".join(place.get("best") or []) or "未知"
         lines.append(f"{'✅' if ok else '🔒'}【{place['name']}】（{int(place.get('depth') or 0)} 层）")
         lines.append(f"   要求：{LEVEL_NAMES[min(req, len(LEVEL_NAMES) - 1)]}"
-                     f"｜入场：{HEART_ENTRY} 心神 + {int(place.get('entry') or 0):,} 元神")
+                     f"｜入场：{heart_cost(doc, HEART_ENTRY)} 心神 + {int(place.get('entry') or 0):,} 元神")
         lines.append(f"   珍品：{best}")
         lines.append(f"   {'#神游 ' + place['name'] if ok else '元神等级不足'}")
         lines.append("─────────────────────")
@@ -663,7 +681,7 @@ def status_text(doc: Any, now: float | None = None) -> str:
     ]
     if state.get("pending"):
         lines.append(f"待处理异象：{state['pending'].get('type')}（用 #抉择 1/2/3）")
-    lines += ["", "可用命令：#观想 | #深入 | #归位"]
+    lines += ["", "可用命令：#观想｜#深入｜#归位"]
     return "\n".join(lines)
 
 
@@ -694,9 +712,10 @@ def enter(doc: Any, name: str, now: float | None = None) -> tuple[bool, str]:
     entry = int(place.get("entry") or 0)
     if cur_of(doc) < entry:
         return False, f"神识云游需要 {entry:,} 元神（当前 {cur_of(doc):,}）。"
-    ok, left, cap = consume_heart(doc, HEART_ENTRY, now)
+    entry_cost = heart_cost(doc, HEART_ENTRY)
+    ok, left, cap = consume_heart(doc, entry_cost, now)
     if not ok:
-        return False, (f"进入精神宇宙需 {HEART_ENTRY} 点心神，你当前 {left}/{cap}，"
+        return False, (f"进入精神宇宙需 {entry_cost} 点心神，你当前 {left}/{cap}，"
                        f"约 {heart_minutes_left(doc, now)} 分钟后恢复 1 点。")
     add_cur(doc, -entry)
     first = _layer_of(place, 1)
@@ -710,7 +729,7 @@ def enter(doc: Any, name: str, now: float | None = None) -> tuple[bool, str]:
     return True, (f"{doc.name or doc.uid}盘膝入定，一缕神识越过精神宇宙的边界。\n"
                   f"进入「{place['name']}」·第 1 层「{first.get('name', '')}」\n"
                   f"{place.get('desc') or ''}\n"
-                  f"入场消耗：{HEART_ENTRY} 心神、{entry:,} 元神（余 {cur_of(doc):,}）\n"
+                  f"入场消耗：{entry_cost} 心神、{entry:,} 元神（余 {cur_of(doc):,}）\n"
                   f"发送 #观想 寻找当前层的机缘")
 
 
@@ -1079,7 +1098,13 @@ INNER_BATCH_MAX = 50
 
 def inner_cost(doc: Any) -> int:
     lv = level_of(doc)
-    return INNER_COST_BASE * ((0 if lv is None else int(lv)) + 1)
+    base = INNER_COST_BASE * ((0 if lv is None else int(lv)) + 1)
+    try:
+        from .mingge import effects_of
+        multiplier = float(effects_of(doc).get("内景地消耗倍率", 1) or 1)
+    except (TypeError, ValueError):
+        multiplier = 1.0
+    return max(1, int(base * min(3.0, max(0.05, multiplier))))
 
 
 def inner_chance(doc: Any) -> float:
@@ -1101,7 +1126,16 @@ def inner_cultivate(doc: Any, times: int = 1, now: float | None = None,
     times = max(1, min(INNER_BATCH_MAX, int(times or 1)))
     cost = inner_cost(doc)
     chance = inner_chance(doc)
-    gain = int(cost * INNER_GAIN_RATE)
+    lv = level_of(doc)
+    base_cost = INNER_COST_BASE * ((0 if lv is None else int(lv)) + 1)
+    try:
+        from .mingge import effects_of
+        fate = effects_of(doc)
+        gain_mult = max(0.0, 1.0 + float(fate.get("内景地收益", 0) or 0)
+                        + float(fate.get("元神修炼加成", 0) or 0))
+    except (TypeError, ValueError):
+        gain_mult = 1.0
+    gain = int(base_cost * INNER_GAIN_RATE * gain_mult)
     win = fail = spend = 0
     got = 0
     notes: list[str] = []

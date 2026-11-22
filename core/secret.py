@@ -44,9 +44,16 @@ LOOT_GRADES: dict[str, tuple[float, int]] = {
 DEFAULT_LOOT_RATES = (0.99, 0.5, 0.25)
 
 
-def loot_grade(rates: tuple[float, float, float], rng: random.Random) -> str:
+def exploration_steps(rng: random.Random, speed_bonus: float = 0.0) -> int:
+    """秘境加速按百分比概率令一次寻宝额外推进一层。"""
+    chance = min(1.0, max(0.0, float(speed_bonus or 0)))
+    return 2 if chance and rng.random() < chance else 1
+
+
+def loot_grade(rates: tuple[float, float, float], rng: random.Random,
+               luck_bonus: float = 0.0) -> str:
     """三连判定：低级必过（默认 0.99），中级 0.5，高级 0.25 → 约 12% 出高级。"""
-    one, two, three = (min(1.0, max(0.0, float(x))) for x in rates)
+    one, two, three = (min(1.0, max(0.0, float(x) + luck_bonus)) for x in rates)
     if rng.random() > one:
         return "none"
     if rng.random() > two:
@@ -172,6 +179,7 @@ def explore(
     protect: Any = None,
     me_fighter: Any = None,
     treasure_bonus: float = 0.0,
+    luck_bonus: float = 0.0,
     loot_rates: tuple[float, float, float] | None = None,
     loot_bonus: int = 0,
 ) -> tuple[Session, Unit, str, bool]:
@@ -196,7 +204,7 @@ def explore(
         """掷出金档（无时代配置时按 low 折算，保持历史行为）。"""
         if not loot_rates:
             return "low", 1.0, int(loot_bonus or 0)
-        g = loot_grade(tuple(loot_rates), rng)
+        g = loot_grade(tuple(loot_rates), rng, luck_bonus)
         mult, rar = LOOT_GRADES[g]
         return g, mult, rar + int(loot_bonus or 0)
 

@@ -81,6 +81,45 @@ def _try_revive(f: Fighter, hp: list[int], idx: int, log: list[str], rng: random
     return True
 
 
+def _apply_control(target: Fighter, name: str, message: str) -> str:
+    if target.eff("first_control_immunity", False):
+        target.effects["first_control_immunity"] = False
+        bonus = float(target.eff("dodge_after_control", 0) or 0)
+        target.effects["dodge_chance_once"] = max(
+            float(target.eff("dodge_chance_once", 0) or 0), bonus)
+        tail = f"并获得一次 {bonus:.0%} 闪避" if bonus else ""
+        return f"【{name}】{target.name} 首次免疫控制{tail}"
+    target.effects["stun_turns"] = int(target.eff("stun_turns", 0) or 0) + 1
+    return f"【{name}】{message}（{target.name} 被定身）"
+
+
+def _dodges_next_attack(target: Fighter, rng: random.Random) -> bool:
+    once = min(0.45, max(0.0, float(target.eff("dodge_chance_once", 0) or 0)))
+    chance = min(0.45, max(0.0, float(target.eff("dodge_chance", 0) or 0)) + once)
+    if once:
+        target.effects["dodge_chance_once"] = 0.0
+    return bool(chance and rng.random() < chance)
+
+
+def _low_hp_shield(target: Fighter, hp_before: int, damage: int) -> tuple[int, int, str]:
+    ratio = max(0.0, float(target.eff("low_hp_shield_ratio", 0) or 0))
+    if (ratio <= 0 or target.eff("low_hp_shield_used", False)):
+        hp_after = max(0, hp_before - damage)
+        return hp_after, hp_before - hp_after, ""
+    threshold = min(0.95, max(0.0, float(target.eff("low_hp_shield_threshold", 0.3) or 0.3)))
+    threshold_hp = max(1, int(target.hp_max * threshold))
+    if hp_before <= threshold_hp or hp_before - damage > threshold_hp:
+        hp_after = max(0, hp_before - damage)
+        return hp_after, hp_before - hp_after, ""
+    spill = max(0, damage - (hp_before - threshold_hp))
+    shield = max(1, int(target.hp_max * ratio))
+    absorbed = min(shield, spill)
+    target.effects["shield"] = int(target.eff("shield", 0) or 0) + shield - absorbed
+    target.effects["low_hp_shield_used"] = True
+    hp_after = max(0, threshold_hp - (spill - absorbed))
+    return hp_after, hp_before - hp_after, f"（低血护盾触发，生成 {shield:,}）"
+
+
 # ------------------------------------------------------- 技能池结算（W1-5）
 
 SKILL_BEILV_CAP = 50.0   # 数据异常钳制（九幽魔体 1e17 / 鹿目圆 100）
@@ -144,8 +183,8 @@ def roll_attack_skills(
         _spend(atk_u, sk)
         extra.append(f"【{sk.get('name')}】{sk.get('msg1', '')}（伤害 ×{beilv:g}）")
         if int(sk.get("控制", 0) or 0) > 0:
-            def_u.effects["stun_turns"] = int(def_u.eff("stun_turns", 0) or 0) + 1
-            extra.append(f"【{sk.get('name')}】{sk.get('msg2', '')}（{def_u.name} 被定身）")
+            extra.append(_apply_control(def_u, str(sk.get("name") or "控制技能"),
+                                        str(sk.get("msg2") or "")))
     return dmg, extra
 
 
@@ -215,8 +254,7 @@ def run_1v1(
         try_heal_skills(atk_u, hp, i, rng, log)
 
         # 无尽劫境独立战斗效果；无效果时不额外消耗随机数，维持既有战斗序列。
-        dodge = min(0.45, max(0.0, float(def_u.eff("dodge_chance", 0) or 0)))
-        if dodge and rng.random() < dodge:
+        if _dodges_next_attack(def_u, rng):
             log.append(f"第{rnd}回合：{def_u.name}看穿攻势，避开一击")
             continue
         take_damage_pct = max(0.0, float(atk_u.eff("take_damage_attack_pct", 0) or 0))
@@ -240,7 +278,8 @@ def run_1v1(
         log.extend(atk_extra)
         # 灵根法球：每击额外 trunc(攻 × 倍率)，不参与暴击放大（原版 伤害 = 暴击伤害 + 法球伤害）
         orb = float(atk_u.eff("orb", 0.0) or 0.0)
-        orb_dmg = int(atk_u.atk * orb) if orb > 0 else 0
+        orb_dmg = (int(atk_u.atk * orb) if orb > 0 else 0)
+        orb_dmg += max(0, int(atk_u.eff("orb_damage_flat", 0) or 0))
         dealt = dmg + orb_dmg
         # 防御技能（W1-5）：逐条掷 pr → 减免/格挡；护盾/反弹写效果槽（下次结算生效）
         dealt, def_extra = roll_defense_skills(def_u, dealt, rng)
@@ -257,7 +296,8 @@ def run_1v1(
             dealt -= absorbed
             if absorbed:
                 suffix += f"（护盾吸收 {absorbed}）"
-        hp[j] = max(0, hp[j] - dealt)
+        hp[j], dealt, shield_note = _low_hp_shield(def_u, hp[j], dealt)
+        suffix += shield_note
         if dealt > 0:
             rage_stacks[j] = min(10, rage_stacks[j] + 1)
         if orb_dmg > 0:
@@ -286,9 +326,10 @@ def run_1v1(
         if extra_chance and hp[j] > 0 and rng.random() < extra_chance:
             extra_damage = max(1, int(dmg * 0.55))
             extra_damage = max(0, int(round(extra_damage * (1 - reduction))))
-            hp[j] = max(0, hp[j] - extra_damage)
+            hp[j], extra_damage, extra_shield_note = _low_hp_shield(
+                def_u, hp[j], extra_damage)
             dealt += extra_damage
-            line += f"，额外行动追击 {extra_damage}"
+            line += f"，额外行动追击 {extra_damage}{extra_shield_note}"
         log.append(line)
         if hp[j] <= 0:
             if _try_revive(def_u, hp, j, log, rng):
@@ -350,6 +391,9 @@ def _raid_strike(
         atk_u.effects["stun_turns"] = stun - 1
         log.append(f"第{rnd}回合：{atk_u.name}被定身，无法出手")
         return 0
+    if _dodges_next_attack(def_u, rng):
+        log.append(f"第{rnd}回合：{def_u.name}看穿攻势，避开一击")
+        return 0
     dmg, crit = battle.harm(
         max(1, int(atk_u.atk * float(atk_u.eff("dmg_dealt_mult", 1.0)))),
         max(1, int(def_u.defense * float(def_u.eff("dmg_taken_mult", 1.0)))),
@@ -358,10 +402,14 @@ def _raid_strike(
     dmg, atk_extra = roll_attack_skills(atk_u, def_u, dmg, rng)
     log.extend(atk_extra)
     orb = float(atk_u.eff("orb", 0.0) or 0.0)
-    orb_dmg = int(atk_u.atk * orb) if orb > 0 else 0
+    orb_dmg = (int(atk_u.atk * orb) if orb > 0 else 0)
+    orb_dmg += max(0, int(atk_u.eff("orb_damage_flat", 0) or 0))
     dealt = dmg + orb_dmg
     dealt, def_extra = roll_defense_skills(def_u, dealt, rng)
     log.extend(def_extra)
+    reduction = min(0.65, max(0.0, float(def_u.eff("damage_reduction", 0) or 0)))
+    if reduction:
+        dealt = max(0, int(round(dealt * (1 - reduction))))
     suffix = ""
     shield = int(def_u.eff("shield", 0) or 0)
     if shield > 0:
@@ -370,7 +418,8 @@ def _raid_strike(
         dealt -= absorbed
         if absorbed:
             suffix += f"（护盾吸收 {absorbed}）"
-    hp[kd] = max(0, hp[kd] - dealt)
+    hp[kd], dealt, shield_note = _low_hp_shield(def_u, hp[kd], dealt)
+    suffix += shield_note
     if orb_dmg > 0:
         suffix += f"，法球 {orb_dmg}"
     line = (f"第{rnd}回合：{atk_u.name}出手，对{def_u.name}造成 {dealt} 点伤害"
@@ -419,11 +468,18 @@ def run_raid(
     damage: dict[str, int] = {_raid_key(p, f"p{i}"): 0 for i, p in enumerate(players)}
     hatred: dict[str, int] = {k: 0 for k in damage}
     revives: dict[str, int] = {
-        _raid_key(p, f"p{i}"): max(0, int(p.tags.get("revives", 0) or 0))
+        _raid_key(p, f"p{i}"): max(
+            max(0, int(p.tags.get("revives", 0) or 0)),
+            max(0, int((p.eff("revive") or {}).get("times", 1) or 1))
+            if isinstance(p.eff("revive"), dict) and not p.eff("revive").get("used")
+            else 0,
+        )
         for i, p in enumerate(players)
     }
     ratio: dict[str, float] = {
-        _raid_key(p, f"p{i}"): min(1.0, max(0.05, float(p.tags.get("revive_ratio", 1.0) or 1.0)))
+        _raid_key(p, f"p{i}"): min(1.0, max(0.05, float(
+            p.tags.get("revive_ratio", (p.eff("revive") or {}).get("ratio", 1.0)
+                       if isinstance(p.eff("revive"), dict) else 1.0) or 1.0)))
         for i, p in enumerate(players)
     }
     phase_left = max(0, int(boss.tags.get("phase_revive", 0) or 0))
@@ -478,10 +534,28 @@ def run_raid(
             for p in players:
                 pk = _raid_key(p, "p")
                 if hp[pk] <= 0 and revives[pk] > 0:
-                    revives[pk] -= 1
-                    hp[pk] = max(1, int(p.hp_max * ratio[pk]))
-                    log.append(f"【者字秘】{p.name} 生机重燃，回复至 {hp[pk]:,}"
-                               f"（余 {revives[pk]} 次）")
+                    revive = p.eff("revive")
+                    legacy_times = max(0, int(p.tags.get("revives", 0) or 0))
+                    if legacy_times:
+                        revives[pk] -= 1
+                        hp[pk] = max(1, int(p.hp_max * ratio[pk]))
+                        log.append(f"【者字秘】{p.name} 生机重燃，回复至 {hp[pk]:,}"
+                                   f"（余 {revives[pk]} 次）")
+                    elif isinstance(revive, dict) and not revive.get("used"):
+                        chance = 1.0 if revive.get("pr") is None else min(
+                            1.0, max(0.0, float(revive.get("pr", 0) or 0)))
+                        if rng.random() < chance:
+                            revives[pk] -= 1
+                            times = max(1, int(revive.get("times", 1) or 1))
+                            revive["times"] = max(0, times - 1)
+                            if revive["times"] <= 0:
+                                revive["used"] = True
+                            hp[pk] = max(1, int(p.hp_max * ratio[pk]))
+                            log.append(f"【{revive.get('name') or '命格复生'}】{p.name} "
+                                       f"生机重燃，回复至 {hp[pk]:,}（余 {revives[pk]} 次）")
+                        else:
+                            revive["used"] = True
+                            revives[pk] = 0
         if win or all(hp[_raid_key(p, "p")] <= 0 for p in players):
             break
 

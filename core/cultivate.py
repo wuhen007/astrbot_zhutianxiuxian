@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import math
 import random
 import time
 from typing import Any
 
+from . import timed_action
 from .player import PlayerDoc
 
 def _date_key(ts: float) -> str:
@@ -64,6 +66,7 @@ def start_cultivate(
     d = doc.model_copy(deep=True)  # ext 深拷贝：写 cultivate_minutes 不得污染调用方档案
     d.state = "闭关中"
     d.state_start = time.time()
+    d.ext["cultivate_time_multiplier"] = timed_action.multiplier(d, d.state_start)
 
     planned: int | None = None
     hint = ""
@@ -75,6 +78,9 @@ def start_cultivate(
         d.ext["cultivate_minutes"] = planned
 
     plan_txt = f"计划闭关 {planned} 分钟{hint}" if planned else "未设时长，出关时按实际时间结算"
+    if planned and d.ext["cultivate_time_multiplier"] < 1:
+        real_minutes = math.ceil(planned * d.ext["cultivate_time_multiplier"])
+        plan_txt += f"；先天至宝加速后预计实时时长 {real_minutes} 分钟"
     return True, f"道友已入定闭关。{plan_txt}。发送「#出关」结算。", d
 
 
@@ -95,7 +101,9 @@ def end_cultivate(
 
     d = doc.model_copy(deep=True)
     elapsed = max(0.0, (now - d.state_start) / 60)
-    counted = min(elapsed, max_minutes)
+    time_multiplier = d.ext.pop("cultivate_time_multiplier", 1.0)
+    credited = timed_action.credited_minutes(d.state_start, now, time_multiplier)
+    counted = min(float(credited), float(max_minutes))
     planned = d.ext.pop("cultivate_minutes", None)
     if planned:
         counted = min(counted, float(planned))
@@ -108,12 +116,12 @@ def end_cultivate(
         return True, "闭关不足一个周期（30 分钟），未能有所精进。", d
 
     gained = int(floored * exp_per_min)
-    # W8-C2 先天至宝：崆峒印/菩提祖树修炼倍率，或东皇钟/混沌钟/虚天舟的计时缩短
+    # W8-C2 先天至宝修炼收益倍率；计时缩短已折算进 credited 分钟。
     try:
         from . import xtzb as _xt
-        xt_mult = max(_xt.yield_mult(d, "cultivate"), 1.0 / max(0.3, _xt.time_mult(d)))
-        if xt_mult > 1:
-            gained = int(gained * xt_mult)
+        yield_mult = _xt.yield_mult(d, "cultivate")
+        if yield_mult > 1:
+            gained = int(gained * yield_mult)
     except Exception:
         pass
     # 丹药 buff（原版 dy 体系）：炼神之力 → 修为转血气；辟谷/炼神次数各消耗 1
@@ -151,7 +159,7 @@ def end_cultivate(
     notes = []
     if buff_notes:
         notes.append("；".join(buff_notes))
-    if planned and elapsed > planned:
+    if planned and credited >= int(planned):
         notes.append("已到计划时长，按计划结算")
     elif elapsed > max_minutes:
         notes.append(f"已达单次上限（{max_minutes} 分钟）")
@@ -187,8 +195,11 @@ def start_work(doc: PlayerDoc, minutes: int | None) -> tuple[bool, str, PlayerDo
     d = doc.model_copy(deep=True)
     d.state = "降妖中"
     d.state_start = time.time()
+    multiplier = timed_action.multiplier(d, d.state_start)
+    d.ext["work_time_multiplier"] = multiplier
     d.ext["work_minutes"] = t
-    return True, f"现在开始降妖{t}分钟，完成后发「#降妖归来」结算。", d
+    timing = f"（先天至宝加速后预计实时时长 {math.ceil(t * multiplier)} 分钟）" if multiplier < 1 else ""
+    return True, f"现在开始降妖{t}分钟{timing}，完成后发「#降妖归来」结算。", d
 
 
 def end_work(
@@ -207,7 +218,9 @@ def end_work(
 
     d = doc.model_copy(deep=True)
     elapsed = max(0.0, (now - d.state_start) / 60)
-    counted = min(elapsed, float(WORK_PERIOD * WORK_CYCLES))
+    time_multiplier = d.ext.pop("work_time_multiplier", 1.0)
+    credited = timed_action.credited_minutes(d.state_start, now, time_multiplier)
+    counted = min(float(credited), float(WORK_PERIOD * WORK_CYCLES))
     planned = d.ext.pop("work_minutes", None)
     if planned:
         counted = min(counted, float(planned))
@@ -219,16 +232,16 @@ def end_work(
         return True, "降妖不足一个周期（15 分钟），妖物四散，空手而归。", d
 
     gained = int(floored * stones_per_min)
-    # W8-C2 先天至宝：收益倍率 / 计时缩短（对齐出关结算的处理）
+    # W8-C2 先天至宝修炼收益倍率；计时缩短已折算进 credited 分钟。
     try:
         from . import xtzb as _xt
-        xt_mult = max(_xt.yield_mult(d, "cultivate"), 1.0 / max(0.3, _xt.time_mult(d)))
-        if xt_mult > 1:
-            gained = int(gained * xt_mult)
+        yield_mult = _xt.yield_mult(d, "cultivate")
+        if yield_mult > 1:
+            gained = int(gained * yield_mult)
     except Exception:
         pass
     d.stones += gained
-    tail = "（已到计划时长，按计划结算）" if planned and elapsed > planned else ""
+    tail = "（已到计划时长，按计划结算）" if planned and credited >= int(planned) else ""
     return True, (
         f"降妖归来（{int(elapsed)} 分钟，计 {floored} 分钟）：灵石 +{gained:,}{tail}。\n"
         f"当前家底：{d.stones:,} 灵石"

@@ -77,6 +77,8 @@ BOARD_CD = 1_800.0          # 神兵榜 30 分钟
 BOARD_TOP = 20
 NAME_MAX = 8                # 赋名 8 码点（equipmentNaming.js:1）
 MAX_CARD_RATIO = 0.99       # item_card 收敛上限，见 shortcut 3
+MAX_TALENT = 200             # 防止器灵丹永久堆叠过度放大炼器经验
+MAX_FURNACE_BONUS = 10       # 与最高阶帝品真器丹的扩容量一致
 ARTIFACT_PREFIX = ("锻造武器", "锻造护具", "锻造宝物")
 
 # 五行词缀：非零五维个数 → (词缀, xishu 加成)。原版 2 项由 Restraint() 随机给 0.5/0.3/0.2/0.08，
@@ -122,7 +124,7 @@ def _blank() -> dict[str, Any]:
         "materials": [],          # list[[材料名, 数量]]
         "TIME": 0.0, "status": 0,
         "artifacts": {},          # 神兵名 → 原始卡（含 atk/def/HP/bao/score）
-        "forges": 0,
+        "forges": 0, "furnace_bonus": 0,
     }
 
 
@@ -348,7 +350,8 @@ def _parse_qty(arg: str) -> tuple[str, int] | None:
 
 def capacity(st: Mapping[str, Any], doc: Any) -> int:
     f = _furnace(st.get("furnace")) or FURNACES[0]
-    return int(f["容纳量"]) + int(doc.ext.get("occupation_level") or 0) // 2
+    bonus = min(MAX_FURNACE_BONUS, max(0, int(st.get("furnace_bonus") or 0)))
+    return int(f["容纳量"]) + int(doc.ext.get("occupation_level") or 0) // 2 + bonus
 
 
 def used(st: Mapping[str, Any]) -> int:
@@ -413,7 +416,8 @@ def start(doc: Any, now: float) -> tuple[bool, str, dict[str, int]]:
 def clear(doc: Any) -> tuple[bool, str, dict[str, int]]:
     st = state_of(doc)
     st["materials"], st["TIME"], st["status"] = [], 0.0, 0
-    return _ok("已清空锻炉：材料、温养计时与炼制状态复位（炉阶/炉火/功法保留）。")
+    bonus_note = "待用真器丹效果保留。" if int(st.get("furnace_bonus") or 0) > 0 else ""
+    return _ok("已清空锻炉：材料、温养计时与炼制状态复位（炉阶/炉火/功法保留）。" + bonus_note)
 
 
 def optimal_min(st: Mapping[str, Any], item_lookup: Callable[[str], Mapping[str, Any] | None]) -> float:
@@ -433,6 +437,9 @@ def panel(doc: Any, now: float,
              f"｜时光令配方 {'已参悟' if st.get('recipe') else '未参悟'}",
              f"容量 {used(st)}/{capacity(st, doc)}｜温养提速 {(1 - time_speed(st)) * 100:.0f}%"
              f"｜开炉系数 +{(f['xishu'] + (g['xishu'] if g else 0.0) + int(st.get('proficiency') or 0) / 100 * 0.1):.2f}"]
+    bonus = min(MAX_FURNACE_BONUS, max(0, int(st.get("furnace_bonus") or 0)))
+    if bonus:
+        lines[1] += f"｜真器丹容量加成 {bonus}（成功开炉后消耗）"
     mats = st.get("materials") or []
     if mats:
         lines.append("—— 炉内材料 ——")
@@ -574,14 +581,17 @@ def open_forge(doc: Any, mode: str, inv: Mapping[str, int], now: float, *,
     gain = int((s[0] + s[1] + s[2]) * 1000 * 0.7 * k + 200)
     st["proficiency"] = min(100, int(st.get("proficiency") or 0) + 2)
     st["forges"] = int(st.get("forges") or 0) + 1
-    st["materials"], st["TIME"], st["status"] = [], 0.0, 0
+    bonus_used = int(st.get("furnace_bonus") or 0)
+    st["materials"], st["TIME"], st["status"], st["furnace_bonus"] = [], 0.0, 0, 0
     doc.ext["occupation_exp"] = int(doc.ext.get("occupation_exp") or 0) + gain
 
+    bonus_note = f"真器丹容量加成 {bonus_used} 已消耗。\n" if bonus_used else ""
     return _ok(
         f"【开炉·{'完美' if mode == 'perfect' else '一键' if mode == 'oneclick' else '常规'}】\n"
         f"获得 {new_name}（{slot}｜{rarity} 阶｜灵韵 {score:,}）\n"
         f"三维 攻 {atk:.3f} / 防 {defense:.3f} / 血 {hp:.3f}｜暴 {bao:.3f}\n"
         f"词缀【{affix_name}】｜总系数 ×{xishu:.2f}｜{window_note}\n"
+        f"{bonus_note}"
         f"熟练度 +2（现 {st['proficiency']}/100）｜炼器经验 +{gain:,}\n"
         f"发 #赋名 {new_name}*新名 可登记神兵榜；#我的锻炉 看全部产出。", delta)
 

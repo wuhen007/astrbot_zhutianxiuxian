@@ -5,16 +5,16 @@ from core.quest import grant_completion_potential
 
 
 class DailyQuestParityTests(unittest.TestCase):
-    def test_completion_potential_uses_legacy_tracks_and_mingge(self):
+    def test_completion_potential_uses_mingge_rate_and_flat_bonus(self):
         doc = PlayerDoc(uid="legacy", ext={
             "potential": 10,
             "legacy_source": {"mijinglevel_id": 4, "xiangulevel_id": 7},
-            "mingge": {"effects": {"仙道潜力收益": 0.2}},
+            "mingge": {"effects": {"仙道潜力收益": 0.2, "仙道潜力额外": 20}},
         })
         amount, granted = grant_completion_potential(doc, "2026-11-20")
         self.assertTrue(granted)
-        self.assertEqual(amount, 84)
-        self.assertEqual(doc.ext["potential"], 94)
+        self.assertEqual(amount, 104)
+        self.assertEqual(doc.ext["potential"], 114)
 
     def test_completion_potential_is_idempotent_per_day(self):
         doc = PlayerDoc(uid="repeat", realm_index=8, ext={"potential": 3})

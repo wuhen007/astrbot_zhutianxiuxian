@@ -176,7 +176,7 @@ def emperor_title_set(doc: Any, st: Mapping, title: str) -> tuple[bool, str]:
     if not title:
         return False, "请填写帝号！示例：#自封帝号 焚天武帝"
     if any(w in title for w in TITLE_FORBID) or any(c.isdigit() for c in title):
-        return False, f"〖天道反噬〗帝号“{title}”触及禁忌（禁词/数字），请重拟！"
+        return False, f"〖天道反噬〗帝号「{title}」触及禁忌（禁词/数字），请重拟！"
     old = str(zst.get("emperor_title") or "")
     zst["emperor_title"] = title
     from . import zhengdao as _zd

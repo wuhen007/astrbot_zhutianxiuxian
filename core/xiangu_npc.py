@@ -415,7 +415,7 @@ def buy(doc: Any, st: dict, item_name: str, rng: Callable[[], float]) -> tuple[b
         return False, trade_text(st), 0
     found = next((i for i in trade["items"] if i["name"] == item_name), None)
     if not found:
-        return False, f"未找到物品“{item_name}”，使用 #向NPC购买 查看商品列表", 0
+        return False, f"未找到物品「{item_name}」，使用 #向NPC购买 查看商品列表", 0
     infamy = int(st.get("infamy", 0) or 0)
     mult = 2.0 if infamy >= 200 else 1.5 if infamy >= 100 else 1.2 if infamy >= 50 else 1.0
     price = int(found["price"] * mult)

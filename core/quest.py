@@ -85,10 +85,12 @@ def grant_completion_potential(doc: Any, today: str) -> tuple[int, bool]:
     base = max(secret_level, ancient_level) * 10
     try:
         from .mingge import effects_of
-        bonus = float(effects_of(doc).get("仙道潜力收益", 0) or 0)
+        effects = effects_of(doc)
+        bonus = float(effects.get("仙道潜力收益", 0) or 0)
+        extra = int(float(effects.get("仙道潜力额外", 0) or 0))
     except (TypeError, ValueError):
-        bonus = 0.0
-    amount = max(0, int(base * max(0.0, 1.0 + bonus)))
+        bonus, extra = 0.0, 0
+    amount = max(0, int(base * max(0.0, 1.0 + bonus)) + extra)
     ext["potential"] = max(0, int(float(ext.get("potential", 0) or 0))) + amount
     claims[key] = {"amount": amount, "claimedAt": time.time()}
     return amount, True

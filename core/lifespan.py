@@ -169,6 +169,11 @@ def rebirth(doc: PlayerDoc) -> str:
 
 def grant(doc: PlayerDoc, amount: int) -> int:
     """增寿（渡劫/登仙等）。返回新值。"""
+    try:
+        from .mingge import signed_bonus
+        amount = int(amount) + int(signed_bonus(doc, "寿元额外"))
+    except (TypeError, ValueError):
+        amount = int(amount)
     cur = shouyuan_of(doc)
     doc.ext["shouyuan"] = cur + max(0, int(amount))
     return doc.ext["shouyuan"]

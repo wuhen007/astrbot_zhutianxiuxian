@@ -8,7 +8,7 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from . import mingge, occupation, xiangu
+from . import mingge, occupation, timed_action, xiangu
 from .player import PlayerDoc
 
 EXT_KEY = "idle_proxy"
@@ -93,6 +93,15 @@ def _save(doc: PlayerDoc, state: dict[str, Any]) -> None:
     doc.ext[EXT_KEY] = state
 
 
+def _task_time_multiplier(doc: PlayerDoc, now: float) -> float:
+    return timed_action.multiplier(doc, now)
+
+
+def _task_minutes(task: Mapping, planned: int, now: float) -> int:
+    return min(planned, timed_action.credited_minutes(
+        task.get("started_at", now), now, task.get("time_multiplier", 1.0)))
+
+
 def parse_duration(raw: str) -> tuple[int, bool]:
     text = str(raw or "").strip()
     if not text:
@@ -175,14 +184,18 @@ def start_proxy(doc: PlayerDoc, now: float, minutes: int, task_id: str,
     minutes = int(minutes)
     if not 1 <= minutes <= MINUTES_MAX or not task_id:
         return False, "代行时长须为 1 至 2880 分钟。", doc
+    multiplier = _task_time_multiplier(doc, now)
     d = doc.model_copy(deep=True)
     state["spirit"]["task"] = {
         "kind": kind, "task_id": str(task_id), "started_at": float(now),
-        "ends_at": float(now) + minutes * 60, "minutes": minutes,
+        "ends_at": float(now) + minutes * 60 * multiplier, "minutes": minutes,
+        "time_multiplier": multiplier,
         "group_id": str(group_id or ""),
     }
     _save(d, state)
-    return True, f"灵身代行{label}启程，计划 {minutes} 分钟；结束时发送 #结束灵身代行 结算。", d
+    timing = (f"预计实时时长 {math.ceil(minutes * multiplier)} 分钟（计时×{multiplier:.0%}）" if multiplier < 1
+              else f"计划 {minutes} 分钟")
+    return True, f"灵身代行{label}启程，{timing}；结束时发送 #结束灵身代行 结算。", d
 
 
 def start_herb_proxy(doc: PlayerDoc, now: float, minutes: int, task_id: str,
@@ -219,14 +232,18 @@ def start_deity_proxy(doc: PlayerDoc, now: float, minutes: int, task_id: str,
     minutes = int(minutes)
     if not 1 <= minutes <= MINUTES_MAX or not task_id:
         return False, "代行时长须为 1 至 2880 分钟。", doc
+    multiplier = _task_time_multiplier(doc, now)
     d = doc.model_copy(deep=True)
     state["deity"]["task"] = {
         "kind": kind, "task_id": str(task_id), "started_at": float(now),
-        "ends_at": float(now) + minutes * 60, "minutes": minutes,
+        "ends_at": float(now) + minutes * 60 * multiplier, "minutes": minutes,
+        "time_multiplier": multiplier,
         "group_id": str(group_id or ""),
     }
     _save(d, state)
-    return True, f"神祇代行{label}启程，计划 {minutes} 分钟；结束时发送 #结束神祇代行 结算。", d
+    timing = (f"预计实时时长 {math.ceil(minutes * multiplier)} 分钟（计时×{multiplier:.0%}）" if multiplier < 1
+              else f"计划 {minutes} 分钟")
+    return True, f"神祇代行{label}启程，{timing}；结束时发送 #结束神祇代行 结算。", d
 
 
 def _roll_yield(amount: float, bonus: float, rng: Any) -> int:
@@ -356,7 +373,7 @@ def finish_deity_herb_proxy(doc: PlayerDoc, now: float, rng: Any,
         return False, {}, doc
 
     planned = max(1, min(MINUTES_MAX, int(task.get("minutes", 0) or 0)))
-    minutes = min(planned, max(0, int((float(now) - float(task.get("started_at", now))) // 60)))
+    minutes = _task_minutes(task, planned, now)
     tier = int(deity["tier"])
     factor = 0.5 + tier * 0.05
     items: dict[str, int] = {}
@@ -388,7 +405,7 @@ def finish_deity_mine_proxy(doc: PlayerDoc, now: float, rng: Any,
         return False, {}, doc
 
     planned = max(1, min(MINUTES_MAX, int(task.get("minutes", 0) or 0)))
-    minutes = min(planned, max(0, int((float(now) - float(task.get("started_at", now))) // 60)))
+    minutes = _task_minutes(task, planned, now)
     factor = 0.5 + int(deity["tier"]) * 0.05
     items = _mine_items(doc, minutes, factor, rng, exp_table) if minutes else {}
     result, d = _finish_progress(doc, state, minutes, items, exp_table, factor,
@@ -421,7 +438,7 @@ def finish_deity_hunt_proxy(doc: PlayerDoc, now: float,
         return False, {}, doc
 
     planned = max(1, min(MINUTES_MAX, int(task.get("minutes", 0) or 0)))
-    minutes = min(planned, max(0, int((float(now) - float(task.get("started_at", now))) // 60)))
+    minutes = _task_minutes(task, planned, now)
     factor = 0.5 + int(deity["tier"]) * 0.05
     items = _hunt_items(doc, minutes, factor, exp_table) if minutes else {}
 
@@ -457,7 +474,7 @@ def finish_deity_source_proxy(doc: PlayerDoc, now: float, rng: Any,
         return False, {}, doc
 
     planned = max(1, min(MINUTES_MAX, int(task.get("minutes", 0) or 0)))
-    minutes = min(planned, max(0, int((float(now) - float(task.get("started_at", now))) // 60)))
+    minutes = _task_minutes(task, planned, now)
     factor = 0.5 + int(deity["tier"]) * 0.05
     items = _source_items(doc, minutes, factor, rng, exp_table) if minutes else {}
     result, d = _finish_progress(doc, state, minutes, items, exp_table, factor,
@@ -494,7 +511,7 @@ def finish_deity_vein_proxy(doc: PlayerDoc, now: float, rng: Any,
         return False, {}, doc
 
     planned = max(1, min(MINUTES_MAX, int(task.get("minutes", 0) or 0)))
-    minutes = min(planned, max(0, int((float(now) - float(task.get("started_at", now))) // 60)))
+    minutes = _task_minutes(task, planned, now)
     factor = 0.5 + int(deity["tier"]) * 0.05
     items = _deity_vein_items(doc, minutes, factor, rng, exp_table) if minutes else {}
     result, d = _finish_progress(doc, state, minutes, items, exp_table, factor, 20,
@@ -531,7 +548,7 @@ def finish_deity_earth_qi_proxy(doc: PlayerDoc, now: float,
         return False, {}, doc
 
     planned = max(1, min(MINUTES_MAX, int(task.get("minutes", 0) or 0)))
-    minutes = min(planned, max(0, int((float(now) - float(task.get("started_at", now))) // 60)))
+    minutes = _task_minutes(task, planned, now)
     factor = 0.5 + int(deity["tier"]) * 0.05
     items = _earth_qi_items(doc, minutes, factor, exp_table) if minutes else {}
     result, d = _finish_progress(doc, state, minutes, items, exp_table, factor,
@@ -570,7 +587,7 @@ def finish_herb_proxy(doc: PlayerDoc, now: float, rng: Any,
         return False, {}, doc
 
     planned = max(1, min(MINUTES_MAX, int(task.get("minutes", 0) or 0)))
-    minutes = min(planned, max(0, int((float(now) - float(task.get("started_at", now))) // 60)))
+    minutes = _task_minutes(task, planned, now)
     tier = int(spirit["tier"])
     factor = 0.5 + tier * 0.05
     items: dict[str, int] = {}
@@ -621,7 +638,7 @@ def finish_mine_proxy(doc: PlayerDoc, now: float, rng: Any,
         return False, {}, doc
 
     planned = max(1, min(MINUTES_MAX, int(task.get("minutes", 0) or 0)))
-    minutes = min(planned, max(0, int((float(now) - float(task.get("started_at", now))) // 60)))
+    minutes = _task_minutes(task, planned, now)
     tier = int(spirit["tier"])
     factor = 0.5 + tier * 0.05
     items = _mine_items(doc, minutes, factor, rng, exp_table) if minutes else {}
@@ -642,7 +659,7 @@ def finish_hunt_proxy(doc: PlayerDoc, now: float,
         return False, {}, doc
 
     planned = max(1, min(MINUTES_MAX, int(task.get("minutes", 0) or 0)))
-    minutes = min(planned, max(0, int((float(now) - float(task.get("started_at", now))) // 60)))
+    minutes = _task_minutes(task, planned, now)
     tier = int(spirit["tier"])
     factor = 0.5 + tier * 0.05
     items = _hunt_items(doc, minutes, factor, exp_table) if minutes else {}
@@ -663,7 +680,7 @@ def finish_source_proxy(doc: PlayerDoc, now: float, rng: Any,
         return False, {}, doc
 
     planned = max(1, min(MINUTES_MAX, int(task.get("minutes", 0) or 0)))
-    minutes = min(planned, max(0, int((float(now) - float(task.get("started_at", now))) // 60)))
+    minutes = _task_minutes(task, planned, now)
     tier = int(spirit["tier"])
     factor = 0.5 + tier * 0.05
     items = _source_items(doc, minutes, factor, rng, exp_table) if minutes else {}
@@ -684,7 +701,7 @@ def finish_earth_qi_proxy(doc: PlayerDoc, now: float,
         return False, {}, doc
 
     planned = max(1, min(MINUTES_MAX, int(task.get("minutes", 0) or 0)))
-    minutes = min(planned, max(0, int((float(now) - float(task.get("started_at", now))) // 60)))
+    minutes = _task_minutes(task, planned, now)
     tier = int(spirit["tier"])
     factor = 0.5 + tier * 0.05
     items = _earth_qi_items(doc, minutes, factor, exp_table) if minutes else {}
@@ -705,7 +722,7 @@ def finish_vein_proxy(doc: PlayerDoc, now: float, rng: Any,
         return False, {}, doc
 
     planned = max(1, min(MINUTES_MAX, int(task.get("minutes", 0) or 0)))
-    minutes = min(planned, max(0, int((float(now) - float(task.get("started_at", now))) // 60)))
+    minutes = _task_minutes(task, planned, now)
     tier = int(spirit["tier"])
     factor = 0.5 + tier * 0.05
     items: dict[str, int] = {}

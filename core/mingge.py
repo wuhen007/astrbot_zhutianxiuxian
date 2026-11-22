@@ -5,10 +5,9 @@
   （默认负面概率 12%），effects 多字段（ attack/defense/hp/暴击/突破成功率/签到倍率…）。
 - getMinggeEffects：主命格 + 附加命格合并（bonus 加法 / direct-multiplier 乘法 / boolean 或）。
 
-本移植接入消费点：战斗三维+暴击（_pvp_battle）、境界突破成功率（#突破）、
-签到奖励倍率（#修仙签到）、渡劫修为减少（#渡劫）。
+本移植按效果键接入战斗、修炼、生活职业、源石坊、元神与秘境消费点；
+新增效果应同步补齐消费端与回归用例，避免只展示不生效。
 W7-1：补命宫拓碑扩槽（≤3）、轮回命签抽取附加词条、主+附加 effects 合并。
-shortcut：速度/生命本源/心神/悟道/采集炼丹等其余消费点仍未接。
 """
 
 from __future__ import annotations
@@ -24,7 +23,8 @@ REROLL_COST = 100_000          # #改命 灵石（原版无重抽通道，自定
 MAX_SLOTS = 3                  # 原版「命宫拓碑」最多 3 条命格
 SLOT_ITEM = "命宫拓碑"
 EXTRACT_ITEM = "轮回命签"
-_MULT_KEYS = {"签到奖励倍率"}   # 乘法合并；其余数值字段按加法
+_MULT_KEYS = {"签到奖励倍率", "内景地消耗倍率", "出售价格倍率"}   # 同类倍率相乘；其余数值字段按加法
+_UNSUPPORTED_KEYS = {"内景地开启概率"}  # 内景地开辟为付费必成，不提供虚假的成功率效果
 
 _CONSUMED_KEYS = {
     "攻击加成": 1.0, "防御加成": 1.0, "生命加成": 1.0,
@@ -39,7 +39,9 @@ def _table(content: Any) -> list[dict]:
 
 def roll(content: Any, rng: random.Random) -> dict:
     """按稀有度权重抽一条；负面独立概率判定（负面池为空则回退正面池）。"""
-    pool = _table(content)
+    pool = [row for row in _table(content)
+            if not row.get("effects")
+            or any(key not in _UNSUPPORTED_KEYS for key in row.get("effects", {}))]
     if not pool:
         return {}
     rarities = sorted({int(e.get("rarity", 1) or 1) for e in pool})
@@ -98,6 +100,8 @@ def effects_of(doc: PlayerDoc) -> dict:
     out: dict = {}
     for m in [identity_of(doc), *extra_of(doc)]:
         for k, v in (m.get("effects") or {}).items():
+            if k in _UNSUPPORTED_KEYS:
+                continue
             if k not in out:
                 out[k] = v
                 continue
@@ -224,7 +228,8 @@ def _fates_of(doc: PlayerDoc) -> list[dict]:
 
 def _fmt_effects(m: Mapping) -> str:
     return "，".join(f"{k}+{v:g}" if not isinstance(v, bool) else k
-                     for k, v in (m.get("effects") or {}).items())
+                     for k, v in (m.get("effects") or {}).items()
+                     if k not in _UNSUPPORTED_KEYS)
 
 
 def batch_reroll(doc: PlayerDoc, content: Any, rng: random.Random,

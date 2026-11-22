@@ -360,7 +360,8 @@ def _unlock(s: dict, name: str, now: float, favor: int, event: str) -> dict:
     return c
 
 
-def meet(s: dict, place: str, floor: int, now: float, rng: random.Random) -> dict | None:
+def meet(s: dict, place: str, floor: int, now: float, rng: random.Random,
+         chance_bonus: float = 0.0) -> dict | None:
     """秘境寻宝后的剧情邂逅。返回 {name, first, gain, text, item, exp_pct} 或 None。
 
     首次：到达配置层数必遇（可发现性优先；原版为概率/条件触发，已在文档标注）。
@@ -389,7 +390,8 @@ def meet(s: dict, place: str, floor: int, now: float, rng: random.Random) -> dic
         return out
 
     # 2) 段德客串（太古战场）
-    if place == "太古战场" and rng.random() < DUANDE_CHANCE:
+    multiplier = max(0.0, 1.0 + float(chance_bonus or 0))
+    if place == "太古战场" and rng.random() < min(1.0, DUANDE_CHANCE * multiplier):
         c = _c(s, "段德")
         first = not bool(c.get("met"))
         if first:
@@ -403,7 +405,7 @@ def meet(s: dict, place: str, floor: int, now: float, rng: random.Random) -> dic
 
     # 3) 重复邂逅
     cands = [n for n in PLACE_CANDS.get(place, []) if (s["chars"].get(n) or {}).get("met")]
-    if cands and rng.random() < REPEAT_CHANCE:
+    if cands and rng.random() < min(1.0, REPEAT_CHANCE * multiplier):
         name = rng.choice(cands)
         c = _c(s, name)
         if name == "柳神":
