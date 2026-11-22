@@ -10,6 +10,8 @@
     font-size: 26px; font-weight: 800; color: #f0d78c; }
   .who { min-width: 0; flex: 1; }
   .who .dao { font-size: 17px; font-weight: 800; color: #e8edf4; letter-spacing: 1px; }
+  .who .profile { font-size: 10px; color: #7a8aa0; margin-top: 2px; line-height: 1.4;
+    overflow-wrap: anywhere; }
   .who .uid { font-size: 10px; color: #55637a; margin-top: 2px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .chips { margin-top: 5px; display: flex; flex-wrap: wrap; gap: 4px; }
@@ -51,6 +53,8 @@
   <div class="avatar">{{ name[:1] }}</div>
   <div class="who">
     <div class="dao">道号 · {{ name }}</div>
+    <div class="profile">性别 · {{ gender }}</div>
+    {% if declaration %}<div class="profile">道宣 · {{ declaration }}</div>{% endif %}
     <div class="uid">UID {{ uid }}</div>
     <div class="chips">
       {% if title %}<span class="chip2">称号 · {{ title }}</span>{% endif %}
