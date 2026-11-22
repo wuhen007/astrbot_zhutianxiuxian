@@ -8359,7 +8359,7 @@ async def main():
                "CMD_RD_VOW", "CMD_RD_LIVES", "CMD_RD_PANEL"]
     miss70 = [c for c in names70 if f"@filter.command({c}" not in src70]
     assert miss70 == [], f"漏注册：{miss70}"
-    assert "sd_mod.deduce(" in src70 and "sd_mod.live(" in src70
+    assert "selfdao_mod.deduce(" in src70 and "selfdao_mod.live(" in src70
     help70b = _json60.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
     assert any(g["group"] == "帝路 · 己道与红尘仙" for g in help70b)
     assert "帝路·红尘仙" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()

@@ -27,6 +27,7 @@ from .core import update_notes as update_notes_mod
 from .core import profile as profile_mod
 from .core import rankings
 from .core import idle_proxy as idle_proxy_mod
+from .core import selfdao as selfdao_mod
 from .core.clock import day_key
 
 PLUGIN_DIR = Path(__file__).parent
@@ -21165,8 +21166,8 @@ class ZhutianPlugin(Star):
         if err:
             yield event.plain_result(err)
             return
-        result = sd_mod.deduce(doc, time.time(),
-                               random.Random(f"{doc.uid}:selfdao:{int(time.time())}"))
+        result = selfdao_mod.deduce(doc, time.time(),
+                                    random.Random(f"{doc.uid}:selfdao:{int(time.time())}"))
         async for r in self._dl_finish(event, doc, result, "推演己道"):
             yield r
 
@@ -21178,7 +21179,7 @@ class ZhutianPlugin(Star):
         if err:
             yield event.plain_result(err)
             return
-        ok, msg, delta = sd_mod.hedao(doc, arg, time.time())
+        ok, msg, delta = selfdao_mod.hedao(doc, arg, time.time())
         async with self.db.transaction():
             await self.db.save_player(doc.model_dump())
             for name, qty in (delta or {}).items():
@@ -21200,7 +21201,7 @@ class ZhutianPlugin(Star):
         if err:
             yield event.plain_result(err)
             return
-        ok, msg = sd_mod.set_realms(doc, arg)
+        ok, msg = selfdao_mod.set_realms(doc, arg)
         async with self.db.transaction():
             await self.db.save_player(doc.model_dump())
         if ok:
@@ -21217,7 +21218,7 @@ class ZhutianPlugin(Star):
         if err:
             yield event.plain_result(err)
             return
-        ok, msg = sd_mod.divine(doc, time.time())
+        ok, msg = selfdao_mod.divine(doc, time.time())
         async with self.db.transaction():
             await self.db.save_player(doc.model_dump())
         if ok:
@@ -21234,7 +21235,7 @@ class ZhutianPlugin(Star):
         if err:
             yield event.plain_result(err)
             return
-        ok, msg = sd_mod.vow(doc, arg)
+        ok, msg = selfdao_mod.vow(doc, arg)
         async with self.db.transaction():
             await self.db.save_player(doc.model_dump())
         yield event.plain_result(msg)
@@ -21248,8 +21249,8 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         era_state = await self._era_state()
-        ok, msg = sd_mod.live(doc, era_state, time.time(),
-                              random.Random(f"{doc.uid}:hongchen:{int(time.time())}"))
+        ok, msg = selfdao_mod.live(doc, era_state, time.time(),
+                                   random.Random(f"{doc.uid}:hongchen:{int(time.time())}"))
         async with self.db.transaction():
             await self.db.save_player(doc.model_dump())
         if ok:
@@ -21266,7 +21267,7 @@ class ZhutianPlugin(Star):
         if err:
             yield event.plain_result(err)
             return
-        async for r in self._smart(event, sd_mod.panel(doc, time.time()), "红尘仙路"):
+        async for r in self._smart(event, selfdao_mod.panel(doc, time.time()), "红尘仙路"):
             yield r
 
     # ------------------------------------------------ W11-F1/F2：自身之道与终局
