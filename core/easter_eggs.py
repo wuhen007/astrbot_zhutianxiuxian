@@ -16,6 +16,7 @@ import time
 from typing import Any, Mapping
 
 from .player import PlayerDoc
+from .clock import day_key
 
 EXT_KEY = "eggs"
 
@@ -101,7 +102,7 @@ def steal(doc: PlayerDoc, target_inv: Mapping[str, int], now: float | None = Non
     now = time.time() if now is None else float(now)
     rng = rng or random.Random()
     st = _st(doc)
-    day = time.strftime("%Y%m%d", time.localtime(now))
+    day = day_key(now).replace("-", "")
     if st.get("steal_day") != day:
         st["steal_day"] = day
         st["steal_used"] = 0

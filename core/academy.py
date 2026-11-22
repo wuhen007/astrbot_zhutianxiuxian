@@ -17,6 +17,7 @@ rng 约定：只用 rng.random()。
 """
 
 from __future__ import annotations
+from .clock import day_key
 
 import time
 from typing import Any
@@ -103,7 +104,7 @@ def panel(doc: Any) -> str:
 
 
 def _day_key(now: float | None = None) -> str:
-    return time.strftime("%Y%m%d", time.localtime(now if now is not None else time.time()))
+    return day_key(time.time() if now is None else now).replace("-", "")
 
 
 def apply(doc: Any, xg_level: int, plane_name: str) -> tuple[bool, str]:

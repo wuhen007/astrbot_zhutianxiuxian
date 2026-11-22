@@ -70,23 +70,24 @@ def roam(doc: PlayerDoc, stats: Any, build_fighter_fn: Any, run_1v1: Any, rng: r
     st = state_of(doc)
     roll = rng.random()
     lines: list[str] = []
+    battle_results: list[str] = []
     gains: dict = {"crystal": 0, "exp": 0, "stones": 0, "insight": 0}
 
     if roll < 0.45:
         # 遇敌：三帝法身（三维 = 玩家 × 系数）——群战折为连战，赢两场算胜
         mult = rng.uniform(*ATTR_RANGE)
         lines.append(rng.choice(TAUNTS).format(name=doc.name or "道友"))
-        lines.append(f"三帝法身自岁月上游逆流而来，三维为你之 {mult:.2f} 倍！")
         me_f = build_fighter_fn("__me__", 1.0)
         wins = 0
         for i, foe_name in enumerate(DARK_TRIAD):
             res = run_1v1(me_f, build_fighter_fn(f"{foe_name}法身", mult), rng)
             if res.winner == 0:
                 wins += 1
-                lines.append(f"第 {i + 1} 战：击败 {foe_name}法身！")
+                battle_results.append(f"胜{foe_name}法身")
             else:
-                lines.append(f"第 {i + 1} 战：不敌 {foe_name}法身，退入时光褶皱。")
+                battle_results.append(f"负{foe_name}法身")
                 break
+        lines.append(f"三帝法身连战（敌方战力 ×{mult:.2f}）：{'、'.join(battle_results)}。")
         if wins >= 2:
             c = _crystal_gain(rng)
             exp_g = 800_000 * (int(doc.realm_index) + 1)
@@ -160,7 +161,7 @@ def roam(doc: PlayerDoc, stats: Any, build_fighter_fn: Any, run_1v1: Any, rng: r
         name = teach_random_prof(doc, rng)
         if name:
             lines.append(f"传道落定：{name}")
-    header = f"--- 遨游时间长河 ---\n岁月沉淀：{int(st['crystal']):,}"
+    header = f"【时间长河·终局战报】\n岁月沉淀：{int(st['crystal']):,}"
     return header + "\n" + "\n".join(lines), gains
 
 

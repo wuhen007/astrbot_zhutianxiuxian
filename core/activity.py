@@ -18,6 +18,7 @@ import time
 from typing import Any, Mapping
 
 from .player import PlayerDoc
+from .clock import day_key
 
 EXT_KEY = "activity"
 
@@ -58,7 +59,7 @@ def state_of(doc: Any) -> dict[str, Any]:
 
 
 def _day_key(now: float) -> str:
-    return time.strftime("%Y%m%d", time.localtime(now))
+    return day_key(now).replace("-", "")
 
 
 def xinghai_sign(doc: PlayerDoc, now: float | None = None,
@@ -71,7 +72,7 @@ def xinghai_sign(doc: PlayerDoc, now: float | None = None,
     day = _day_key(now)
     if st.get("xh_day") == day:
         return False, "今日已在往世星海签到——明天再来。", {}
-    yesterday = time.strftime("%Y%m%d", time.localtime(now - 86400))
+    yesterday = _day_key(now - 86400)
     streak = int(st.get("xh_streak", 0) or 0) + 1 if st.get("xh_day") == yesterday else 1
     days = min(999, streak)
     gain = DAILY_EXP * days
@@ -154,7 +155,7 @@ def anniversary_sign(doc: PlayerDoc, now: float | None = None,
     day = _day_key(now)
     if st.get("zn_day") == day:
         return False, "今日已行周年签到。", {}
-    yesterday = time.strftime("%Y%m%d", time.localtime(now - 86400))
+    yesterday = _day_key(now - 86400)
     streak = int(st.get("zn_streak", 0) or 0) + 1 if st.get("zn_day") == yesterday else 1
     st["zn_day"] = day
     st["zn_streak"] = streak

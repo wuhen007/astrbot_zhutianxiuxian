@@ -1327,7 +1327,9 @@ def is_weekend(now: float) -> bool:
 
 
 def week_key(now: float) -> str:
-    y, w, _ = datetime.date.fromtimestamp(now).isocalendar()
+    shanghai_date = datetime.datetime.fromtimestamp(
+        now + 8 * 3600, datetime.timezone.utc).date()
+    y, w, _ = shanghai_date.isocalendar()
     return f"{y}-W{w:02d}"
 
 

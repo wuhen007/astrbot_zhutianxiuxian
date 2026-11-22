@@ -101,6 +101,8 @@ def _defaults(now: float = 0.0) -> dict[str, Any]:
         "power_bonus": 0.0,
         "last_decay_at": now,
         "last_prove_at": 0.0,
+        "dao_flaws": 0,
+        "break_king_failed_at": 0.0,
         "reshapes": 0,
         "repairs": 0,
         "history": [],
@@ -122,6 +124,8 @@ def state_of(doc: Any, now: float | None = None) -> dict[str, Any]:
     if isinstance(raw, dict):
         st.update(raw)
     st["wounds"] = max(0.0, float(st.get("wounds", 0) or 0))
+    st["dao_flaws"] = max(0, int(st.get("dao_flaws", 0) or 0))
+    st["break_king_failed_at"] = float(st.get("break_king_failed_at", 0) or 0)
     st["repair_progress"] = max(0.0, float(st.get("repair_progress", 0) or 0))
     st["power_bonus"] = max(0.0, float(st.get("power_bonus", 0) or 0))
     st["last_decay_at"] = float(st.get("last_decay_at", 0) or 0)
@@ -209,6 +213,29 @@ def heal(doc: Any, amount: float, reason: str, now: float | None = None) -> floa
 
 def clear(doc: Any, reason: str, now: float | None = None) -> float:
     return heal(doc, 1e9, reason, now)
+
+
+def use_supreme_divine_item(doc: Any, now: float | None = None) -> tuple[bool, str]:
+    """Repair one failed emperor-proof flaw and release its 24-hour retry lock."""
+    now = time.time() if now is None else float(now)
+    st = state_of(doc, now)
+    cooling = (st["break_king_failed_at"] > 0
+               and now - st["last_prove_at"] < PROVE_CD)
+    if st["dao_flaws"] <= 0 and not cooling:
+        return False, "道基无瑕且帝劫余波已散，无需使用无上神物。"
+    if st["dao_flaws"] > 0:
+        st["dao_flaws"] -= 1
+        save(doc, st)
+        heal(doc, 1.0, "无上神物·弥合道基", now)
+        st = state_of(doc, now)
+    lines = ["【无上神物·道基重铸】"]
+    if cooling:
+        st["last_prove_at"] = now - PROVE_CD
+        st["break_king_failed_at"] = 0.0
+        lines.append("帝劫修养冷却已解除，可再次证道。")
+    lines.append(f"道果瑕疵：修复后剩余 {st['dao_flaws']} 处。")
+    save(doc, st)
+    return True, "\n".join(lines)
 
 
 def power_bonus(doc: Any) -> float:
@@ -304,11 +331,13 @@ def panel(doc: Any, reg: Mapping[str, Any] | None = None,
     e = effects(doc, now)
     w = st["wounds"]
     r = registry_of(reg or {})
+    retry_left = max(0, int(PROVE_CD - (now - float(st.get("last_prove_at", 0) or 0))))
     lines = [
         "--- 道伤 · 证道 ---",
         f"道伤：{w:.1f}（惩罚 {int(e['level'])}/{WOUND_LEVEL_CAP} 级）｜自然恢复 -{DECAY_STEP}/10 分钟",
         f"成功率 -{e['chance_penalty']:.0%}｜悟道 ×{e['dao_multiplier']:.2f}｜三维 ×{e['attr_multiplier']:.2f}",
         f"证道方式：{st['zhengdao_method'] or '未证道'}｜帝号：{st['emperor_title'] or '无'}",
+        f"道果瑕疵：{st['dao_flaws']} 处｜帝劫修养：{retry_left // 3600} 小时 {retry_left % 3600 // 60} 分",
         f"帝威加成：+{st['power_bonus']:.0%}（战斗增伤）｜历史峰值：第 {int(st['peak_realm']) + 1} 境",
         f"已重塑 {int(st['reshapes'])} 次｜已修复 {int(st['repairs'])} 次",
         f"禁证道：{'是' if st['cannot_prove'] else '否'}｜禁准帝劫：{'是' if st['cannot_zhundi_trib'] else '否'}",
@@ -479,6 +508,8 @@ def prove(doc: Any, reg: dict[str, Any], now: float | None = None,
     if st["wounds"] >= PROVE_WOUND_GATE:
         return *_no(f"身负道伤 {st['wounds']:.1f} ≥{PROVE_WOUND_GATE:.0f}，"
                     "帝路已断——先 #修复道伤 / #道基重塑。"), reg
+    if st["dao_flaws"] > 0:
+        return *_no(f"道果尚有 {st['dao_flaws']} 处瑕疵，帝路未通；可用无上神物修复。"), reg
     if st.get("cannot_prove"):
         return *_no("你的证道资格已被剥夺（#月华救赎 / #根源波动 可解除）。"), reg
     left = PROVE_CD - (now - float(st.get("last_prove_at", 0) or 0))
@@ -510,15 +541,22 @@ def prove(doc: Any, reg: dict[str, Any], now: float | None = None,
     won = waves == EMPEROR_WAVES and foes == EMPEROR_FOES
     if not won:
         add_wounds(doc, 2.0, "大帝意志劫失败", now, halve=frost_active(doc))
+        st = state_of(doc, now)
+        st["dao_flaws"] += 1
+        st["break_king_failed_at"] = now
+        st["last_prove_at"] = now
+        save(doc, st)
         doc.exp = int(doc.exp * 0.6)
         _set_xueqi(doc, int(_xueqi(doc) * 0.6))
         return *_ok(f"【证道·{route}】万道枷锁渡过 {waves}/{EMPEROR_WAVES} 波、"
                     f"古帝意志胜 {foes}/{EMPEROR_FOES} 位（单波 {chance:.0%}，难度 ×{mult:g}）。\n"
                     "道基受损，修为与血气再损 40%｜道伤 +2（霜华减半）｜"
-                    "寻不死神药修复伤体后方可重证。"), reg
+                    "道果瑕疵 +1｜需修养 24 小时，或使用无上神物修复后再战。"), reg
     title = (rng.choice(EMPEROR_SURNAMES) + rng.choice(EMPEROR_TITLES))
     _write_wounds(doc, st, 0.0, "证道成帝", -st["wounds"], now)
     st = state_of(doc, now)
+    st["break_king_failed_at"] = 0.0
+    st["dao_flaws"] = 0
     st["reached"] = True
     st["zhengdao_method"] = route
     st["emperor_title"] = title

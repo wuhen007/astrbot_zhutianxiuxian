@@ -13,7 +13,7 @@
   **公告群名单**维护，不是发消息。
 - `#补登唯一机缘` 属仙古遗迹永久认领，本移植不做仙古遗迹 → 不移植。
 
-状态全部落在 `calamity_state["admin"]` 单例，db 恒 v17。
+状态全部落在 `calamity_state["admin"]` 单例，db 当前版本为 v18。
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from __future__ import annotations
 import time
 from typing import Any, Iterable, Mapping
 
-from . import fashan, lifespan, plane
+from . import fashan, lifespan, occupation, plane
 
 # ---------------------------------------------------------------- 常量
 
@@ -63,7 +63,7 @@ INVITE_TIER_TEXT = {
 
 # 诸天初始化要清空的表；db_info 必须保留（版本号）
 INIT_TABLES = (
-    "players", "inventory", "world_boss", "boss_ledger", "sects", "auction",
+    "players", "inventory", "world_boss", "boss_ledger", "sects", "auction", "item_grants",
     "daily_tasks", "dark_boss", "dark_ledger", "raid_team", "raid_member",
     "rift_state", "ancient_state", "calamity_state", "lingjie_state",
     "other_shore_state", "market_state", "era_state", "tianjiao_state",
@@ -310,8 +310,13 @@ def grant_occupation_level(doc: Any, levels: int) -> tuple[bool, str]:
     if not job:
         return False, f"{getattr(doc, 'name', doc.uid)} 尚未就职，无处补发等级。"
     cur = int((doc.ext or {}).get("occupation_level", 1) or 1)
-    doc.ext["occupation_level"] = cur + levels
-    return True, f"{doc.name} 的 {job} 等级 +{levels}，现为 {cur + levels} 级。"
+    target = min(occupation.MAX_OCC_LEVEL, cur + levels)
+    granted = target - cur
+    if granted <= 0:
+        return False, f"{doc.name} 的 {job} 已达 {occupation.MAX_OCC_LEVEL} 级上限。"
+    doc.ext["occupation_level"] = target
+    capped = "（已按职业等级上限夹紧）" if granted < levels else ""
+    return True, f"{doc.name} 的 {job} 等级 +{granted}，现为 {target} 级。{capped}"
 
 
 def divorce(doc: Any) -> tuple[bool, str]:

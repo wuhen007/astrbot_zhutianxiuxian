@@ -27,6 +27,7 @@ shortcut（与原版的差异，均已在数值上折算而非省略）：
 """
 
 from __future__ import annotations
+from .clock import day_key
 
 import random
 import time
@@ -163,7 +164,7 @@ def set_state(doc: Any, st: Mapping[str, Any]) -> None:
 
 
 def _date_key(now: float) -> str:
-    return time.strftime("%Y-%m-%d", time.localtime(now))
+    return day_key(now)
 
 
 def _have(inv: Mapping[str, int], name: str, qty: int = 1) -> bool:

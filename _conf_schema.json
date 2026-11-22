@@ -85,6 +85,30 @@
         "default": true,
         "hint": "开=关键面板出图（需 Playwright 环境），失败自动回退纯文本"
       },
+      "NIGHT_QUIET_ENABLED": {
+        "description": "启用夜间静默",
+        "type": "bool",
+        "default": false,
+        "hint": "开启后，指定时段冻结世界历法并暂停灵界裂缝定时结算。"
+      },
+      "NIGHT_QUIET_START_HOUR": {
+        "description": "夜间静默开始小时",
+        "type": "int",
+        "default": 0,
+        "hint": "使用 NIGHT_QUIET_UTC_OFFSET 指定时区，取值 0-23。"
+      },
+      "NIGHT_QUIET_END_HOUR": {
+        "description": "夜间静默结束小时",
+        "type": "int",
+        "default": 8,
+        "hint": "取值 0-23；开始与结束相同表示不生效。"
+      },
+      "NIGHT_QUIET_UTC_OFFSET": {
+        "description": "夜间静默时区 UTC 偏移",
+        "type": "int",
+        "default": 8,
+        "hint": "例如中国标准时间填写 8。"
+      },
       "ERA_TICK_HOURS": {
         "description": "时代历法：每多少小时推进一次",
         "type": "float",

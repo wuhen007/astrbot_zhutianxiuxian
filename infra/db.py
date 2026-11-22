@@ -12,7 +12,7 @@ from typing import Any, AsyncIterator, Optional
 
 import aiosqlite
 
-LATEST_DB_VERSION = 17
+LATEST_DB_VERSION = 18
 
 
 def _shanghai_date_key(ts: float) -> str:
@@ -25,20 +25,25 @@ def _shanghai_date_key(ts: float) -> str:
 
 
 def _serialized(write_fn):
-    """写方法串行化守卫：独立调用持写锁；事务内调用（外层已持锁）直接放行。
+    """连接访问串行化；仅持锁协程可在事务内重入。
 
-    共享单连接下没有它，并发命令的写入会互相搭车：乙的提交会把甲
-    写一半的事务提前落地，或甲的 BEGIN 报「事务已存在」。
+    aiosqlite 连接的事务状态属于整个连接，不能用 in_transaction 判断调用方
+    是否处于该事务，否则其他协程会读到未提交数据或把写入并入该事务。
     """
     @functools.wraps(write_fn)
     async def wrapper(self, *args, **kwargs):
         assert self.conn is not None
-        if self.conn.in_transaction:
+        task = asyncio.current_task()
+        if self._db_owner is task:
             return await write_fn(self, *args, **kwargs)
         async with self.wlock:
             if self.conn.in_transaction:   # 上次异常遗留的孤儿事务，清掉再写
                 await self.conn.rollback()
-            return await write_fn(self, *args, **kwargs)
+            self._db_owner = task
+            try:
+                return await write_fn(self, *args, **kwargs)
+            finally:
+                self._db_owner = None
     return wrapper
 
 
@@ -47,6 +52,7 @@ class DataBase:
         self.db_path = Path(db_path)
         self.conn: Optional[aiosqlite.Connection] = None
         self.wlock = asyncio.Lock()   # 全部写路径共用一把锁：命令并发时串行落库
+        self._db_owner: asyncio.Task | None = None
         # 审计修复3：calamity_state 是全服单例整档覆盖，"读档→改→save_calamity"
         # 跨度必须持本锁，否则并发写入者互相回滚字段（护法/帝关/天地榜/战功）。
         self.calamity_lock = asyncio.Lock()
@@ -74,6 +80,7 @@ class DataBase:
             if self.conn.in_transaction:   # 上次异常遗留的孤儿事务，清掉再开
                 await self.conn.rollback()
             await self.conn.execute("BEGIN")
+            self._db_owner = asyncio.current_task()
             try:
                 yield self.conn
             except Exception:
@@ -81,6 +88,8 @@ class DataBase:
                 raise
             else:
                 await self.conn.commit()
+            finally:
+                self._db_owner = None
 
     async def _migrate(self) -> None:
         assert self.conn is not None
@@ -110,11 +119,12 @@ class DataBase:
                 await _v14_other_shore(self.conn)
                 await _v16_era(self.conn)
                 await _v17_tianjiao_faction(self.conn)
+                await _v18_qq_operations(self.conn)
                 await self.conn.execute("INSERT INTO db_info (version) VALUES (?)", (LATEST_DB_VERSION,))
             return
 
         # 后续版本在此登记：MIGRATIONS[n] = upgrade_fn
-        MIGRATIONS = {2: _v2_inventory, 3: _v3_world_boss, 4: _v4_sects, 5: _v5_auction, 6: _v6_sect_score, 7: _v7_daily_tasks, 8: _v8_dark_boss, 9: _v9_raid, 10: _v10_rift, 11: _v11_calamity, 12: _v12_lingjie, 13: _v13_ancient, 14: _v14_other_shore, 15: _v15_market, 16: _v16_era, 17: _v17_tianjiao_faction}
+        MIGRATIONS = {2: _v2_inventory, 3: _v3_world_boss, 4: _v4_sects, 5: _v5_auction, 6: _v6_sect_score, 7: _v7_daily_tasks, 8: _v8_dark_boss, 9: _v9_raid, 10: _v10_rift, 11: _v11_calamity, 12: _v12_lingjie, 13: _v13_ancient, 14: _v14_other_shore, 15: _v15_market, 16: _v16_era, 17: _v17_tianjiao_faction, 18: _v18_qq_operations}
         for version in sorted(v for v in MIGRATIONS if v > current):
             async with self.transaction():
                 await MIGRATIONS[version](self.conn)
@@ -122,6 +132,118 @@ class DataBase:
 
     # ---- 纳戒（背包）：以物品名为键，全部游戏操作均按名字进行 ----
 
+    @_serialized
+    async def register_qq_group(self, platform_id: str, group_id: str) -> None:
+        assert self.conn is not None
+        now = time.time()
+        await self.conn.execute(
+            "INSERT INTO qq_groups(platform_id, group_id, categories, registered_at, last_seen) "
+            "VALUES (?, ?, '[]', ?, ?) ON CONFLICT(platform_id, group_id) "
+            "DO UPDATE SET last_seen = excluded.last_seen",
+            (str(platform_id), str(group_id), now, now),
+        )
+        await self.conn.commit()
+
+    @_serialized
+    async def set_qq_group(self, platform_id: str, group_id: str, categories: list[str]) -> None:
+        assert self.conn is not None
+        now = time.time()
+        await self.conn.execute(
+            "INSERT INTO qq_groups(platform_id, group_id, categories, registered_at, last_seen) "
+            "VALUES (?, ?, ?, ?, ?) ON CONFLICT(platform_id, group_id) DO UPDATE SET "
+            "categories = excluded.categories, last_seen = excluded.last_seen",
+            (str(platform_id), str(group_id), json.dumps(sorted(set(categories))), now, now),
+        )
+        await self.conn.commit()
+
+    @_serialized
+    async def qq_group_categories(self, platform_id: str, group_id: str) -> list[str] | None:
+        assert self.conn is not None
+        async with self.conn.execute(
+            "SELECT categories FROM qq_groups WHERE platform_id = ? AND group_id = ?",
+            (str(platform_id), str(group_id)),
+        ) as cur:
+            row = await cur.fetchone()
+        return json.loads(row[0]) if row else None
+
+    @_serialized
+    async def qq_subscribers(self, category: str) -> list[tuple[str, str]]:
+        assert self.conn is not None
+        async with self.conn.execute(
+            "SELECT platform_id, group_id FROM qq_groups WHERE categories LIKE ?",
+            (f'%"{category}"%',),
+        ) as cur:
+            return [(str(row[0]), str(row[1])) for row in await cur.fetchall()]
+
+    @_serialized
+    async def create_item_grant(self, grant_id: str, target_uid: str, item: str, qty: int,
+                                issuer_uid: str, platform_id: str, group_id: str) -> None:
+        assert self.conn is not None
+        await self.conn.execute(
+            "INSERT INTO item_grants(id, target_uid, item, qty, issuer_uid, platform_id, group_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (grant_id, str(target_uid), item, int(qty), str(issuer_uid), str(platform_id), str(group_id), time.time()),
+        )
+        await self.conn.commit()
+
+    async def confirm_item_grant(self, grant_id: str, target_uid: str,
+                                 platform_id: str, group_id: str) -> tuple[bool, str]:
+        assert self.conn is not None
+        async with self.transaction():
+            async with self.conn.execute(
+                "SELECT target_uid, platform_id, group_id, claim_uid, claimed_at FROM item_grants WHERE id = ?",
+                (grant_id,),
+            ) as cur:
+                row = await cur.fetchone()
+            if not row:
+                return False, "发放单不存在。"
+            if str(row[0]) != str(target_uid) or str(row[1]) != str(platform_id) or str(row[2]) != str(group_id):
+                return False, "只能由创建发放单所在群的目标玩家本人确认。"
+            if row[4] is not None:
+                return False, "此发放单已经领取。"
+            if not row[3]:
+                return False, "还没有待确认的私聊领取申请。"
+            await self.conn.execute(
+                "UPDATE item_grants SET confirmed_at = ? WHERE id = ? AND claimed_at IS NULL",
+                (time.time(), grant_id),
+            )
+            return True, "已确认私聊领取申请，请申请人返回私聊发送「#领取发放 单号」完成领取。"
+
+    async def claim_item_grant(self, grant_id: str, target_uid: str) -> tuple[bool, str]:
+        assert self.conn is not None
+        async with self.transaction():
+            async with self.conn.execute(
+                "SELECT target_uid, item, qty, claimed_at, claim_uid, confirmed_at "
+                "FROM item_grants WHERE id = ?", (grant_id,)
+            ) as cur:
+                row = await cur.fetchone()
+            if not row:
+                return False, "发放单不存在。"
+            if row[3] is not None:
+                return False, "此发放单已经领取。"
+            if str(row[0]) != str(target_uid):
+                if str(row[4] or "") != str(target_uid) or row[5] is None:
+                    await self.conn.execute(
+                        "UPDATE item_grants SET claim_uid = ?, confirmed_at = NULL WHERE id = ?",
+                        (str(target_uid), grant_id),
+                    )
+                    return False, "已登记私聊领取申请。请只在本人刚刚发起申请时回到发放单所在群，由被 @ 的账号发送「#确认发放 单号」；确认后再私聊领取。"
+            reward_uid = str(row[0])
+            raw = await self.get_player(reward_uid)
+            if not raw:
+                return False, "请先私聊机器人踏入仙途，再领取发放。"
+            if row[1] == "灵石":
+                raw["stones"] = int(raw.get("stones", 0) or 0) + int(row[2])
+                await self.save_player(raw)
+            else:
+                await self.add_items(reward_uid, {str(row[1]): int(row[2])})
+            await self.conn.execute(
+                "UPDATE item_grants SET claimed_at = ? WHERE id = ? AND claimed_at IS NULL",
+                (time.time(), grant_id),
+            )
+            return True, str(row[1])
+
+    @_serialized
     async def get_inventory(self, uid: str) -> dict[str, int]:
         assert self.conn is not None
         async with self.conn.execute(
@@ -188,6 +310,7 @@ class DataBase:
         if owned:
             await self.conn.commit()
 
+    @_serialized
     async def get_player(self, uid: str) -> Optional[dict[str, Any]]:
         assert self.conn is not None
         async with self.conn.execute("SELECT doc FROM players WHERE uid = ?", (uid,)) as cur:
@@ -223,6 +346,7 @@ class DataBase:
 
     # ---- 每日任务 ----
 
+    @_serialized
     async def get_daily_task(self, uid: str) -> Optional[dict[str, Any]]:
         assert self.conn is not None
         async with self.conn.execute(
@@ -286,6 +410,7 @@ class DataBase:
 
     # ---- 黑暗动乱帝战 ----
 
+    @_serialized
     async def get_dark_boss(self) -> Optional[dict[str, Any]]:
         assert self.conn is not None
         async with self.conn.execute(
@@ -342,6 +467,7 @@ class DataBase:
             await self.conn.commit()
         return left
 
+    @_serialized
     async def dark_ledger(self, round_no: int) -> dict[str, tuple[str, int]]:
         assert self.conn is not None
         async with self.conn.execute(
@@ -352,6 +478,7 @@ class DataBase:
 
     # ---- 裂界副本：全服单例状态（当前裂界 + 锚定度 + 贡献） ----
 
+    @_serialized
     async def get_market(self) -> dict[str, Any]:
         assert self.conn is not None
         async with self.conn.execute("SELECT doc FROM market_state WHERE id = 1") as cur:
@@ -374,6 +501,7 @@ class DataBase:
         if owned:
             await self.conn.commit()
 
+    @_serialized
     async def get_era(self) -> dict[str, Any]:
         """世界时代单例（五时代轮转 / 历法 / 出金率）。缺表或空档返回 {}。"""
         assert self.conn is not None
@@ -397,6 +525,7 @@ class DataBase:
         if owned:
             await self.conn.commit()
 
+    @_serialized
     async def get_tianjiao(self) -> dict[str, Any]:
         """位面天骄共享状态（血条 / 轮回 / 贡献榜）。"""
         assert self.conn is not None
@@ -420,6 +549,7 @@ class DataBase:
         if owned:
             await self.conn.commit()
 
+    @_serialized
     async def get_faction(self) -> dict[str, Any]:
         """势力全服状态（等级 / 成员 / 贡献）。"""
         assert self.conn is not None
@@ -443,6 +573,7 @@ class DataBase:
         if owned:
             await self.conn.commit()
 
+    @_serialized
     async def get_rift(self) -> dict[str, Any]:
         assert self.conn is not None
         async with self.conn.execute("SELECT doc FROM rift_state WHERE id = 1") as cur:
@@ -467,6 +598,7 @@ class DataBase:
 
     # ---- 千年灾劫：全服单例状态（灾厄列表 + 魔主 + 纪元） ----
 
+    @_serialized
     async def get_calamity(self) -> dict[str, Any]:
         assert self.conn is not None
         async with self.conn.execute("SELECT doc FROM calamity_state WHERE id = 1") as cur:
@@ -491,6 +623,7 @@ class DataBase:
 
     # ---- 灵界裂缝：全服单例状态（现世裂缝 + 探索任务 + 界印记录） ----
 
+    @_serialized
     async def get_lingjie(self) -> dict[str, Any]:
         assert self.conn is not None
         async with self.conn.execute("SELECT doc FROM lingjie_state WHERE id = 1") as cur:
@@ -515,6 +648,7 @@ class DataBase:
 
     # ---- 彼岸古文明：全服单例状态（四章贡献链） ----
 
+    @_serialized
     async def get_ancient(self) -> dict[str, Any]:
         assert self.conn is not None
         async with self.conn.execute("SELECT doc FROM ancient_state WHERE id = 1") as cur:
@@ -539,6 +673,7 @@ class DataBase:
 
     # ---- 彼岸世界/真世界：全服单例状态（世界 + 星辰 + 路径） ----
 
+    @_serialized
     async def get_other_shore(self) -> dict[str, Any]:
         assert self.conn is not None
         async with self.conn.execute("SELECT doc FROM other_shore_state WHERE id = 1") as cur:
@@ -561,6 +696,7 @@ class DataBase:
         if owned:
             await self.conn.commit()
 
+    @_serialized
     async def all_player_uids(self) -> list[str]:
         assert self.conn is not None
         async with self.conn.execute("SELECT uid FROM players") as cur:
@@ -595,6 +731,7 @@ class DataBase:
         if owned:
             await self.conn.commit()
 
+    @_serialized
     async def get_raid(self, code: str) -> dict[str, Any] | None:
         assert self.conn is not None
         async with self.conn.execute(
@@ -604,6 +741,7 @@ class DataBase:
         ) as cur:
             return self._raid_row(await cur.fetchone())
 
+    @_serialized
     async def active_raid_of(self, uid: str) -> dict[str, Any] | None:
         assert self.conn is not None
         async with self.conn.execute(
@@ -616,6 +754,7 @@ class DataBase:
         ) as cur:
             return self._raid_row(await cur.fetchone())
 
+    @_serialized
     async def last_raid_of(self, uid: str) -> dict[str, Any] | None:
         assert self.conn is not None
         async with self.conn.execute(
@@ -627,6 +766,7 @@ class DataBase:
         ) as cur:
             return self._raid_row(await cur.fetchone())
 
+    @_serialized
     async def raid_members(self, code: str) -> list[dict[str, Any]]:
         assert self.conn is not None
         async with self.conn.execute(
@@ -641,6 +781,7 @@ class DataBase:
             for r in rows
         ]
 
+    @_serialized
     async def raid_member(self, code: str, uid: str) -> dict[str, Any] | None:
         for m in await self.raid_members(code):
             if m["uid"] == uid:
@@ -780,6 +921,7 @@ class DataBase:
             await self.conn.commit()
         return n
 
+    @_serialized
     async def list_raids(self, status: str = "recruiting", limit: int = 10) -> list[dict[str, Any]]:
         assert self.conn is not None
         async with self.conn.execute(
@@ -791,6 +933,7 @@ class DataBase:
             rows = await cur.fetchall()
         return [d for d in (self._raid_row(r) for r in rows) if d]
 
+    @_serialized
     async def raid_member_count(self, code: str) -> int:
         assert self.conn is not None
         async with self.conn.execute(
@@ -802,6 +945,7 @@ class DataBase:
     # ---- 世界 Boss ----
 
 
+    @_serialized
     async def get_boss(self) -> Optional[dict[str, Any]]:
         assert self.conn is not None
         async with self.conn.execute(
@@ -855,6 +999,7 @@ class DataBase:
             await self.conn.commit()
         return left
 
+    @_serialized
     async def boss_ledger(self, round_no: int) -> dict[str, tuple[str, int]]:
         """某轮贡献账本：uid → (名字, 累计伤害)，按伤害降序。"""
         assert self.conn is not None
@@ -867,6 +1012,7 @@ class DataBase:
 
     # ---- 宗门 ----
 
+    @_serialized
     async def get_sect(self, name: str) -> Optional[dict[str, Any]]:
         assert self.conn is not None
         async with self.conn.execute(
@@ -916,6 +1062,7 @@ class DataBase:
         if owned:
             await self.conn.commit()
 
+    @_serialized
     async def all_sects(self) -> list[dict[str, Any]]:
         assert self.conn is not None
         async with self.conn.execute(
@@ -936,6 +1083,7 @@ class DataBase:
         if owned:
             await self.conn.commit()
 
+    @_serialized
     async def all_players(self) -> list[dict[str, Any]]:
         """遍历玩家文档（排行用；群服规模下可接受全扫）。"""
         assert self.conn is not None
@@ -956,6 +1104,7 @@ class DataBase:
             await self.conn.commit()
         return cur.rowcount > 0
 
+    @_serialized
     async def all_auctions(self) -> list[dict[str, Any]]:
         """全量拍卖挂单（超管清场用）。"""
         assert self.conn is not None
@@ -1021,6 +1170,7 @@ class DataBase:
             await self.conn.commit()
         return cur.lastrowid
 
+    @_serialized
     async def get_auction(self, lot_id: int) -> Optional[dict[str, Any]]:
         assert self.conn is not None
         async with self.conn.execute(
@@ -1033,6 +1183,7 @@ class DataBase:
             return {"id": r[0], "seller_uid": r[1], "seller_name": r[2],
                     "item": r[3], "qty": r[4], "price": r[5], "listed_at": r[6]}
 
+    @_serialized
     async def auction_page(self, page: int, per: int = 8) -> tuple[list[dict], int]:
         assert self.conn is not None
         async with self.conn.execute("SELECT COUNT(*) FROM auction") as cur:
@@ -1058,6 +1209,7 @@ class DataBase:
             await self.conn.commit()
         return cur.rowcount > 0
 
+    @_serialized
     async def my_auctions(self, uid: str) -> list[dict[str, Any]]:
         assert self.conn is not None
         async with self.conn.execute(
@@ -1279,3 +1431,20 @@ async def _v17_tianjiao_faction(conn: aiosqlite.Connection) -> None:
         " id INTEGER PRIMARY KEY CHECK (id = 1),"
         " doc TEXT NOT NULL)"
     )
+
+
+async def _v18_qq_operations(conn: aiosqlite.Connection) -> None:
+    """群推送订阅及需要玩家私聊领取的发放单。"""
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS qq_groups ("
+        " platform_id TEXT NOT NULL, group_id TEXT NOT NULL, categories TEXT NOT NULL,"
+        " registered_at REAL NOT NULL, last_seen REAL NOT NULL,"
+        " PRIMARY KEY(platform_id, group_id))"
+    )
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS item_grants ("
+        " id TEXT PRIMARY KEY, target_uid TEXT NOT NULL, item TEXT NOT NULL, qty INTEGER NOT NULL,"
+        " issuer_uid TEXT NOT NULL, platform_id TEXT NOT NULL, group_id TEXT NOT NULL,"
+        " claim_uid TEXT, confirmed_at REAL, created_at REAL NOT NULL, claimed_at REAL)"
+    )
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_item_grants_target ON item_grants(target_uid, claimed_at)")

@@ -7,6 +7,7 @@ import functools
 import json
 import random
 import re
+import secrets
 import time
 from pathlib import Path
 
@@ -16,11 +17,13 @@ from astrbot.api.star import Context, Star, StarTools, register
 from .ui_kit import btn as _uk_btn, row as _uk_row, kb_result as _uk_kb, own as _uk_own, data_ok as _uk_data, encode_size_ok as _uk_size, available as _uk_avail
 
 from .core.player import PlayerDoc, create_player, next_realm_entry, realm_entry
+from .core import night_quiet as night_quiet_mod
 from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity, catalog, cultivate, daofa, dibing, dungeon, equipment, era as era_mod, extras, faction, other_shore_forge as osf, other_shore_world, relic as relic_mod, fishing as fish_mod, voyage as voyage_mod, reincarnation as rein_mod, bloodline, memory as mem_mod, inner_world as iw_mod, yuanshen as ysh_mod, flower as flower_mod, suiyun as suiyun_mod, zhengdao as dz_mod, daolu as dl_mod, wudao as wd_mod, supreme as sp_mod, bengming as bm_mod, xtzb as xt_mod, daotreasure as dt_mod, duanzao as dzl_mod, auction as xg_mod, sacrifice as ss_mod, authority as authority_mod, tianjiao as tj_mod, tuanben as tb_mod, teamboss as dr_mod, revival as rv_mod, sword_magic as sm_mod, admin as adm_mod, worldline as wl_mod, superdim as sd_mod, shengxu as sx_mod, shangcang as sc_mod, puppet as pup_mod, sect_deep as sec_mod, tiandibang as tdb_mod, realm_event as rev_mod, ownway as ow_mod, physique as ph_mod, exclusive_set as ex_mod, zhutian_extra as zx_mod, occupation_extra as oe_mod, activity as ac_mod, reinc_state as rs_mod, plane_events as pe_mod, games_mini as gm_mod, xtzb_birth as xb_mod, auto_task as at_mod, easter_eggs as eg_mod, plane_relay as pr_mod, sect_extra as se_mod, assistant as as_mod, bounty as bt_mod, xiangu as xgm_mod, xiangu_npc as xn_mod, xiangu_camp as xc_mod, xiangu_dao as xdd_mod, xiangu_baodi as xbd_mod, academy as acd_mod, social as soc_mod, abilities as ab_mod, tianji as tjge_mod, sellall as sa_mod, fashan, items, lifespan, linggen, market, mingge, river, addict, endless, lingjie, motou, npc, occupation, plane, pet, pvp, quest, raid, rift, secret, sect, shenjie, story_npc, trib, universe, wenxian, world_deep, xiaoshijie, yuanshi, zhutian
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
 from .core import legacy_import as legacy_mod
+from .core import update_notes as update_notes_mod
 
 PLUGIN_DIR = Path(__file__).parent
 
@@ -60,6 +63,7 @@ def talent_desc(t: dict) -> str:
 CMD_START = "#踏入仙途"
 CMD_STATUS = "#修仙状态"
 CMD_HELP = "#修仙帮助"
+CMD_UPDATE_NOTES = "#更新内容"
 CMD_SIGN = "#修仙签到"
 CMD_CLOSED = "#闭关"
 CMD_OPEN = "#出关"
@@ -767,6 +771,7 @@ CMD_DZ_RULES = "#道伤规则"
 CMD_DZ_RESHAPE = "#道基重塑"
 CMD_DZ_REPAIR = "#修复道伤"
 CMD_DZ_PROVE = "#证道成帝"
+CMD_DZ_USE_SUPREME = "#使用无上神物"
 CMD_DZ_REPROVE = "#证道"
 CMD_DZ_CHARGE = "#冲关"
 CMD_DZ_CHARGE_EXTREME = "#冲关极境"
@@ -1187,6 +1192,13 @@ CMD_MARRY_NO = "我拒绝"
 CMD_DIVORCE = "#断绝姻缘"
 CMD_QINMI = "#查询亲密度"
 CMD_GIVE_STONES = "#补发灵石"
+CMD_GROUP_GRANT = "#创建发放单"
+CMD_CLAIM_GRANT = "#领取发放"
+CMD_GROUP_CONFIRM_GRANT = "#确认发放"
+CMD_GROUP_PUSH_JOIN = "#邀请群加入推送"
+CMD_GROUP_PUSH_LEAVE = "#退出群推送"
+CMD_GROUP_PUSH_CATEGORIES = "#群推送分类"
+QQ_PUSH_CATEGORIES = {"时代": "era", "每日": "daily", "拍卖": "auction", "活动": "game"}
 CMD_VIEW_PLAYER = "#查看玩家"
 CMD_RESET_TASK = "#重置每日任务"
 CMD_BAN = "#封禁修仙"
@@ -1325,6 +1337,8 @@ class ZhutianPlugin(Star):
         self.whitelist_groups = [
             str(g) for g in (config.get("ACCESS_CONTROL", {}).get("WHITELIST_GROUPS") or [])
         ]
+        self._registered_groups: set[tuple[str, str]] = set()
+        self._qq_group_push_cache: dict[tuple[str, str], tuple[float, bool | None]] = {}
         # W8-F1：超管世界状态缓存（难度 / 修仙管理员 / 公告群 / 管理日志），
         # 启动时从 calamity_state["admin"] 灌入；只有 #选择难度 一类的指令会改写它。
         self._adm_state: dict = adm_mod.state_of({})
@@ -1465,22 +1479,92 @@ class ZhutianPlugin(Star):
         await self.db.close()
         await render.shutdown()
 
-    async def _era_broadcast(self, text: str) -> None:
-        """时代变化主动消息：向白名单群推送（对齐原版 Era.notifyGroups 广播）。"""
+    async def _push_to_subscribers(self, category: str, text: str) -> None:
         if not text:
             return
         from astrbot.api.event import MessageChain
         from astrbot.api.message_components import Plain
 
-        platform_id = "大肥鱼"  # qq_official 平台实例 id
-        for gid in self.whitelist_groups:
+        for platform_id, gid in await self.db.qq_subscribers(category):
+            key = (platform_id, gid)
+            cached = self._qq_group_push_cache.get(key)
+            can_push = cached[1] if cached and time.monotonic() - cached[0] < 600 else None
+            if can_push is False:
+                logger.info(f"[zhutian] QQ 群未开放主动消息，跳过推送 {platform_id}/{gid}")
+                continue
             try:
+                self._remember_qq_group_scene(platform_id, gid)
                 await self.context.send_message(
                     f"{platform_id}:GroupMessage:{gid}",
                     MessageChain(chain=[Plain(text)]),
                 )
             except Exception as e:  # 单群失败不影响其它群（QQ 主动消息有额度限制）
-                logger.warning(f"[zhutian] 时代推送发送失败 {gid}: {e}")
+                logger.warning(f"[zhutian] 群推送发送失败 {platform_id}/{gid} ({category}): {e}")
+
+    async def _push_to_group(self, platform_id: str, group_id: str,
+                            category: str, text: str) -> None:
+        if category not in (await self.db.qq_group_categories(platform_id, group_id) or []):
+            return
+        can_push = await self._qq_group_can_push(platform_id, group_id)
+        if can_push is False:
+            return
+        from astrbot.api.event import MessageChain
+        from astrbot.api.message_components import Plain
+        try:
+            self._remember_qq_group_scene(platform_id, group_id)
+            await self.context.send_message(
+                f"{platform_id}:GroupMessage:{group_id}",
+                MessageChain(chain=[Plain(text)]),
+            )
+        except Exception as exc:
+            logger.warning(f"[zhutian] 群推送发送失败 {platform_id}/{group_id} ({category}): {exc}")
+
+    def _remember_qq_group_scene(self, platform_id: str, group_id: str) -> None:
+        try:
+            platform = self.context.get_platform_inst(str(platform_id))
+            if platform and platform.meta().name == "qq_official":
+                remember = getattr(platform, "remember_session_scene", None)
+                if callable(remember):
+                    remember(str(group_id), "group")
+        except Exception as exc:
+            logger.debug(f"[zhutian] QQ 群会话路由缓存恢复失败 {platform_id}/{group_id}: {exc}")
+
+    async def _era_broadcast(self, text: str) -> None:
+        """时代变化仅推送到群管理员明确订阅的群。"""
+        await self._push_to_subscribers("era", text)
+
+    async def _qq_group_can_push(self, platform_id: str, group_id: str) -> bool | None:
+        """读取 QQ 官方群主动推送开关；其他平台或接口无权限时返回 None。"""
+        key = (str(platform_id), str(group_id))
+        now = time.monotonic()
+        cached = self._qq_group_push_cache.get(key)
+        if cached and now - cached[0] < (600 if cached[1] is not None else 120):
+            return cached[1]
+        try:
+            platform = self.context.get_platform_inst(key[0])
+            if not platform or platform.meta().name != "qq_official":
+                return None
+            api = platform.client.api
+            get_state = getattr(api, "get_group_bot_state", None)
+            if callable(get_state):
+                state = await get_state(key[1])
+            else:
+                from botpy.http import Route
+                route = Route(
+                    "GET", "/v2/groups/{group_openid}/bot_state", group_openid=key[1]
+                )
+                state = await api._http.request(route)
+            if isinstance(state, dict) and isinstance(state.get("data"), dict):
+                state = state["data"]
+            value = state.get("allow_proactive_msg") if isinstance(state, dict) else None
+            result = bool(value) if value is not None else None
+        except Exception as exc:
+            logger.info(f"[zhutian] QQ 群主动消息状态查询失败 {key[0]}/{key[1]}: {exc}")
+            result = None
+        self._qq_group_push_cache[key] = (now, result)
+        if len(self._qq_group_push_cache) > 1024:
+            self._qq_group_push_cache.pop(next(iter(self._qq_group_push_cache)))
+        return result
 
     async def _era_push_loop(self) -> None:
         """后台监听世界历法：每 60s 懒推进一次，跨时代/跨纪元或满千年即推送（W34）。
@@ -1492,6 +1576,13 @@ class ZhutianPlugin(Star):
             while True:
                 await asyncio.sleep(60)
                 try:
+                    if self._night_quiet(time.time()):
+                        now = time.time()
+                        raw = await self.db.get_era()
+                        st = era_mod.ensure(raw, now)
+                        st["last_tick"] = now
+                        await self.db.save_era(st)
+                        continue
                     span, step = self._era_tick_args()
                     raw = await self.db.get_era()
                     st, info = era_mod.tick(raw, time.time(),
@@ -1519,19 +1610,7 @@ class ZhutianPlugin(Star):
             pass
 
     async def _xg_broadcast(self, groups: list[str], text: str) -> None:
-        if not text:
-            return
-        from astrbot.api.event import MessageChain
-        from astrbot.api.message_components import Plain
-
-        for gid in groups:
-            try:
-                await self.context.send_message(
-                    f"大肥鱼:GroupMessage:{gid}",
-                    MessageChain(chain=[Plain(text)]),
-                )
-            except Exception as exc:
-                logger.warning(f"[zhutian] 星阁群推送失败 {gid}: {exc}")
+        await self._push_to_subscribers("auction", text)
 
     async def _xg_auction_loop(self) -> None:
         """每分钟结算到期场次，并按原版晚间时段开启官方拍品。"""
@@ -1604,11 +1683,7 @@ class ZhutianPlugin(Star):
             pass
 
     async def _daily_reminder_loop(self) -> None:
-        """每日 00:05（上海时区）向白名单群推送日常刷新提醒（对齐原版 AutoDailyTask 时点）。"""
-        from astrbot.api.event import MessageChain
-        from astrbot.api.message_components import Plain
-
-        platform_id = "大肥鱼"  # qq_official 平台实例 id
+        """每日 00:05（上海时区）向订阅群推送日常刷新提醒。"""
         try:
             while True:
                 now = time.time()
@@ -1620,19 +1695,206 @@ class ZhutianPlugin(Star):
                         "【诸天修仙 · 每日刷新】\n"
                         "#修仙签到 / #获取每日任务 已刷新，道友们今天也别忘了修行。"
                     )
-                    for gid in self.whitelist_groups:
-                        try:
-                            await self.context.send_message(
-                                f"{platform_id}:GroupMessage:{gid}",
-                                MessageChain(chain=[Plain(text)]),
-                            )
-                        except Exception as e:  # 单群失败不影响其它群
-                            logger.warning(f"[zhutian] 每日提醒发送失败 {gid}: {e}")
+                    await self._push_to_subscribers("daily", text)
                 await asyncio.sleep(20)
         except asyncio.CancelledError:
             pass
 
     # ---- 门禁 ----
+
+    @filter.event_message_type(filter.EventMessageType.ALL)
+    async def register_group_activity(self, event: AstrMessageEvent):
+        group_id = str(event.get_group_id() or "")
+        platform_id = str(event.get_platform_id() or "")
+        if not group_id or not platform_id:
+            return
+        key = (platform_id, group_id)
+        if key not in self._registered_groups:
+            await self.db.register_qq_group(*key)
+            self._registered_groups.add(key)
+
+    @staticmethod
+    def _event_admin(event: AstrMessageEvent) -> bool:
+        value = getattr(event, "is_admin", False)
+        return bool(value() if callable(value) else value)
+
+    @staticmethod
+    def _event_group_admin(event: AstrMessageEvent) -> bool:
+        value = getattr(event, "role", "")
+        role = str(getattr(value, "value", value) or "").lower()
+        raw_message = getattr(getattr(event, "message_obj", None), "raw_message", None)
+        raw_data = getattr(raw_message, "raw_data", {})
+        author = raw_data.get("author") if isinstance(raw_data, dict) else None
+        author = author or getattr(raw_message, "author", None)
+        if isinstance(author, dict):
+            role = str(author.get("member_role") or author.get("role") or role).lower()
+        elif author is not None:
+            role = str(getattr(author, "member_role", None) or getattr(author, "role", None) or role).lower()
+        return role in {"admin", "owner", "group_admin", "group_owner"}
+
+    @staticmethod
+    def _event_group_owner(event: AstrMessageEvent) -> bool:
+        value = getattr(event, "role", "")
+        role = str(getattr(value, "value", value) or "").lower()
+        raw_message = getattr(getattr(event, "message_obj", None), "raw_message", None)
+        raw_data = getattr(raw_message, "raw_data", {})
+        author = raw_data.get("author") if isinstance(raw_data, dict) else None
+        author = author or getattr(raw_message, "author", None)
+        if isinstance(author, dict):
+            role = str(author.get("member_role") or author.get("role") or role).lower()
+        elif author is not None:
+            role = str(getattr(author, "member_role", None) or getattr(author, "role", None) or role).lower()
+        return role in {"owner", "group_owner"}
+
+    def _group_operator(self, event: AstrMessageEvent) -> bool:
+        return bool(event.get_group_id()) and (
+            self._event_group_admin(event) or self._adm_ok(event)
+        )
+
+    def _group_owner_operator(self, event: AstrMessageEvent) -> bool:
+        return bool(event.get_group_id()) and (
+            self._event_group_owner(event) or self._adm_ok(event)
+        )
+
+    @filter.command(CMD_GROUP_PUSH_JOIN, "群主邀请本群订阅推送")
+    async def handle_group_push_join(self, event: AstrMessageEvent):
+        group_id = str(event.get_group_id() or "")
+        platform_id = str(event.get_platform_id() or "")
+        if not group_id or not platform_id:
+            yield event.plain_result("请在群聊中使用此命令。")
+            return
+        if not self._group_owner_operator(event):
+            yield event.plain_result("仅本群群主或机器人主人可以设置群推送。")
+            return
+        await self.db.set_qq_group(platform_id, group_id, list(QQ_PUSH_CATEGORIES.values()))
+        self._qq_group_push_cache.pop((platform_id, group_id), None)
+        can_push = await self._qq_group_can_push(platform_id, group_id)
+        permission_note = (
+            "QQ 当前未开放本群主动消息，已保存偏好但暂不投递；请群主在 QQ 侧开启后重新设置订阅。"
+            if can_push is False else
+            "已检测到本群允许主动消息。"
+            if can_push is True else
+            "无法查询本群主动消息开关（可能是 QQ 接口权限或适配器版本限制），将按实际发送结果处理。"
+        )
+        yield event.plain_result(
+            "本群已订阅时代、每日、拍卖、活动推送。频次：时代进度默认每 2 小时一次、跨时代时推送，每日 00:05，"
+            f"拍卖结算或开拍时，活动在裂缝开启/探索归来时。{permission_note}"
+            "如需调整请用「#群推送分类 时代 每日 拍卖 活动」；可随时「#退出群推送」。"
+        )
+
+    @filter.command(CMD_GROUP_PUSH_LEAVE, "停止本群主动推送")
+    async def handle_group_push_leave(self, event: AstrMessageEvent):
+        group_id = str(event.get_group_id() or "")
+        platform_id = str(event.get_platform_id() or "")
+        if not group_id or not platform_id:
+            yield event.plain_result("请在群聊中使用此命令。")
+            return
+        if not self._group_owner_operator(event):
+            yield event.plain_result("仅本群群主或机器人主人可以设置群推送。")
+            return
+        await self.db.set_qq_group(platform_id, group_id, [])
+        self._qq_group_push_cache.pop((platform_id, group_id), None)
+        yield event.plain_result("本群已退出全部主动推送；再次使用「#邀请群加入推送」可恢复。")
+
+    @filter.command(CMD_GROUP_PUSH_CATEGORIES, "设置本群推送类别")
+    async def handle_group_push_categories(self, event: AstrMessageEvent):
+        group_id = str(event.get_group_id() or "")
+        platform_id = str(event.get_platform_id() or "")
+        if not group_id or not platform_id:
+            yield event.plain_result("请在群聊中使用此命令。")
+            return
+        if not self._group_owner_operator(event):
+            yield event.plain_result("仅本群群主或机器人主人可以设置群推送。")
+            return
+        tail = self._adm_tail(event)
+        categories = tail.split(None, 1)[1] if len(tail.split(None, 1)) == 2 else ""
+        tokens = [s for s in re.split(r"[\s，,、]+", categories.strip()) if s]
+        if not tokens:
+            yield event.plain_result("用法：#群推送分类 时代 每日 拍卖 活动；全部退出请用「#退出群推送」。")
+            return
+        if tokens == ["全部"]:
+            tokens = list(QQ_PUSH_CATEGORIES)
+        unknown = [s for s in tokens if s not in QQ_PUSH_CATEGORIES]
+        if unknown:
+            yield event.plain_result("类别仅支持：时代、每日、拍卖、活动。用法：#群推送分类 时代 每日 拍卖 活动")
+            return
+        await self.db.set_qq_group(
+            platform_id, group_id, [QQ_PUSH_CATEGORIES[s] for s in tokens]
+        )
+        self._qq_group_push_cache.pop((platform_id, group_id), None)
+        can_push = await self._qq_group_can_push(platform_id, group_id)
+        selected = "、".join(tokens) if tokens else "无"
+        status = "本群允许主动消息。" if can_push is True else (
+            "本群未开放主动消息，推送会暂停。" if can_push is False else
+            "无法读取本群主动消息状态，实际发送时再确认。"
+        )
+        yield event.plain_result(f"本群推送类别已设置为：{selected}。{status}频次：时代进度默认每 2 小时、跨时代时推送；每日 00:05；拍卖按结算或开拍；活动按玩法事件触发。")
+
+    @filter.command(CMD_GROUP_GRANT, "群主创建玩家私聊领取的发放单")
+    async def handle_group_grant(self, event: AstrMessageEvent):
+        platform_id = str(event.get_platform_id() or "")
+        group_id = str(event.get_group_id() or "")
+        if not group_id:
+            yield event.plain_result("请在群聊中创建发放单。")
+            return
+        if not self._group_owner_operator(event):
+            yield event.plain_result("仅本群群主或机器人主人可以创建发放单。")
+            return
+        target_uid = self._at_target(event)
+        args = self._adm_tail(event).split()
+        item = args[-2].strip() if len(args) >= 2 else ""
+        try:
+            qty = int(args[-1]) if len(args) >= 2 else 0
+        except ValueError:
+            qty = 0
+        if not target_uid or not item or qty < 1 or qty > 1_000_000_000_000:
+            yield event.plain_result("用法：#创建发放单 @玩家 道具名 数量（灵石也可发放）")
+            return
+        if item != "灵石" and item not in self.item_index:
+            yield event.plain_result("未找到该道具，请检查道具名称。")
+            return
+        if not await self.db.get_player(str(target_uid)):
+            yield event.plain_result("目标玩家尚未踏入仙途。")
+            return
+        grant_id = secrets.token_hex(8)
+        await self.db.create_item_grant(
+            grant_id, str(target_uid), item, qty, str(event.get_sender_id()), platform_id, group_id
+        )
+        yield event.plain_result(
+            f"已创建发放单 {grant_id}：{item} ×{qty}。请玩家私聊机器人发送「#领取发放 {grant_id}」；"
+            "如私聊与群内身份不同，还需由被 @ 的账号在本群发送「#确认发放 单号」。"
+            "本项目公益运营，请勿为领取道具向任何人付费。"
+        )
+
+    @filter.command(CMD_CLAIM_GRANT, "私聊领取指定发放单")
+    async def handle_claim_grant(self, event: AstrMessageEvent, grant_id: str = ""):
+        if event.get_group_id():
+            yield event.plain_result("为保护账号身份，请私聊机器人领取发放单。")
+            return
+        grant_id = str(grant_id or "").strip()
+        if not re.fullmatch(r"[0-9a-f]{16}", grant_id):
+            yield event.plain_result("用法：#领取发放 发放单号")
+            return
+        ok, result = await self.db.claim_item_grant(grant_id, str(event.get_sender_id()))
+        if not ok:
+            yield event.plain_result(result)
+            return
+        yield event.plain_result(
+            f"领取成功：{result}。本项目公益运营，请勿为此向任何人付费。"
+        )
+
+    @filter.command(CMD_GROUP_CONFIRM_GRANT, "目标玩家确认私聊领取申请")
+    async def handle_confirm_grant(self, event: AstrMessageEvent, grant_id: str = ""):
+        group_id = str(event.get_group_id() or "")
+        platform_id = str(event.get_platform_id() or "")
+        grant_id = str(grant_id or "").strip()
+        if not group_id or not re.fullmatch(r"[0-9a-f]{16}", grant_id):
+            yield event.plain_result("请在发放单所在群使用「#确认发放 单号」。")
+            return
+        ok, msg = await self.db.confirm_item_grant(
+            grant_id, str(event.get_sender_id()), platform_id, group_id
+        )
+        yield event.plain_result(msg)
 
     def _allowed(self, event: AstrMessageEvent) -> bool:
         if not self.whitelist_groups:
@@ -1731,17 +1993,25 @@ class ZhutianPlugin(Star):
         if not self._allowed(event):
             return
         uid = event.get_sender_id()
-        if await self.db.get_player(uid):
+        nickname = str(event.get_sender_name() or "").strip()
+        existing = await self.db.get_player(uid)
+        if existing:
+            doc = PlayerDoc(**existing)
+            if nickname and str(doc.name or "").strip() in ("", uid):
+                doc.name = nickname
+                await self.db.save_player(doc.model_dump())
+                yield event.plain_result(f"已将道友昵称同步为「{nickname}」，无需重复踏入仙途。")
+                return
             yield event.plain_result("道友已踏入仙途，无需重复此举。")
             return
-        doc = create_player(uid, event.get_sender_name() or "", self.content.table("Level/练气境界"))
+        doc = create_player(uid, nickname, self.content.table("Level/练气境界"))
         import random as _random
         mg = mingge.ensure(doc, self.content, _random.Random(f"{uid}:mingge"))
         await self.db.save_player(doc.model_dump())
         entry = realm_entry(doc, self.content.table("Level/练气境界"))
         fate = f"\n命格判定：【{mg.get('name')}】——{mg.get('desc', '')}" if mg else ""
         yield event.plain_result(
-            f"恭喜道友 {doc.name or uid} 踏入仙途！\n"
+            f"恭喜道友 {doc.name or '道友'} 踏入仙途！\n"
             f"起始境界：【{entry.get('level', '凡人')}】{fate}\n"
             f"发送「{CMD_STATUS}」查看状态。"
         )
@@ -1941,6 +2211,7 @@ class ZhutianPlugin(Star):
             {"title": "基础修炼", "lines": [
                 (CMD_START, "踏入仙途，创建角色"),
                 (CMD_STATUS, "查看状态（含灵根）"),
+                (CMD_UPDATE_NOTES, "查看最近 10 条玩法调整与修复"),
                 (CMD_SIGN, "每日签到领灵石"),
                 (f"{CMD_CLOSED} 120分钟", "闭关修炼（时长可省略）"),
                 (CMD_OPEN, "出关结算（×灵根效率）"),
@@ -2094,7 +2365,7 @@ class ZhutianPlugin(Star):
                 (CMD_RIFT_ENTER, "进入（需先 #穿梭 到裂界所在位面）"),
                 (f"{CMD_RIFT_STABLE} / {CMD_RIFT_LOOT} / {CMD_RIFT_FORCE}", "三路线共 3 层（稳阵/寻宝/强攻）"),
                 (CMD_RIFT_OUT, "撤离并结算界源+修为+血气"),
-                (f"{CMD_RIFT_EXCHANGE} 名字", "界源兑换（星图/宝盒/无尽秘钥等）"),
+                (f"{CMD_RIFT_EXCHANGE} 名字", "界源兑换（含 80 界源兑换无上神物）"),
             ]},
             {"title": "时代与天地法则", "lines": [
                 (f"{CMD_ERA_SHOW} / #时代", "五时代轮转：突破成功率/消耗系数/秘境出金率/纪元进度"),
@@ -2348,6 +2619,13 @@ class ZhutianPlugin(Star):
                 (CMD_RANK, "修为与灵石排行"),
                 (f"{CMD_DUEL} @道友 / {CMD_DUEL_RANK}", "比试（胜+3 平+1）与积分榜"),
             ]},
+            {"title": "群运营", "lines": [
+                (CMD_GROUP_PUSH_JOIN, "群主订阅本群推送"),
+                 (f"{CMD_GROUP_PUSH_CATEGORIES} 时代 每日 拍卖 活动", "设置本群推送类别；每日提醒 00:05，其它按事件触发"),
+                (CMD_GROUP_PUSH_LEAVE, "停止本群主动推送"),
+                (f"{CMD_GROUP_GRANT} @玩家 道具名 数量", "创建待领取发放单"),
+                (f"{CMD_CLAIM_GRANT} 单号 / {CMD_GROUP_CONFIRM_GRANT} 单号", "私聊申请与领取；必要时目标账号在原群确认"),
+            ]},
             {"title": "仙宠功法", "lines": [
                 (f"{CMD_PET_GET} 名字 / {CMD_PET_MY}", "领取 / 查看仙宠"),
                 (f"{CMD_PET_FEED} 灵石 / {CMD_PET_FREE}", "喂养 / 放生"),
@@ -2424,6 +2702,7 @@ class ZhutianPlugin(Star):
                 (CMD_DZ_RESHAPE, "5 枚五行本源 + 50 万灵石，道伤 -1"),
                 (CMD_DZ_REPAIR, "八门疗伤功法取最强效率，一次性归零"),
                 (CMD_DZ_PROVE, "准帝九重天证道成帝：三路线 + 9 波雷劫 + 7 古帝"),
+                (CMD_DZ_USE_SUPREME, "消耗无上神物，修复一处帝劫道果瑕疵并解除 24 小时冷却"),
                 (CMD_DZ_REPROVE, "路尽级仙帝跌落重证：清修为血气、复归峰值境界"),
                 (CMD_DZ_CHARGE, "仙古冲关：消耗修为血气冲 1 境"),
                 (CMD_DZ_CHARGE_EXTREME, "极境冲关：三种太古遗种真血 + 血气 100 万，冲 2 境"),
@@ -2759,6 +3038,14 @@ class ZhutianPlugin(Star):
                 lines.append(f"{c}：{d}")
         async for _r in self._smart(event, "\n".join(lines)):
             yield _r
+
+    @filter.command(CMD_UPDATE_NOTES, "查看最近的修仙更新内容")
+    async def handle_update_notes(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        yield event.plain_result(update_notes_mod.format_updates(
+            update_notes_mod.read_commits(PLUGIN_DIR)))
+
     # ---- 数值辅助 ----
 
     def _val(self, key: str, default):
@@ -6308,30 +6595,17 @@ class ZhutianPlugin(Star):
         return PlayerDoc(**raw), None
 
     @filter.command(CMD_GIVE_STONES, "补发灵石")
-    async def handle_give_stones(self, event: AstrMessageEvent, amount: int = 0):
-        if not self._allowed(event):
-            return
-        if not self._adm_ok(event):
-            yield event.plain_result("此权柄唯管理员可执。")
-            return
-        target, terr = await self._target_doc(event)
-        if terr:
-            yield event.plain_result(terr)
-            return
-        amount = int(amount or 0)
-        if amount <= 0:
-            yield event.plain_result("格式：#补发灵石 @玩家 数量")
-            return
-        dt = target.model_copy(deep=True)
-        dt.stones += amount
-        await self.db.save_player(dt.model_dump())
-        yield event.plain_result(f"已为 {target.name} 补发灵石 ×{amount}。")
+    async def handle_give_stones(self, event: AstrMessageEvent):
+        yield event.plain_result(
+            f"直接补发已停用。请在群内由管理员使用「{CMD_GROUP_GRANT} @玩家 灵石 数量」，"
+            f"玩家再私聊发送「{CMD_CLAIM_GRANT} 发放单号」领取。公益项目，请勿付费。"
+        )
 
     @filter.command(CMD_VIEW_PLAYER, "查看玩家档案")
     async def handle_view_player(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
-        if not event.is_admin:
+        if not self._adm_ok(event):
             yield event.plain_result("此权柄唯管理员可执。")
             return
         target, terr = await self._target_doc(event)
@@ -6351,7 +6625,7 @@ class ZhutianPlugin(Star):
     async def handle_reset_task(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
-        if not event.is_admin:
+        if not self._adm_ok(event):
             yield event.plain_result("此权柄唯管理员可执。")
             return
         target, terr = await self._target_doc(event)
@@ -6373,9 +6647,7 @@ class ZhutianPlugin(Star):
 
     @filter.command(CMD_BAN, "封禁修仙")
     async def handle_ban(self, event: AstrMessageEvent):
-        if not self._allowed(event):
-            return
-        if not event.is_admin:
+        if not self._group_operator(event) and not self._adm_ok(event):
             yield event.plain_result("此权柄唯管理员可执。")
             return
         target, terr = await self._target_doc(event)
@@ -6389,9 +6661,7 @@ class ZhutianPlugin(Star):
 
     @filter.command(CMD_UNBAN, "解封修仙")
     async def handle_unban(self, event: AstrMessageEvent):
-        if not self._allowed(event):
-            return
-        if not event.is_admin:
+        if not self._group_operator(event) and not self._adm_ok(event):
             yield event.plain_result("此权柄唯管理员可执。")
             return
         target, terr = await self._target_doc(event)
@@ -6408,7 +6678,7 @@ class ZhutianPlugin(Star):
     def _adm_ok(self, event: AstrMessageEvent) -> bool:
         """机器人管理员恒有权柄；修仙管理员名单由 `#设置修仙管理员` 追加。"""
         return adm_mod.is_master(
-            str(event.get_sender_id()), bool(event.is_admin), self._adm_state)
+            str(event.get_sender_id()), self._event_admin(event), self._adm_state)
 
     async def _adm_save(self) -> None:
         """落库世界状态，并同步内存缓存（难度开关是热路径，不能每条指令去读库）。"""
@@ -13444,11 +13714,26 @@ class ZhutianPlugin(Star):
     async def _era_state(self) -> dict:
         """读世界历法并原地懒推进；只有真的跨年才落库（读指令不白写盘）。"""
         raw = await self.db.get_era()
+        now = time.time()
+        if self._night_quiet(now):
+            st = era_mod.ensure(raw, now)
+            st["last_tick"] = now
+            await self.db.save_era(st)
+            return st
         span, step = self._era_tick_args()
-        st, info = era_mod.tick(raw, time.time(), tick_seconds=span, years_per_tick=step)
+        st, info = era_mod.tick(raw, now, tick_seconds=span, years_per_tick=step)
         if not raw or info["ticks"]:
             await self.db.save_era(st)
         return st
+
+    def _night_quiet(self, now: float) -> bool:
+        return night_quiet_mod.is_quiet(
+            now,
+            self._val("NIGHT_QUIET_ENABLED", False),
+            self._val("NIGHT_QUIET_START_HOUR", 0),
+            self._val("NIGHT_QUIET_END_HOUR", 8),
+            self._val("NIGHT_QUIET_UTC_OFFSET", 8),
+        )
 
     async def _era_sealed_count(self, st: dict) -> int:
         key = era_mod.era_key(st)
@@ -16332,9 +16617,6 @@ class ZhutianPlugin(Star):
         if not event.is_admin:
             yield event.plain_result("此权柄唯管理员可执。")
             return
-        from astrbot.api.event import MessageChain
-        from astrbot.api.message_components import Plain
-
         now = time.time()
         rng = random.Random()
         existing = lingjie.ensure(await self.db.get_lingjie()).get("rift")
@@ -16355,14 +16637,7 @@ class ZhutianPlugin(Star):
             f"现世坐标为 {rift['x']},{rift['y']}，六小时后自行坍塌。\n"
             f"洞照境以上道友可 #前往 {rift['x']},{rift['y']} 后 #探索灵界裂缝。"
         )
-        for gid in self.whitelist_groups:
-            try:
-                await self.context.send_message(
-                    f"大肥鱼:GroupMessage:{gid}",
-                    MessageChain(chain=[Plain(text)]),
-                )
-            except Exception as e:
-                logger.warning(f"[zhutian] 灵界裂缝广播失败 {gid}: {e}")
+        await self._push_to_subscribers("game", text)
         yield event.plain_result(text)
 
     @filter.command(CMD_LINGJIE_GOTO, "前往坐标")
@@ -16429,6 +16704,7 @@ class ZhutianPlugin(Star):
             state.setdefault("tasks", {})[doc.uid] = {
                 "uid": doc.uid,
                 "gid": event.get_group_id() or "",
+                "platform_id": event.get_platform_id() or "",
                 "start": now,
                 "end": now + dur,
                 "rift_id": rift.get("id"),
@@ -16489,6 +16765,28 @@ class ZhutianPlugin(Star):
     async def _lingjie_tick(self) -> None:
         now = time.time()
         state = lingjie.ensure(await self.db.get_lingjie())
+        if self._night_quiet(now):
+            if not state.get("_quiet_since"):
+                state["_quiet_since"] = night_quiet_mod.window_start(
+                    now,
+                    int(self._val("NIGHT_QUIET_START_HOUR", 0)),
+                    int(self._val("NIGHT_QUIET_END_HOUR", 8)),
+                    int(self._val("NIGHT_QUIET_UTC_OFFSET", 8)),
+                )
+                await self.db.save_lingjie(state)
+            return
+        quiet_since = float(state.pop("_quiet_since", 0) or 0)
+        if quiet_since:
+            if state.get("rift"):
+                rift = state["rift"]
+                start = max(quiet_since, float(rift.get("created_at", quiet_since)))
+                end = float(rift.get("expires_at", now))
+                rift["expires_at"] = end + max(0.0, min(now, end) - start)
+            for task in (state.get("tasks") or {}).values():
+                start = max(quiet_since, float(task.get("start", quiet_since)))
+                end = float(task.get("end", now))
+                task["end"] = end + max(0.0, min(now, end) - start)
+            await self.db.save_lingjie(state)
         rift = state.get("rift")
         changed = False
         for uid, task in list((state.get("tasks") or {}).items()):
@@ -16580,14 +16878,9 @@ class ZhutianPlugin(Star):
         lines += mult_msgs
         text = "【灵界裂缝·归来】\n" + "\n".join(lines)
         gid = str(task.get("gid") or "")
-        if gid:
-            try:
-                await self.context.send_message(
-                    f"大肥鱼:GroupMessage:{gid}",
-                    MessageChain(chain=[Plain(text)]),
-                )
-            except Exception as e:
-                logger.warning(f"[zhutian] 灵界裂缝战报发送失败 {gid}: {e}")
+        platform_id = str(task.get("platform_id") or "")
+        if gid and platform_id:
+            await self._push_to_group(platform_id, gid, "game", text)
 
     # ---- 镇妖塔榜（P2-2）：按 ext["tower_floor"] 排序，附炼神魄段数 ----
 
@@ -20154,6 +20447,32 @@ class ZhutianPlugin(Star):
         async for r in self._smart(event, msg, "证道成帝"):
             yield r
 
+    @filter.command(CMD_DZ_USE_SUPREME, "使用无上神物")
+    async def handle_dz_use_supreme(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        if int(inv.get("无上神物", 0) or 0) < 1:
+            yield event.plain_result("纳戒中没有【无上神物】。可用 80 界源在 #界源兑换，或探索仙古核心区域寻得。")
+            return
+        repaired = doc.model_copy(deep=True)
+        ok, msg = dz_mod.use_supreme_divine_item(repaired, time.time())
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        async with self.db.transaction():
+            consumed = await self.db.remove_item(doc.uid, "无上神物", 1)
+            if consumed:
+                await self.db.save_player(repaired.model_dump())
+        if not consumed:
+            yield event.plain_result("纳戒中的无上神物数量已变化，请重试。")
+            return
+        yield event.plain_result(msg)
+
     @filter.command(CMD_DZ_REPROVE, "证道")
     async def handle_dz_reprove(self, event: AstrMessageEvent):
         if not self._allowed(event):
@@ -20976,7 +21295,9 @@ class ZhutianPlugin(Star):
         if err:
             yield event.plain_result(err)
             return
-        text, _ = oe_mod.villains_text(doc, time.strftime("%Y%m%d"), int(time.time()) // 3600 % 24)
+        now = time.time()
+        local = time.gmtime(now + 8 * 3600)
+        text, _ = oe_mod.villains_text(doc, time.strftime("%Y%m%d", local), local.tm_hour)
         yield event.plain_result(text)
 
     @filter.command(CMD_OCC_SLAY, "消灭恶人 名字（侠客，侠客令×1）")
@@ -20988,8 +21309,10 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         inv = await self.db.get_inventory(doc.uid)
-        result = oe_mod.slay(doc, inv, arg, time.strftime("%Y%m%d"),
-                             int(time.time()) // 3600 % 24, time.time(),
+        now = time.time()
+        local = time.gmtime(now + 8 * 3600)
+        result = oe_mod.slay(doc, inv, arg, time.strftime("%Y%m%d", local),
+                             local.tm_hour, now,
                              random.Random(f"{doc.uid}:slay:{int(time.time())}"))
         async with self.db.transaction():
             await self.db.save_player(doc.model_dump())
@@ -21006,7 +21329,9 @@ class ZhutianPlugin(Star):
         if err:
             yield event.plain_result(err)
             return
-        text, _ = oe_mod.villages_text(doc, time.strftime("%Y%m%d"), int(time.time()) // 3600 % 24)
+        now = time.time()
+        local = time.gmtime(now + 8 * 3600)
+        text, _ = oe_mod.villages_text(doc, time.strftime("%Y%m%d", local), local.tm_hour)
         yield event.plain_result(text)
 
     @filter.command(CMD_OCC_RAID, "劫掠村庄 名字（唤魔者，唤魔令×1）")
@@ -21018,8 +21343,10 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         inv = await self.db.get_inventory(doc.uid)
-        result = oe_mod.raid(doc, inv, arg, time.strftime("%Y%m%d"),
-                             int(time.time()) // 3600 % 24, time.time(),
+        now = time.time()
+        local = time.gmtime(now + 8 * 3600)
+        result = oe_mod.raid(doc, inv, arg, time.strftime("%Y%m%d", local),
+                             local.tm_hour, now,
                              random.Random(f"{doc.uid}:raid:{int(time.time())}"))
         async with self.db.transaction():
             await self.db.save_player(doc.model_dump())
@@ -21236,7 +21563,8 @@ class ZhutianPlugin(Star):
         if err:
             yield event.plain_result(err)
             return
-        yield event.plain_result(rs_mod.task_text(doc, random.Random(f"{doc.uid}:rstask:{time.strftime('%Y%m%d')}")))
+        day = time.strftime("%Y%m%d", time.gmtime(time.time() + 8 * 3600))
+        yield event.plain_result(rs_mod.task_text(doc, random.Random(f"{doc.uid}:rstask:{day}")))
 
     @filter.command(CMD_RS_SQUAD, "轮回小队（NPC 队友）")
     async def handle_rs_squad(self, event: AstrMessageEvent):
@@ -21975,8 +22303,9 @@ class ZhutianPlugin(Star):
         if err:
             yield event.plain_result(err)
             return
-        text, _pool = bt_mod.bounty_text(doc, time.strftime("%Y%m%d"),
-                                         int(time.time()) // 3600 % 24)
+        now = time.time()
+        local = time.gmtime(now + 8 * 3600)
+        text, _pool = bt_mod.bounty_text(doc, time.strftime("%Y%m%d", local), local.tm_hour)
         yield event.plain_result(text)
 
     @filter.command(CMD_BG_KILL, "刺杀目标 名字（侠客+侠客令×1）")
@@ -21988,9 +22317,11 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         inv = await self.db.get_inventory(doc.uid)
-        ok, msg, delta = bt_mod.assassinate(doc, inv, name, time.strftime("%Y%m%d"),
-                                            int(time.time()) // 3600 % 24, time.time(),
-                                            random.Random(f"{doc.uid}:assn:{int(time.time())}"))
+        now = time.time()
+        local = time.gmtime(now + 8 * 3600)
+        ok, msg, delta = bt_mod.assassinate(doc, inv, name, time.strftime("%Y%m%d", local),
+                                            local.tm_hour, now,
+                                            random.Random(f"{doc.uid}:assn:{int(now)}"))
         async with self.db.transaction():
             await self.db.save_player(doc.model_dump())
             for g, q in (delta or {}).items():
@@ -22000,8 +22331,8 @@ class ZhutianPlugin(Star):
 
     @filter.command(CMD_BG_RUMOR, "江湖传闻（每日随机 3 条）")
     async def handle_bg_rumor(self, event: AstrMessageEvent):
-        yield event.plain_result(bt_mod.rumors_text(
-            time.strftime("%Y%m%d"), time.strftime("%Y%m%d")))
+        day = time.strftime("%Y%m%d", time.gmtime(time.time() + 8 * 3600))
+        yield event.plain_result(bt_mod.rumors_text(day, day))
 
     @filter.command(CMD_STYLE_TOGGLE, "切换练气排版（1/2/3）")
     async def handle_style_toggle(self, event: AstrMessageEvent):

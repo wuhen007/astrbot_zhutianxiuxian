@@ -20,6 +20,7 @@ shortcut：原版鱼王按玩家血量缩放、宝箱五组不放回抽奖、仙
 """
 
 from __future__ import annotations
+from .clock import day_key
 
 import json
 import random
@@ -129,7 +130,7 @@ def set_state(doc: Any, st: Mapping[str, Any]) -> None:
 
 
 def _day_key(now: float) -> str:
-    return time.strftime("%Y-%m-%d", time.localtime(now + 8 * 3600))
+    return day_key(now)
 
 
 # ---------------------------------------------------------------- 签到

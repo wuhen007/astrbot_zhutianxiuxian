@@ -25,6 +25,7 @@
 """
 
 from __future__ import annotations
+from .clock import day_key
 
 import random
 import time
@@ -92,7 +93,7 @@ def state_of(doc: Any) -> dict[str, Any]:
 
 
 def _day_key(now: float) -> str:
-    return time.strftime("%Y%m%d", time.localtime(now))
+    return day_key(now).replace("-", "")
 
 
 def _node_exp(st: Mapping[str, Any], name: str) -> int:

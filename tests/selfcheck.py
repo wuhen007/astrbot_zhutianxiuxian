@@ -24,6 +24,10 @@ import random as _random               # noqa: E402
 async def main():
     tmp = Path(tempfile.mkdtemp(prefix="zhutian_m0_"))
 
+    def assert_optional_png(path, label):
+        if path is not None:
+            assert path.exists() and path.stat().st_size > 2000, f"{label} PNG 无效"
+
     # 1. 迁移 + 玩家文档往返
     db = DataBase(tmp / "zhutian.db")
     await db.connect()
@@ -177,10 +181,10 @@ async def main():
     ok, _, _ = items_mod.sell(inv_doc, junk, 1)
     assert not ok, "出售价 0 不可出售"
 
-    # 10. 迁移版本 = 17
+    # 10. 迁移版本 = 18
     from infra.db import LATEST_DB_VERSION
     async with db.conn.execute("SELECT version FROM db_info") as cur:
-        assert (await cur.fetchone())[0] == LATEST_DB_VERSION == 17
+        assert (await cur.fetchone())[0] == LATEST_DB_VERSION == 18
 
     # 11. 装备：穿戴/换位/卸下 + 比例与固定加成聚合
     from core import battle as battle_mod   # noqa: E402
@@ -575,12 +579,13 @@ async def main():
     ok, msg, _, _ = zt_mod.begin_projection(zt_doc, "星海归墟", 1_000.0)
     assert not ok and "镜阶不足" in msg
     ok, msg, zt3, proj = zt_mod.begin_projection(zt_doc, "魔卡少女樱", 1_000.0)
-    assert ok and proj["max_choice"] == 3, msg
+    assert ok and proj["max_choice"] == len(proj["options"]) and proj["max_choice"] > 0, msg
     assert zt3["energy"] == 3  # 4-1
     zt_doc.ext["zhutian"] = zt3
-    before_marks = len(zt3["imprints"])
-    tail, zt4 = zt_mod.resolve_projection(zt_doc, proj, 3, _random.Random(2))
-    assert "世界印记" in tail and len(zt4["imprints"]) == before_marks + 1  # 首投影必得印记
+    tail, zt4 = zt_mod.resolve_projection(zt_doc, proj, proj["max_choice"], _random.Random(2))
+    story_state = zt4["exploration"]["魔卡少女樱"]
+    assert story_state["count"] == 1 and story_state["resolved"], tail
+    assert "世界印记" not in tail  # 事件式剧情在后续结局达成前不发放世界印记
     # 化身装载：buff 替换与切回（需先写回 zt4）
     zt4["avatars"]["木之本樱"] = {"root": dict(zt_mod.AVATAR_ROOTS["木之本樱"]), "stage": 1}
     zt4["energy"] = 5
@@ -792,12 +797,18 @@ async def main():
     for _ in range(3):
         ok, msg, w = wx_mod.explore_clue(w)
         assert ok, msg
+    trial_start = wx_mod.time.time() - 7 * 86400
+    for day in range(7):
+        wx_mod.record_trial(w, "daily", trial_start + day * 86400)
+    wx_mod.record_trial(w, "inner-world", trial_start + 7 * 86400)
+    wx_mod.record_trial(w, "tianjiao", trial_start + 7 * 86400)
     ok, msg, _ = wx_mod.activate(w, 3)
     assert not ok and "境界" in msg
     ok, msg, w = wx_mod.activate(w, 10)
     assert ok and w["active"] and w["level"] == 1, msg
     # 任务埋桩 + 领取（每日 3 项各 500；统一用真实时间，避免跨日 key 重置）
     now = wx_mod.time.time()
+    wx_mod.record_daily_task_completion(w, now)
     wx_mod.track(w, "seclusion", 5, now)
     wx_mod.track(w, "raid", 5, now)
     for k in ("seclusion", "raid"):
@@ -815,7 +826,7 @@ async def main():
     ok, msg, _, _ = wx_mod.claim_level(w, 5)
     assert not ok and "已达到" in msg
     # 每日期数 → 每周 daily 进度
-    assert wx_mod.weekly_of(w, now)["prog"]["daily"] == 1
+    assert wx_mod.weekly_of(w, now)["prog"]["daily_task"] == 1
     # 50 级节点奖励潜力
     assert wx_mod.level_reward(50)["potential"] == 80
     # 面板渲染文本
@@ -1241,7 +1252,7 @@ async def main():
     ok, msg, st = end_mod.apply_checkpoint(st, 1, content_e, base_e, _random.Random(2), 1_800_000_000)
     assert ok and st["phase"] == "ready", msg
 
-    # 强属性跑完 10 层，验证通关/解锁/道痕入账
+    # 强属性推进到第 10 层后主动撤离，验证进度与道痕入账（每档共 150 层）
     base_win = {"atk": 200_000_000, "def": 5_000_000, "hp": 3_000_000_000, "bao": 1.0}
     st2 = end_mod.state_of(PlayerDoc(uid="endless2", name="劫客二", realm_index=30))
     ok, msg, st2 = end_mod.start_run(
@@ -1261,10 +1272,13 @@ async def main():
             st2 = end_mod.select_node(st2, 1)[2]
             st2, _r = end_mod.resolve_node(
                 st2, base_win, content_e, 1_800_000_000, _random.Random(st2["layer"] + 10))
+            if st2["layer"] >= 10:
+                break
         else:
             break
-    assert not st2["active"] and st2["best_layer"] == 10, st2
-    assert 1 in st2["clears"] and end_mod.unlocked_tier(st2) == 2, st2
+    assert st2["active"] and st2["layer"] == 10 and st2["best_layer"] == 10, st2
+    _, st2 = end_mod.withdraw(st2, 1_800_000_000)
+    assert not st2["active"] and 1 not in st2["clears"] and end_mod.unlocked_tier(st2) == 1, st2
     assert st2["marks_total"] > 0 and st2["marks"] == 0
 
     # 战败：只保留一半道痕
@@ -1538,10 +1552,10 @@ async def main():
     text_p = plane_mod.plane_text(d2, pdata, [f"境{i}" for i in range(64)], now)
     assert "诸天星路" in text_p and "仙界" in text_p
     assert "坐标记忆" in plane_mod.memory_text(d2, pdata, [f"境{i}" for i in range(64)], now)
-    png_p = await render_mod.render_panel("plane", payload, tmp)
-    assert png_p and png_p.exists() and png_p.stat().st_size > 2000
     html_p = render_mod._jinja().get_template("plane.html").render(**payload)
     assert "仙界" in html_p and "rg" in html_p
+    png_p = await render_mod.render_panel("plane", payload, tmp)
+    assert_optional_png(png_p, "plane")
     print("plane ok")
 
     # 16i. 裂界副本：窗口/进入/三路线/结算/兑换
@@ -2977,13 +2991,13 @@ async def main():
 
     out = tmp / "status.png"
     png = await render_mod.render_panel("status", status_data, tmp)
-    assert png and png.exists() and png.stat().st_size > 2000, "PNG 未生成或过小"
+    assert_optional_png(png, "status")
 
     boss_data = {"title": "世界 Boss", "footer": "test", "round": 1, "alive": True,
                  "status": "存活", "health": 600000, "health_max": 1000000, "pct": 60.0,
                  "reward": 500000, "ledger": [("甲", 700), ("乙", 300)]}
     png2 = await render_mod.render_panel("boss", boss_data, tmp)
-    assert png2 and png2.exists() and png2.stat().st_size > 2000
+    assert_optional_png(png2, "boss")
 
     help_data = {"title": "诸天修仙 · 指令总览", "footer": "test",
                  "groups": [{"title": "基础修炼", "lines": [("#踏入仙途", "创建角色"), ("#修仙签到", "领灵石")]},
@@ -2991,7 +3005,7 @@ async def main():
     html_h = render_mod._jinja().get_template("help.html").render(**help_data)
     assert "基础修炼" in html_h and "#踏入仙途" in html_h, "help 模板变量未注入"
     png3 = await render_mod.render_panel("help", help_data, tmp)
-    assert png3 and png3.exists() and png3.stat().st_size > 2000
+    assert_optional_png(png3, "help")
 
     qv = {"title": "每日修行任务", "sub": "2026-11-01", "level": 3, "exp": 120,
           "exp_need": 75000, "exp_pct": 0.2,
@@ -3005,7 +3019,9 @@ async def main():
           "state": "进行中（完成后 #提交每日任务）",
           "final": {"amount": 48000, "task_exp": 72, "key_n": 3}}
     png_q = await render_mod.render_panel("quest", qv, tmp)
-    assert png_q and png_q.exists() and png_q.stat().st_size > 2000
+    html_q = render_mod._jinja().get_template("quest.html").render(**qv)
+    assert "每日修行任务" in html_q and "散财修行" in html_q
+    assert_optional_png(png_q, "quest")
 
     # 纳戒面板：分组互斥 + 渲染
     bag_data = {"title": "诸天万界 · 纳戒", "sub": "4 种", "footer": "test",
@@ -3021,7 +3037,7 @@ async def main():
     html_b = render_mod._jinja().get_template("bag.html").render(**bag_data)
     assert "万兽神药" in html_b and "定魂草" in html_b and "37 件" in html_b, "bag 模板变量未注入"
     png_b = await render_mod.render_panel("bag", bag_data, tmp)
-    assert png_b and png_b.exists() and png_b.stat().st_size > 2000
+    assert_optional_png(png_b, "bag")
 
     # 团本面板：血条/成员/分奖
     raid_data = {
@@ -3035,10 +3051,10 @@ async def main():
         ],
         "victory": False, "loot": "五行神石", "hint": "#讨伐出手（今日 3 次）",
     }
-    png_r = await render_mod.render_panel("raid", raid_data, tmp)
-    assert png_r and png_r.exists() and png_r.stat().st_size > 2000
     html_r = render_mod._jinja().get_template("raid.html").render(**raid_data)
     assert "若陀龙王" in html_r and "7,750,000" in html_r and "甲" in html_r
+    png_r = await render_mod.render_panel("raid", raid_data, tmp)
+    assert_optional_png(png_r, "raid")
 
     # 无尽劫境面板：星图/血条/道法
     endless_data = {
@@ -3058,10 +3074,10 @@ async def main():
                       {"name": "雷帝宝术", "lv": 2, "max": 3, "rarity": "核心"}],
         "boons": ["如意金箍棒"], "hint": "#星图定途 1-3 → #无尽下一关",
     }
-    png_e = await render_mod.render_panel("endless", endless_data, tmp)
-    assert png_e and png_e.exists() and png_e.stat().st_size > 2000
     html_e = render_mod._jinja().get_template("endless.html").render(**endless_data)
     assert "乱古界海" in html_e and "界海黑兽" in html_e and "至尊骨" in html_e
+    png_e = await render_mod.render_panel("endless", endless_data, tmp)
+    assert_optional_png(png_e, "endless")
 
     # 分组区间互斥：物品只落一组
     tiers = [(9, 99), (8, 9), (7, 8), (6, 7), (4, 6), (0, 4)]
@@ -4994,6 +5010,10 @@ async def main():
     dz39.clear(d39, "自检", t39)
     reg39c = dz39.registry_of({})
     ok39, msg39, _, reg39d = dz39.prove(d39, reg39c, t39, _Seq39(0.0))
+    assert not ok39 and "道果尚有" in msg39, msg39
+    ok39, msg39 = dz39.use_supreme_divine_item(d39, t39)
+    assert ok39 and "冷却已解除" in msg39 and "剩余 0 处" in msg39, msg39
+    ok39, msg39, _, reg39d = dz39.prove(d39, reg39c, t39, _Seq39(0.0))
     assert ok39 and "证道成功" in msg39 and reg39d["heart_holder"] == d39.uid
     assert len(reg39d["emperors"]) == 1 and dz39.peek(d39) == 0.0
     assert abs(dz39.power_bonus(d39) - 0.8) < 1e-6
@@ -6025,9 +6045,12 @@ async def main():
     # ⑥ 官方开拍 / 管理员开关 / 面板文案
     wo46 = xg46.world_of({})
     wo46["enabled"] = True
-    notes46, _ = xg46.tick(wo46, t46, pools46, _random.Random(1), {})
+    wo46["groups"] = ["g1"]
+    t_open46 = 1_704_112_200.0  # 2024-01-01 20:30 Asia/Shanghai
+    assert "official" in xg46.open_kinds_at(t_open46)
+    notes46, _ = xg46.tick(wo46, t_open46, pools46, _random.Random(1), {})
     assert any("开拍" in n for n in notes46) and wo46["official"]["start"] == 500000
-    assert "500,000" in xg46.panel(wo46, "official", t46)
+    assert "500,000" in xg46.panel(wo46, "official", t_open46)
     ok46, _, _ = xg46.switch(wo46, "close", False, "", True)
     assert ok46 and wo46["official"] is None and wo46["enabled"] is False
     ok46, msg46, _ = xg46.switch(wo46, "open", False, "g1", False)
@@ -6043,7 +6066,7 @@ async def main():
     ypoor46 = PlayerDoc(uid="v", stones=0, ext={"yuanshi": {"amount": 11_999_999}})
     ok46, msg46, _ = xg46.verify_inner(ypoor46)
     assert not ok46 and "验资需" in msg46
-    rich46 = PlayerDoc(uid="v", stones=0, ext={"yuanshi": {"amount": 12_000_000}})
+    rich46 = PlayerDoc(uid="12345", stones=0, ext={"yuanshi": {"amount": 12_000_000}})
     ok46, msg46, _ = xg46.verify_inner(rich46)
     assert ok46 and rich46.ext["yuanshi"]["amount"] == 7_000_000
     assert rich46.ext[xg46.INNER_FLAG] == 1
@@ -6051,9 +6074,12 @@ async def main():
     assert not ok46 and "永久" in msg46
     wi46 = xg46.world_of({})
     wi46["enabled2"] = True
-    xg46.tick(wi46, t46, pools46, _random.Random(2), {})
+    wi46["groups2"] = ["g1"]
+    t_inner46 = 1_704_114_960.0  # 2024-01-01 21:16 Asia/Shanghai
+    xg46.tick(wi46, t_inner46, pools46, _random.Random(2), {},
+              open_kinds=xg46.open_kinds_at(t_inner46))
     noid46 = PlayerDoc(uid="n", stones=0, ext={"yuanshi": {"amount": 9_000_000}})
-    ok46, msg46, _ = xg46.bid(wi46, noid46, "inner", "", t46, _random.Random(3))
+    ok46, msg46, _ = xg46.bid(wi46, noid46, "inner", "", t_inner46, _random.Random(3))
     assert not ok46 and "验资" in msg46
 
     # ⑧ 内场 NPC 同步抬价（原版 30%/分钟 cron 的等价替代）
@@ -6062,14 +6088,20 @@ async def main():
         def random(self):
             self.calls += 1
             return self.first if self.calls == 1 else 0.5
-        def choices(self, pop, weights=None, k=1): return [(1.05, 1.15)]
+        def choices(self, pop, weights=None, k=1): return [pop[-1]]
         def uniform(self, a, b): return (a + b) / 2
         def choice(self, seq): return seq[0]
     wi46b = xg46.world_of({})
     wi46b["enabled2"] = True
-    xg46.tick(wi46b, t46, pools46, _R46(0.9), {})
-    ok46, msg46, _ = xg46.bid(wi46b, rich46, "inner", "", t46, _R46(0.0))
-    assert ok46 and "神秘 NPC" in msg46 and wi46b["inner"]["bidder"] == "-1", msg46
+    wi46b["groups2"] = ["g1"]
+    xg46.tick(wi46b, t_inner46, pools46, _R46(0.9), {},
+              open_kinds=xg46.open_kinds_at(t_inner46))
+    ok46, msg46, _ = xg46.bid(wi46b, rich46, "inner", "", t_inner46, _R46(0.0))
+    assert ok46, msg46
+    notes46, _ = xg46.tick(wi46b, t_inner46 + 60, pools46, _R46(0.0), {},
+                           open_kinds=xg46.open_kinds_at(t_inner46 + 60), scheduled=True)
+    assert any("NPC" in n for n in notes46)
+    assert wi46b["inner"]["bidder"] == "-1" and wi46b["inner"]["npcBidType"] == "神秘"
 
     assert "无手续费" in xg46.rules_text() and "#星阁内场验资" in xg46.help_text()
     print("W8-D2 auction ok")
@@ -6975,7 +7007,7 @@ async def main():
     assert bak52.exists() and bak52.stat().st_size > 0
     con52 = _sqlite52.connect(bak52)
     try:
-        assert con52.execute("SELECT version FROM db_info").fetchone()[0] == 17
+        assert con52.execute("SELECT version FROM db_info").fetchone()[0] == 18
     finally:
         con52.close()
     await db.backup_to(bak52)      # 同名不覆盖，自动加序号

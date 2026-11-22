@@ -55,6 +55,7 @@ EXCHANGES: dict[str, dict] = {
     "定神丹": {"cost": 25, "qty": 1},
     "无尽秘钥": {"cost": 50, "qty": 1},
     "无尽秘钥配方": {"cost": 100, "qty": 1},
+    "无上神物": {"cost": 80, "qty": 1},
 }
 
 EXP_PER_SOURCE = 20_000

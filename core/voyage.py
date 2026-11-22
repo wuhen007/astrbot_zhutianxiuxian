@@ -16,6 +16,7 @@ shortcut：原版「拆解赎回」（装备拆解返还）在本移植无对应
 """
 
 from __future__ import annotations
+from .clock import day_key
 
 import random
 import time
@@ -110,7 +111,7 @@ def set_state(doc: Any, st: Mapping[str, Any]) -> None:
 
 
 def _day(now: float) -> str:
-    return time.strftime("%Y-%m-%d", time.localtime(now + 8 * 3600))
+    return day_key(now)
 
 
 # ---------------------------------------------------------------- 造舟

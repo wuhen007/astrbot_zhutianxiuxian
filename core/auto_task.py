@@ -16,13 +16,14 @@ import time
 from typing import Any, Mapping
 
 from .player import PlayerDoc
+from .clock import day_key
 
 EXT_KEY = "auto_task"
 LOG_DAYS = 7
 
 
 def _day_key(now: float) -> str:
-    return time.strftime("%Y%m%d", time.localtime(now))
+    return day_key(now).replace("-", "")
 
 
 def _defaults() -> dict[str, Any]:

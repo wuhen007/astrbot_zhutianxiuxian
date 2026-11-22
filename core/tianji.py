@@ -21,6 +21,7 @@ rng 约定：无随机（纯兑换）。
 """
 
 from __future__ import annotations
+from .clock import day_key
 
 import json
 import time
@@ -112,15 +113,16 @@ def fulou_text(world: Mapping) -> str:
     return "\n".join(lines)
 
 
-def _today_key() -> str:
-    return time.strftime("%Y-%m-%d", time.localtime())
+def _today_key(now: float | None = None) -> str:
+    return day_key(time.time() if now is None else now)
 
 
-def daily_of(world: Mapping) -> dict:
+def daily_of(world: Mapping, now: float | None = None) -> dict:
     t = world.setdefault("tianji", {})
     day = str(t.get("day") or "")
-    if day != _today_key():
-        t = {"day": _today_key(), "bought": {}}
+    today = _today_key(now)
+    if day != today:
+        t = {"day": today, "bought": {}}
         world["tianji"] = t
     return t.setdefault("bought", {})
 
