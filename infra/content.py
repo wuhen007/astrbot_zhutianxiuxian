@@ -1,16 +1,12 @@
-"""内容数据表加载器：扫描 data/ 下全部 JSON，建索引，缺表优雅降级。
-
-不依赖 astrbot 宿主（用标准 logging），保证本层可在任意 cwd 离线测试。
-"""
+"""内容数据表加载器：扫描 data/ 下全部 JSON，建索引，缺表优雅降级。"""
 
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger("zhutian.content")
+from astrbot.api import logger
 
 NAME_KEYS = ("level", "level_name", "name")
 

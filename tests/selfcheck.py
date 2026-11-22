@@ -3,10 +3,25 @@ import asyncio
 import sys
 import tempfile
 import time
+from types import ModuleType
+from unittest.mock import Mock
 from pathlib import Path
 
 PLUGIN = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PLUGIN))
+
+try:
+    from astrbot.api import logger as _astrbot_logger  # noqa: F401
+except ModuleNotFoundError as exc:
+    if exc.name not in {"astrbot", "astrbot.api"}:
+        raise
+    _astrbot = ModuleType("astrbot")
+    _astrbot.__path__ = []
+    _astrbot_api = ModuleType("astrbot.api")
+    _astrbot_api.logger = Mock()
+    _astrbot.api = _astrbot_api
+    sys.modules["astrbot"] = _astrbot
+    sys.modules["astrbot.api"] = _astrbot_api
 
 from infra.db import DataBase          # noqa: E402
 from infra.content import ContentStore # noqa: E402
