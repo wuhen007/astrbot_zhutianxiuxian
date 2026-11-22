@@ -89,7 +89,7 @@ def parse_duration(raw: str) -> tuple[int, bool]:
     match = re.fullmatch(r"(\d+)\s*(分钟|小时|天)?", text)
     if not match:
         raise ValueError("时长格式：灵身代行采药/采矿/狩猎/寻源/地脉引气/寻脉定源，"
-                         "神祇代行采药/采矿/狩猎；时长可用分钟/小时/天。")
+                         "神祇代行采药/采矿/狩猎/寻源；时长可用分钟/小时/天。")
     value = int(match.group(1))
     minutes = value * {None: 1, "分钟": 1, "小时": 60, "天": 1_440}[match.group(2)]
     if minutes < 1:
@@ -182,7 +182,7 @@ def start_deity_herb_proxy(doc: PlayerDoc, now: float, minutes: int, task_id: st
 def start_deity_proxy(doc: PlayerDoc, now: float, minutes: int, task_id: str,
                       kind: str, group_id: str = "") -> tuple[bool, str, PlayerDoc]:
     task_types = {"herb": ("采药师", "采药"), "mine": ("采矿师", "采矿"),
-                  "hunt": ("猎户", "狩猎")}
+                  "hunt": ("猎户", "狩猎"), "source": ("源师", "寻源")}
     if kind not in task_types:
         return False, "神祇代行任务类型无效。", doc
     required_job, label = task_types[kind]
@@ -334,6 +334,41 @@ def finish_deity_hunt_proxy(doc: PlayerDoc, now: float,
     return True, result, d
 
 
+def _source_items(doc: PlayerDoc, minutes: int, factor: float, rng: Any,
+                  exp_table: Sequence[Mapping]) -> dict[str, int]:
+    level = max(0, int(doc.ext.get("occupation_level", 1) or 1))
+    rate = occupation.rate_of(level, exp_table) * 10 or 1
+    base_amount = math.floor((1.8 + rng.random() * 0.4) * minutes)
+    common = math.floor(math.floor(3 * (rate + 1) * base_amount) * factor)
+    rare_count = minutes // 30
+    upper = math.floor(math.floor(2 * (rate + 0.7) * rare_count) * factor)
+    divine = math.floor(math.floor((rate + 0.5) * rare_count) * factor)
+    return {name: amount for name, amount in (
+        ("下品源石", common), ("中品源石", common), ("上品源石", upper),
+        ("神源石", divine), ("凡源药", divine),
+    ) if amount > 0}
+
+
+def finish_deity_source_proxy(doc: PlayerDoc, now: float, rng: Any,
+                              exp_table: Sequence[Mapping]) -> tuple[bool, dict, PlayerDoc]:
+    state = state_of(doc)
+    deity = state["deity"]
+    task = deity["task"]
+    if deity["tier"] < 1 or not isinstance(task, dict) or task.get("kind") != "source":
+        return False, {}, doc
+    if doc.ext.get("occupation") != "源师":
+        return False, {}, doc
+
+    planned = max(1, min(MINUTES_MAX, int(task.get("minutes", 0) or 0)))
+    minutes = min(planned, max(0, int((float(now) - float(task.get("started_at", now))) // 60)))
+    factor = 0.5 + int(deity["tier"]) * 0.05
+    items = _source_items(doc, minutes, factor, rng, exp_table) if minutes else {}
+    result, d = _finish_progress(doc, state, minutes, items, exp_table, factor,
+                                 progress_track="deity")
+    result.update({"planned_minutes": planned, "kind": "source"})
+    return True, result, d
+
+
 def finish_deity_proxy(doc: PlayerDoc, now: float, rng: Any,
                        exp_table: Sequence[Mapping]) -> tuple[bool, dict, PlayerDoc]:
     state = state_of(doc)
@@ -344,6 +379,8 @@ def finish_deity_proxy(doc: PlayerDoc, now: float, rng: Any,
         return finish_deity_mine_proxy(doc, now, rng, exp_table)
     if task.get("kind") == "hunt":
         return finish_deity_hunt_proxy(doc, now, exp_table)
+    if task.get("kind") == "source":
+        return finish_deity_source_proxy(doc, now, rng, exp_table)
     return False, {}, doc
 
 
@@ -454,19 +491,7 @@ def finish_source_proxy(doc: PlayerDoc, now: float, rng: Any,
     minutes = min(planned, max(0, int((float(now) - float(task.get("started_at", now))) // 60)))
     tier = int(spirit["tier"])
     factor = 0.5 + tier * 0.05
-    items: dict[str, int] = {}
-    if minutes:
-        level = max(0, int(doc.ext.get("occupation_level", 1) or 1))
-        rate = occupation.rate_of(level, exp_table) * 10 or 1
-        base_amount = math.floor((1.8 + rng.random() * 0.4) * minutes)
-        common = math.floor(math.floor(3 * (rate + 1) * base_amount) * factor)
-        rare_count = minutes // 30
-        rare = math.floor(math.floor(2 * (rate + 0.7) * rare_count) * factor)
-        divine = math.floor(math.floor((rate + 0.5) * rare_count) * factor)
-        items = {name: amount for name, amount in (
-            ("下品源石", common), ("中品源石", common), ("上品源石", rare),
-            ("神源石", divine), ("凡源药", divine),
-        ) if amount > 0}
+    items = _source_items(doc, minutes, factor, rng, exp_table) if minutes else {}
 
     result, d = _finish_progress(doc, state, minutes, items, exp_table, factor)
     result.update({"planned_minutes": planned, "kind": "source"})

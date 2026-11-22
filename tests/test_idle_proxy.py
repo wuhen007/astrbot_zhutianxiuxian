@@ -3,6 +3,7 @@ import asyncio
 import random
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 from types import MethodType, SimpleNamespace
 
@@ -538,6 +539,37 @@ class IdleProxyHandlerTests(unittest.IsolatedAsyncioTestCase):
                          {"tier": 2, "exp": 90, "task": None})
         self.assertIsNone(idle_proxy.deity_state_of(saved_doc)["task"])
         self.assertTrue(any("神祇狩猎归来" in str(line) for line in result))
+
+    async def test_deity_source_route_awards_source_items_and_advances_only_deity_progress(self):
+        doc = PlayerDoc(uid="u11", name="源师", realm_index=21,
+                        ext={"occupation": "源师", "occupation_level": 10,
+                             "occupation_exp": 0, "yuanshi": {"amount": 321},
+                             "idle_proxy": {"spirit": {"tier": 2, "exp": 77, "task": None},
+                                 "deity": {"tier": 1, "exp": 0, "injured_until": 0, "task": None}}})
+        await self.db.save_player(doc.model_dump())
+        self.host.occ_exp_table = [{"id": 10, "rate": 1.0, "experience": 1_000_000}]
+        with mock.patch.object(random, "Random", return_value=ZeroRandom()):
+            started = await self.invoke("u11", "#神祇代行寻源 480分钟", "handle_deity_proxy")
+        self.assertTrue(any("神祇代行寻源启程" in str(line) for line in started))
+        raw = await self.db.get_player("u11")
+        raw["ext"]["idle_proxy"]["deity"]["task"]["started_at"] -= 480 * 60
+        await self.db.save_player(raw)
+
+        with mock.patch.object(random, "Random", return_value=ZeroRandom()):
+            result = await self.invoke("u11", "#结束神祇代行", "handle_finish_deity_proxy")
+        inventory = await self.db.get_inventory("u11")
+        self.assertEqual({name: inventory[name] for name in ("下品源石", "中品源石", "上品源石", "神源石", "凡源药")},
+                         {"下品源石": 15_681, "中品源石": 15_681, "上品源石": 188,
+                          "神源石": 92, "凡源药": 92})
+        saved = await self.db.get_player("u11")
+        saved_doc = PlayerDoc(**saved)
+        self.assertEqual(saved["ext"]["occupation_exp"], 48_000)
+        self.assertEqual(idle_proxy.deity_state_of(saved_doc)["exp"], 480)
+        self.assertEqual(idle_proxy.state_of(saved_doc)["spirit"],
+                         {"tier": 2, "exp": 77, "task": None})
+        self.assertIsNone(idle_proxy.deity_state_of(saved_doc)["task"])
+        self.assertEqual(saved["ext"]["yuanshi"]["amount"], 321)
+        self.assertTrue(any("神祇寻源归来" in str(line) for line in result))
 
     async def test_failed_inventory_write_rolls_back_task_and_experience(self):
         doc = PlayerDoc(uid="u2", name="药师", realm_index=21,

@@ -2364,6 +2364,7 @@ class ZhutianPlugin(Star):
                 (f"{CMD_DEITY_PROXY} [分钟/小时/天]", "采药师专属，神祇倍率 55%～95%"),
                 (f"{CMD_DEITY_MINE_PROXY} [分钟/小时/天]", "采矿师专属，神祇倍率 55%～95%"),
                 (f"{CMD_DEITY_HUNT_PROXY} [分钟/小时/天]", "猎户专属，结算五种猎物与神祇/职业经验"),
+                ("#神祇代行寻源 [分钟/小时/天]", "源师专属，获得纳戒源石道具与凡源药"),
                 (CMD_DEITY_PROXY_END, "结算神祇代行并晋升神祇重天"),
                 (f"{CMD_MINE} 分钟", "采矿（采矿师，30 分钟周期）"),
                 (CMD_MINE_END, "结束采矿结算"),
@@ -18841,7 +18842,7 @@ class ZhutianPlugin(Star):
                 await self.db.save_player(d.model_dump())
         yield event.plain_result(msg)
 
-    @filter.regex(r"^#神祇代行(采药|采矿|狩猎)(?:\s+.*)?$")
+    @filter.regex(r"^#神祇代行(采药|采矿|狩猎|寻源)(?:\s+.*)?$")
     @_serialized_player_command
     async def handle_deity_proxy(self, event: AstrMessageEvent):
         if not self._allowed(event):
@@ -18855,7 +18856,7 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         message = self._msg_of(event).strip()
-        task_label = next(label for label in ("采药", "采矿", "狩猎")
+        task_label = next(label for label in ("采药", "采矿", "狩猎", "寻源")
                           if message.startswith(f"#神祇代行{label}"))
         raw = message[len(f"#神祇代行{task_label}"):].strip()
         try:
@@ -18865,7 +18866,7 @@ class ZhutianPlugin(Star):
             return
         ok, msg, d = idle_proxy_mod.start_deity_proxy(
             doc, time.time(), minutes, secrets.token_hex(8),
-            {"采药": "herb", "采矿": "mine", "狩猎": "hunt"}[task_label], group_id)
+            {"采药": "herb", "采矿": "mine", "狩猎": "hunt", "寻源": "source"}[task_label], group_id)
         if not ok:
             yield event.plain_result(msg)
             return
@@ -18886,7 +18887,7 @@ class ZhutianPlugin(Star):
             return
         deity = idle_proxy_mod.deity_state_of(doc)
         task = deity.get("task")
-        if not isinstance(task, dict) or task.get("kind") not in {"herb", "mine", "hunt"}:
+        if not isinstance(task, dict) or task.get("kind") not in {"herb", "mine", "hunt", "source"}:
             yield event.plain_result("神祇当前没有等待结算的代行任务。")
             return
         seed = f"{doc.uid}:deity-proxy:{task.get('task_id', '')}"
@@ -18900,7 +18901,7 @@ class ZhutianPlugin(Star):
             if result["items"]:
                 await self.db.add_items(doc.uid, result["items"])
         task_label, job = {"herb": ("采药", "采药师"), "mine": ("采矿", "采矿师"),
-                           "hunt": ("狩猎", "猎户")}[result["kind"]]
+                           "hunt": ("狩猎", "猎户"), "source": ("寻源", "源师")}[result["kind"]]
         lines = [f"【神祇{task_label}归来】实际 {result['minutes']}/{result['planned_minutes']} 分钟",
                  f"职业经验 +{result['occupation_exp']}｜{job} {result['occupation_level']} 级",
                  f"收益倍率 ×{result['factor']:.0%}｜神祇 {result['spirit_tier']} 重，经验 {result['spirit_exp']}/{result['spirit_tier'] * 1000}"]
