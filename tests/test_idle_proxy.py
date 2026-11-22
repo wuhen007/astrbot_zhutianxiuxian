@@ -8,7 +8,7 @@ from unittest import mock
 from pathlib import Path
 from types import MethodType, SimpleNamespace
 
-from core import idle_proxy
+from core import idle_proxy, tianjiao
 from core.player import PlayerDoc
 from infra.db import DataBase
 
@@ -19,6 +19,14 @@ class ZeroRandom:
 
     def randrange(self, start, stop):
         return 2
+
+
+class SequenceRandom:
+    def __init__(self, values):
+        self.values = iter(values)
+
+    def random(self):
+        return next(self.values)
 
 
 class MiningRandom:
@@ -45,7 +53,8 @@ class IdleProxyTests(unittest.TestCase):
         self.assertTrue(ok, message)
         self.assertEqual(formed.exp, 0)
         self.assertEqual(formed.ext["xueqi"], 0)
-        self.assertEqual(idle_proxy.state_of(formed)["spirit"], {"tier": 1, "exp": 0, "task": None})
+        self.assertEqual(idle_proxy.state_of(formed)["spirit"],
+                         {"tier": 1, "exp": 0, "injured_until": 0.0, "task": None})
         again, _, unchanged = idle_proxy.condense_spirit(formed)
         self.assertFalse(again)
         self.assertEqual(unchanged.exp, formed.exp)
@@ -60,7 +69,8 @@ class IdleProxyTests(unittest.TestCase):
         doc = self.eligible_doc()
         doc.ext["legacy_source"] = {"灵身": 2, "灵性": 4, "灵性经验": 75}
         state = idle_proxy.state_of(doc)
-        self.assertEqual(state["spirit"], {"tier": 4, "exp": 75, "task": None})
+        self.assertEqual(state["spirit"],
+                         {"tier": 4, "exp": 75, "injured_until": 0.0, "task": None})
         self.assertEqual(doc.ext["legacy_source"]["灵身"], 2)
 
     def test_duration_parser_defaults_converts_caps_and_rejects_invalid_input(self):
@@ -300,8 +310,111 @@ class IdleProxyTests(unittest.TestCase):
             "庚金": 11_499, "玄土": 11_499, "绿色石胚": 7,
         })
         self.assertEqual(idle_proxy.state_of(settled)["spirit"],
-                         {"tier": 2, "exp": 77, "task": None})
+                         {"tier": 2, "exp": 77, "injured_until": 0.0, "task": None})
         self.assertEqual(idle_proxy.deity_state_of(settled)["exp"], 495)
+
+
+class ProxyAmbushTests(unittest.TestCase):
+    def test_only_available_dead_enemies_can_trigger_proxy_ambush(self):
+        doc = PlayerDoc(uid="u1", ext={"tianjiao_hatred": {
+            "未达死敌": 100, "死敌甲": 101, "不死不休乙": 201,
+            "轮回中": 300, "气血耗尽": 300,
+        }})
+        rows = [{"name": name} for name in ("未达死敌", "死敌甲", "不死不休乙", "轮回中", "气血耗尽")]
+        world = {"bosses": {
+            "轮回中": {"hp_pct": 1, "alive_until": 2_000},
+            "气血耗尽": {"hp_pct": 0, "alive_until": 0},
+        }}
+
+        selected = tianjiao.select_proxy_ambush(
+            doc, rows, world, now=1_000, rng=SequenceRandom((0.99, 0.0)))
+
+        self.assertEqual(selected, {"name": "不死不休乙", "hatred": 201,
+                                    "level": "不死不休", "chance": 0.35})
+
+    def test_proxy_ambush_chance_uses_the_selected_hatred_tier(self):
+        doc = PlayerDoc(uid="u1", ext={"tianjiao_hatred": {"死敌甲": 101}})
+        rows = [{"name": "死敌甲"}]
+
+        selected = tianjiao.select_proxy_ambush(
+            doc, rows, {}, now=1_000, rng=SequenceRandom((0.0, 0.2)))
+
+        self.assertIsNone(selected)
+
+    def test_proxy_plunder_caps_loss_to_each_reward_and_skips_unclassified_items(self):
+        stolen = tianjiao.proxy_plunder(
+            {"少量材料": 2, "大量材料": 100, "未知物品": 20},
+            lambda name: "材料" if name != "未知物品" else "",
+            SequenceRandom((1.0,)),
+        )
+
+        self.assertEqual(stolen, {"少量材料": 1, "大量材料": 65})
+
+    def test_ambush_reduces_awards_and_persists_six_hour_spirit_injury(self):
+        source = PlayerDoc(uid="u1", ext={"occupation": "采药师", "occupation_level": 1,
+                                            "occupation_exp": 50,
+                                            "idle_proxy": {"spirit": {"tier": 1, "exp": 0,
+                                                "injured_until": 0, "task": None},
+                                                           "deity": {"tier": 0, "exp": 0,
+                                                "injured_until": 0, "task": None}}})
+        settled = source.model_copy(deep=True)
+        result = {"items": {"少量材料": 2, "大量材料": 100},
+                  "occupation_exp": 1_000, "occupation_level": 1}
+
+        message = idle_proxy.apply_proxy_ambush(
+            source, settled, result, "spirit", "死敌甲",
+            {"少量材料": 1, "大量材料": 65}, 1_000,
+            [{"id": 1, "experience": 5_000}],
+        )
+
+        self.assertEqual(result["items"], {"少量材料": 1, "大量材料": 35})
+        self.assertEqual(result["occupation_exp"], 350)
+        self.assertEqual(settled.ext["occupation_exp"], 400)
+        self.assertEqual(idle_proxy.state_of(settled)["spirit"]["injured_until"], 22_600)
+        self.assertIn("死敌甲", message)
+        self.assertIn("6小时", message)
+
+    def test_legacy_spirit_injury_timestamp_blocks_new_proxy_task(self):
+        doc = PlayerDoc(uid="u1", ext={"occupation": "采药师", "legacy_source": {
+            "灵身": 1, "灵性": 1, "灵身重伤至": 1_700_000_100_000,
+        }})
+
+        ok, message, unchanged = idle_proxy.start_herb_proxy(doc, 1_700_000_000, 30, "next")
+
+        self.assertFalse(ok)
+        self.assertIn("养伤", message)
+        self.assertIs(unchanged, doc)
+
+    def test_deity_injury_blocks_new_deity_task(self):
+        doc = PlayerDoc(uid="u1", ext={"occupation": "采药师", "idle_proxy": {
+            "spirit": {"tier": 0, "exp": 0, "task": None},
+            "deity": {"tier": 1, "exp": 0, "injured_until": 1_100, "task": None},
+        }})
+
+        ok, message, _ = idle_proxy.start_deity_herb_proxy(doc, 1_000, 30, "next")
+
+        self.assertFalse(ok)
+        self.assertIn("养伤", message)
+
+    def test_condensing_new_proxy_preserves_legacy_injury_timestamps(self):
+        spirit_doc = PlayerDoc(uid="spirit", realm_index=21, exp=20_000_000,
+                               ext={"xueqi": 20_000_000, "occupation": "采药师",
+                                    "legacy_source": {"灵身": 0,
+                                        "灵身重伤至": 1_700_000_100_000}})
+        deity_doc = PlayerDoc(uid="deity", realm_index=21, exp=20_000_000,
+                              ext={"xueqi": 20_000_000, "occupation": "采药师",
+                                   "legacy_source": {"神祇": 0, "mijinglevel_id": 6,
+                                       "神祇重伤至": 1_700_000_100_000}})
+
+        spirit_ok, _, formed_spirit = idle_proxy.condense_spirit(spirit_doc)
+        deity_ok, _, formed_deity = idle_proxy.condense_deity(deity_doc)
+
+        self.assertTrue(spirit_ok)
+        self.assertTrue(deity_ok)
+        self.assertEqual(idle_proxy.state_of(formed_spirit)["spirit"]["injured_until"],
+                         1_700_000_100)
+        self.assertEqual(idle_proxy.deity_state_of(formed_deity)["injured_until"],
+                         1_700_000_100)
 
 
 def command_handlers():
@@ -309,7 +422,8 @@ def command_handlers():
     tree = ast.parse((plugin_root / "main.py").read_text(encoding="utf-8"))
     wanted = {"handle_condense_spirit", "handle_spirit_proxy",
               "handle_finish_spirit_proxy", "handle_condense_deity",
-              "handle_deity_proxy", "handle_finish_deity_proxy"}
+              "handle_deity_proxy", "handle_finish_deity_proxy",
+              "_apply_proxy_ambush"}
     methods = [node for node in ast.walk(tree)
                if isinstance(node, ast.AsyncFunctionDef) and node.name in wanted]
     for method in methods:
@@ -318,9 +432,10 @@ def command_handlers():
         ast.ImportFrom(module="__future__", names=[ast.alias(name="annotations")], level=0),
         *methods,
     ], type_ignores=[])
-    from core import occupation as occupation_mod
+    from core import occupation as occupation_mod, tianjiao as tianjiao_mod
     env = {"PlayerDoc": PlayerDoc, "idle_proxy_mod": idle_proxy,
-           "occupation": occupation_mod, "random": random, "time": __import__("time"),
+           "occupation": occupation_mod, "tj_mod": tianjiao_mod,
+           "random": random, "time": __import__("time"),
            "secrets": __import__("secrets"), "CMD_SPIRIT_PROXY": "#灵身代行采药",
            "CMD_DEITY_PROXY": "#神祇代行采药",
            "CMD_DEITY_MINE_PROXY": "#神祇代行采矿",
@@ -349,6 +464,8 @@ class IdleProxyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.host._pl_lock = pl_lock
         self.host._require_player = require_player
         self.host._msg_of = lambda event: event.message_str
+        self.host._tianjiao_rows = lambda: []
+        self.host._cls_of = lambda name: "材料"
         for name, method in command_handlers().items():
             setattr(self.host, name, MethodType(method, self.host))
         self.assertTrue(hasattr(self.host, "handle_condense_spirit"))
@@ -530,7 +647,7 @@ class IdleProxyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved["ext"]["occupation_exp"], 48_000)
         self.assertEqual(idle_proxy.deity_state_of(PlayerDoc(**saved))["exp"], 480)
         self.assertEqual(idle_proxy.state_of(PlayerDoc(**saved))["spirit"],
-                         {"tier": 3, "exp": 90, "task": None})
+                         {"tier": 3, "exp": 90, "injured_until": 0.0, "task": None})
 
     async def test_deity_hunt_route_awards_food_and_advances_only_deity_progress(self):
         foods = ("野兔", "野猪", "野牛", "野鸡", "野羊")
@@ -555,7 +672,7 @@ class IdleProxyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved["ext"]["occupation_exp"], 48_000)
         self.assertEqual(idle_proxy.deity_state_of(saved_doc)["exp"], 480)
         self.assertEqual(idle_proxy.state_of(saved_doc)["spirit"],
-                         {"tier": 2, "exp": 90, "task": None})
+                         {"tier": 2, "exp": 90, "injured_until": 0.0, "task": None})
         self.assertIsNone(idle_proxy.deity_state_of(saved_doc)["task"])
         self.assertTrue(any("神祇狩猎归来" in str(line) for line in result))
 
@@ -585,7 +702,7 @@ class IdleProxyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved["ext"]["occupation_exp"], 48_000)
         self.assertEqual(idle_proxy.deity_state_of(saved_doc)["exp"], 480)
         self.assertEqual(idle_proxy.state_of(saved_doc)["spirit"],
-                         {"tier": 2, "exp": 77, "task": None})
+                         {"tier": 2, "exp": 77, "injured_until": 0.0, "task": None})
         self.assertIsNone(idle_proxy.deity_state_of(saved_doc)["task"])
         self.assertEqual(saved["ext"]["yuanshi"]["amount"], 321)
         self.assertTrue(any("神祇寻源归来" in str(line) for line in result))
@@ -614,7 +731,7 @@ class IdleProxyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved["ext"]["occupation_exp"], 48_000)
         self.assertEqual(idle_proxy.deity_state_of(saved_doc)["exp"], 480)
         self.assertEqual(idle_proxy.state_of(saved_doc)["spirit"],
-                         {"tier": 3, "exp": 90, "task": None})
+                         {"tier": 3, "exp": 90, "injured_until": 0.0, "task": None})
         self.assertIsNone(idle_proxy.deity_state_of(saved_doc)["task"])
         self.assertEqual(saved["ext"]["yuanshi"]["amount"], 654_321)
         self.assertTrue(any("神祇地脉引气归来" in str(line) for line in result))
@@ -644,7 +761,7 @@ class IdleProxyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved["ext"]["occupation_exp"], 33_600)
         self.assertEqual(idle_proxy.deity_state_of(saved_doc)["exp"], 480)
         self.assertEqual(idle_proxy.state_of(saved_doc)["spirit"],
-                         {"tier": 3, "exp": 90, "task": None})
+                         {"tier": 3, "exp": 90, "injured_until": 0.0, "task": None})
         self.assertIsNone(idle_proxy.deity_state_of(saved_doc)["task"])
         self.assertEqual(saved["ext"]["yuanshi"]["amount"], 654_321)
         self.assertTrue(any("奖励减少30%" in str(line) for line in result))
@@ -677,7 +794,7 @@ class IdleProxyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved["ext"]["occupation_exp"], 9_600)
         self.assertEqual(idle_proxy.deity_state_of(saved_doc)["exp"], 480)
         self.assertEqual(idle_proxy.state_of(saved_doc)["spirit"],
-                         {"tier": 3, "exp": 90, "task": None})
+                         {"tier": 3, "exp": 90, "injured_until": 0.0, "task": None})
         self.assertIsNone(idle_proxy.deity_state_of(saved_doc)["task"])
         self.assertEqual(saved["ext"]["yuanshi"]["amount"], 987_654)
         self.assertTrue(any("神祇寻脉定源归来" in str(line) for line in result))
@@ -704,6 +821,110 @@ class IdleProxyHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved["ext"]["idle_proxy"]["spirit"]["task"]["task_id"], "tx-fail")
         self.assertEqual(await self.db.get_inventory("u2"), {})
 
+    async def test_spirit_ambush_rewards_and_injury_commit_with_task_settlement(self):
+        now = time.time()
+        doc = PlayerDoc(uid="ambush", name="采药师", realm_index=21,
+                        ext={"occupation": "采药师", "occupation_level": 1,
+                             "tianjiao_hatred": {"死敌甲": 101},
+                             "idle_proxy": {"spirit": {"tier": 1, "exp": 0,
+                                 "injured_until": 0, "task": {"kind": "herb",
+                                     "task_id": "ambush-task", "started_at": now - 172_800,
+                                     "ends_at": now, "minutes": 2_880, "group_id": "g1"}},
+                                 "deity": {"tier": 0, "exp": 0,
+                                     "injured_until": 0, "task": None}}})
+        await self.db.save_player(doc.model_dump())
+        await self.db.save_tianjiao({"bosses": {"死敌甲": {
+            "hp_pct": 1, "alive_until": 0, "escaped_until": 0}}})
+        self.host._tianjiao_rows = lambda: [{"name": "死敌甲"}]
+
+        with mock.patch.object(random, "Random", return_value=ZeroRandom()):
+            result = await self.invoke("ambush", "#结束灵身代行", "handle_finish_spirit_proxy")
+
+        saved = PlayerDoc(**(await self.db.get_player("ambush")))
+        spirit = idle_proxy.state_of(saved)["spirit"]
+        inventory = await self.db.get_inventory("ambush")
+        self.assertGreaterEqual(spirit["injured_until"], now + 6 * 60 * 60)
+        self.assertLess(spirit["injured_until"], now + 6 * 60 * 60 + 2)
+        self.assertIsNone(spirit["task"])
+        self.assertEqual(saved.ext["occupation_exp"], 100_800)
+        self.assertEqual(inventory, {"万年凝血草": 7, "万年何首乌": 10,
+                                     "万年血精草": 7, "万年甜甜花": 7,
+                                     "万年清心草": 7})
+        self.assertTrue(any("死敌埋伏" in str(line) for line in result))
+
+    async def test_deity_ambush_injures_only_deity_and_commits_reduced_rewards(self):
+        now = time.time()
+        doc = PlayerDoc(uid="deity-ambush", name="采药师", realm_index=21,
+                        ext={"occupation": "采药师", "occupation_level": 1,
+                             "tianjiao_hatred": {"死敌甲": 101},
+                             "idle_proxy": {"spirit": {"tier": 2, "exp": 17,
+                                 "injured_until": 0, "task": None},
+                                 "deity": {"tier": 1, "exp": 0,
+                                     "injured_until": 0, "task": {"kind": "herb",
+                                         "task_id": "deity-ambush-task",
+                                         "started_at": now - 172_800,
+                                         "ends_at": now, "minutes": 2_880,
+                                         "group_id": "g1"}}}})
+        await self.db.save_player(doc.model_dump())
+        await self.db.save_tianjiao({"bosses": {"死敌甲": {
+            "hp_pct": 1, "alive_until": 0, "escaped_until": 0}}})
+        self.host._tianjiao_rows = lambda: [{"name": "死敌甲"}]
+
+        with mock.patch.object(random, "Random", return_value=ZeroRandom()):
+            result = await self.invoke("deity-ambush", "#结束神祇代行",
+                                       "handle_finish_deity_proxy")
+
+        saved = PlayerDoc(**(await self.db.get_player("deity-ambush")))
+        deity = idle_proxy.deity_state_of(saved)
+        spirit = idle_proxy.state_of(saved)["spirit"]
+        inventory = await self.db.get_inventory("deity-ambush")
+        self.assertGreaterEqual(deity["injured_until"], now + 6 * 60 * 60)
+        self.assertLess(deity["injured_until"], now + 6 * 60 * 60 + 2)
+        self.assertIsNone(deity["task"])
+        self.assertEqual((spirit["tier"], spirit["exp"], spirit["injured_until"]), (2, 17, 0))
+        self.assertEqual(saved.ext["occupation_exp"], 100_800)
+        self.assertEqual(inventory, {"万年凝血草": 7, "万年何首乌": 10,
+                                     "万年血精草": 7, "万年甜甜花": 7,
+                                     "万年清心草": 7})
+        self.assertTrue(any("死敌埋伏" in str(line) for line in result))
+
+    async def test_failed_ambush_inventory_write_rolls_back_injury_and_task_clear(self):
+        now = time.time()
+        doc = PlayerDoc(uid="ambush-fail", name="采药师", realm_index=21,
+                        ext={"occupation": "采药师", "occupation_level": 1,
+                             "tianjiao_hatred": {"死敌甲": 101},
+                             "idle_proxy": {"spirit": {"tier": 1, "exp": 0,
+                                 "injured_until": 0, "task": {"kind": "herb",
+                                     "task_id": "ambush-fail-task", "started_at": now - 172_800,
+                                     "ends_at": now, "minutes": 2_880, "group_id": "g1"}},
+                                 "deity": {"tier": 0, "exp": 0,
+                                     "injured_until": 0, "task": None}}})
+        await self.db.save_player(doc.model_dump())
+        await self.db.save_tianjiao({"bosses": {"死敌甲": {
+            "hp_pct": 1, "alive_until": 0, "escaped_until": 0}}})
+        self.host._tianjiao_rows = lambda: [{"name": "死敌甲"}]
+        original = self.db.add_items
+        attempted_items = []
+
+        async def fail_add_items(uid, items):
+            attempted_items.append(items)
+            raise RuntimeError("ambush inventory write failed")
+
+        self.db.add_items = fail_add_items
+        with mock.patch.object(random, "Random", return_value=ZeroRandom()):
+            with self.assertRaisesRegex(RuntimeError, "ambush inventory write failed"):
+                await self.invoke("ambush-fail", "#结束灵身代行", "handle_finish_spirit_proxy")
+        self.db.add_items = original
+
+        self.assertEqual(attempted_items, [{"万年凝血草": 7, "万年何首乌": 10,
+                                            "万年血精草": 7, "万年甜甜花": 7,
+                                            "万年清心草": 7}])
+        saved = PlayerDoc(**(await self.db.get_player("ambush-fail")))
+        spirit = idle_proxy.state_of(saved)["spirit"]
+        self.assertEqual(spirit["injured_until"], 0)
+        self.assertEqual(spirit["task"]["task_id"], "ambush-fail-task")
+        self.assertEqual(saved.ext.get("occupation_exp", 0), 0)
+        self.assertEqual(await self.db.get_inventory("ambush-fail"), {})
 
 if __name__ == "__main__":
     unittest.main()

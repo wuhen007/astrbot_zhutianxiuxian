@@ -43,14 +43,14 @@ def state_of(doc: PlayerDoc) -> dict[str, Any]:
     state["spirit"] = {
         "tier": min(9, max(0, int(spirit.get("tier", 0) or 0))),
         "exp": max(0, int(spirit.get("exp", 0) or 0)),
+        "injured_until": _injury_timestamp(
+            spirit.get("injured_until", legacy.get("灵身重伤至", 0))),
         "task": copy.deepcopy(task) if isinstance(task, dict) else None,
     }
     deity = state.get("deity")
     if not isinstance(deity, dict):
         legacy_tier = int(legacy.get("神祇", 0) or 0)
-        injured_until = float(legacy.get("神祇重伤至", 0) or 0)
-        if injured_until > 10_000_000_000:
-            injured_until /= 1_000
+        injured_until = _injury_timestamp(legacy.get("神祇重伤至", 0))
         deity = {
             "tier": legacy_tier,
             "exp": max(0, int(legacy.get("神祇经验", 0) or 0)),
@@ -61,10 +61,21 @@ def state_of(doc: PlayerDoc) -> dict[str, Any]:
     state["deity"] = {
         "tier": min(9, max(0, int(deity.get("tier", 0) or 0))),
         "exp": max(0, int(deity.get("exp", 0) or 0)),
-        "injured_until": max(0.0, float(deity.get("injured_until", 0) or 0)),
+        "injured_until": _injury_timestamp(
+            deity.get("injured_until", legacy.get("神祇重伤至", 0))),
         "task": copy.deepcopy(task) if isinstance(task, dict) else None,
     }
     return state
+
+
+def _injury_timestamp(value: Any) -> float:
+    try:
+        timestamp = float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    if timestamp > 10_000_000_000:
+        timestamp /= 1_000
+    return max(0.0, timestamp)
 
 
 def deity_state_of(doc: PlayerDoc) -> dict[str, Any]:
@@ -110,7 +121,8 @@ def condense_spirit(doc: PlayerDoc) -> tuple[bool, str, PlayerDoc]:
     d = doc.model_copy(deep=True)
     d.exp -= SPIRIT_COST
     d.ext["xueqi"] = xueqi - SPIRIT_COST
-    state["spirit"] = {"tier": 1, "exp": 0, "task": None}
+    state["spirit"] = {"tier": 1, "exp": 0,
+                        "injured_until": float(state["spirit"]["injured_until"]), "task": None}
     _save(d, state)
     return True, "洞天灵身·初成\n耗费两千万修为与血气，以原始符文凝出第一尊灵身。", d
 
@@ -128,7 +140,8 @@ def condense_deity(doc: PlayerDoc) -> tuple[bool, str, PlayerDoc]:
     d = doc.model_copy(deep=True)
     d.exp -= SPIRIT_COST
     d.ext["xueqi"] = xueqi - SPIRIT_COST
-    state["deity"] = {"tier": 1, "exp": 0, "injured_until": 0.0, "task": None}
+    state["deity"] = {"tier": 1, "exp": 0,
+                       "injured_until": float(state["deity"]["injured_until"]), "task": None}
     _save(d, state)
     return True, "道宫神祇凝练成功\n耗费两千万修为与血气，于五大神藏中凝聚出第一重神祇。", d
 
@@ -151,6 +164,9 @@ def start_proxy(doc: PlayerDoc, now: float, minutes: int, task_id: str,
         return False, "你的洞天尚未蕴养出灵身。", doc
     if doc.ext.get("occupation") != required_job:
         return False, f"需先转职为{required_job}，才能让灵身{label}。", doc
+    if float(spirit["injured_until"]) > now:
+        left = math.ceil((float(spirit["injured_until"]) - now) / 60)
+        return False, f"你的灵身仍在养伤，约 {left} 分钟后才能代行。", doc
     if spirit["task"]:
         task = spirit["task"]
         left = max(0, int(math.ceil((float(task["ends_at"]) - now) / 60)))
@@ -240,13 +256,64 @@ def _finish_progress(doc: PlayerDoc, state: dict, minutes: int, items: dict[str,
     if progress_track == "deity":
         state["deity"] = {**progress, "tier": next_tier, "exp": spirit_exp, "task": None}
     else:
-        state[progress_track] = {"tier": next_tier, "exp": spirit_exp, "task": None}
+        state[progress_track] = {
+            "tier": next_tier, "exp": spirit_exp,
+            "injured_until": _injury_timestamp(progress.get("injured_until")),
+            "task": None,
+        }
     _save(d, state)
     return {
         "minutes": minutes, "occupation_exp": exp_gain, "items": items,
         "factor": factor, "spirit_tier": next_tier, "spirit_exp": spirit_exp,
         "occupation_level": level,
     }, d
+
+
+def apply_proxy_ambush(source_doc: PlayerDoc, settled_doc: PlayerDoc, result: dict,
+                       progress_track: str, tianjiao_name: str,
+                       stolen_items: Mapping[str, int], now: float,
+                       exp_table: Sequence[Mapping]) -> str:
+    if progress_track not in {"spirit", "deity"}:
+        raise ValueError("proxy progress track must be spirit or deity")
+    result_items = result.get("items")
+    result_items = result_items if isinstance(result_items, dict) else {}
+    actual_stolen = {}
+    for name, raw_amount in stolen_items.items():
+        available = max(0, int(result_items.get(name, 0) or 0))
+        amount = min(available, max(0, int(raw_amount or 0)))
+        if amount:
+            remaining = available - amount
+            if remaining:
+                result_items[name] = remaining
+            else:
+                result_items.pop(name, None)
+            actual_stolen[name] = amount
+
+    occupation_exp = max(0, int(result.get("occupation_exp", 0) or 0))
+    occupation_exp = math.floor(occupation_exp * 0.35)
+    level, exp = occupation.add_exp(
+        max(0, int(source_doc.ext.get("occupation_level", 1) or 1)),
+        max(0, int(source_doc.ext.get("occupation_exp", 0) or 0)),
+        occupation_exp, exp_table)
+    result["occupation_exp"], result["occupation_level"] = occupation_exp, level
+    settled_doc.ext["occupation_level"], settled_doc.ext["occupation_exp"] = level, exp
+
+    state = state_of(settled_doc)
+    actor = state[progress_track]
+    actor["injured_until"] = max(
+        float(actor["injured_until"]), float(now) + 6 * 60 * 60)
+    _save(settled_doc, state)
+
+    stolen_line = "、".join(f"{name}×{amount}" for name, amount in actual_stolen.items())
+    if not stolen_line:
+        stolen_line = "大半职业感悟"
+    actor_name = "灵身" if progress_track == "spirit" else "神祇"
+    return "\n".join([
+        f"【死敌埋伏·{actor_name}重伤】",
+        f"{tianjiao_name}早已守在归途，专程截杀你的{actor_name}。",
+        f"被夺收益：{stolen_line}；职业经验仅保留35%。",
+        f"{actor_name}重伤，需休养6小时后才能再次代行。",
+    ])
 
 
 def apply_overdue_penalty(source_doc: PlayerDoc, settled_doc: PlayerDoc, result: dict,

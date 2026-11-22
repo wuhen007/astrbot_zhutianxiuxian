@@ -19,9 +19,10 @@ shortcut（与原版差异）：
 
 from __future__ import annotations
 
+import math
 import random
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, Mapping
 
 from .player import PlayerDoc
@@ -49,6 +50,7 @@ HATRED_LEVELS: tuple[tuple[str, int, float, float, float], ...] = (
     ("不死不休", 201, float("inf"), 0.95, 0.90),
 )
 HATRED_GAIN: dict[str, int] = {"挑战失败": 5, "挑战成功": 20, "击杀": 50, "嘲讽": 3, "护道失败": 30}
+PROXY_AMBUSH_CHANCE = {"死敌": 0.20, "不死不休": 0.35}
 
 PLANES = ("下界八域", "九天十地", "界海", "仙域", "太初星墟")
 
@@ -73,6 +75,55 @@ def level_of(value: int) -> tuple[str, float, float]:
         if v >= lo:
             picked = (name, escape, protector)
     return picked
+
+
+def select_proxy_ambush(doc: Any, tianjiao_list: list[Mapping], world: Mapping | None,
+                        now: float, rng: Any) -> dict | None:
+    candidates = []
+    bosses = world.get("bosses", {}) if isinstance(world, Mapping) else {}
+    bosses = bosses if isinstance(bosses, Mapping) else {}
+    for row in tianjiao_list:
+        name = str(row.get("name") or row.get("名号") or "").strip()
+        if not name:
+            continue
+        hatred = hatred_of(doc, name)
+        level = level_of(hatred)[0]
+        if level not in PROXY_AMBUSH_CHANCE:
+            continue
+        raw_boss = bosses.get(name)
+        boss = raw_boss if isinstance(raw_boss, Mapping) else {}
+        if blocked_until(boss) > float(now) or hp_pct_of(boss) <= 0:
+            continue
+        candidates.append({"name": name, "hatred": hatred, "level": level})
+    if not candidates:
+        return None
+
+    total_weight = sum(candidate["hatred"] for candidate in candidates)
+    roll = min(1.0, max(0.0, float(rng.random()))) * total_weight
+    selected = candidates[-1]
+    for candidate in candidates:
+        roll -= candidate["hatred"]
+        if roll <= 0:
+            selected = candidate
+            break
+    chance = PROXY_AMBUSH_CHANCE[selected["level"]]
+    if min(1.0, max(0.0, float(rng.random()))) >= chance:
+        return None
+    return {**selected, "chance": chance}
+
+
+def proxy_plunder(items: Mapping[str, int], item_class_of: Callable[[str], str],
+                  rng: Any) -> dict[str, int]:
+    rate_basis_points = min(
+        6_500, 3_500 + math.floor(min(1.0, max(0.0, float(rng.random()))) * 3_001))
+    stolen = {}
+    for raw_name, raw_qty in items.items():
+        name = str(raw_name or "").strip()
+        qty = max(0, int(raw_qty or 0))
+        if not name or qty <= 0 or not item_class_of(name):
+            continue
+        stolen[name] = max(1, min(qty, qty * rate_basis_points // 10_000))
+    return stolen
 
 
 def add_hatred(doc: Any, name: str, reason: str) -> tuple[int, int, str]:

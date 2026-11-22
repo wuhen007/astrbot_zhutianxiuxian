@@ -22,6 +22,7 @@ from .core import adventure, alchemy, ancient, battle, blessing, boss, calamity,
 from .infra import render
 from .infra.content import ContentStore
 from .infra.db import DataBase
+from .infra.plugin_data import prepare_plugin_data_dir
 from .core import legacy_import as legacy_mod
 from .core import update_notes as update_notes_mod
 from .core import profile as profile_mod
@@ -31,6 +32,7 @@ from .core import selfdao as selfdao_mod
 from .core.clock import day_key
 
 PLUGIN_DIR = Path(__file__).parent
+PLUGIN_NAME = "astrbot_zhutianxiuxian"
 
 
 def _serialized_calamity_command(fn):
@@ -1326,20 +1328,27 @@ ITEM_TABLES = (
 
 
 @register(
-    "astrbot_zhutianxiuxian",
+    PLUGIN_NAME,
     "wuhen",
     "诸天万界修仙（Python 重构版）",
-    "0.1.1",
+    "0.1.2",
     "",
 )
 class ZhutianPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.config = config
-        self.db = DataBase(StarTools.get_data_dir("zhutian") / "zhutian.db")
+        plugin_data_dir = StarTools.get_data_dir(PLUGIN_NAME)
+        legacy_data_dir = plugin_data_dir.parent / "zhutian"
+        migrate_legacy_data = ((legacy_data_dir / "zhutian.db").is_file()
+                               and not (plugin_data_dir / "zhutian.db").exists())
+        plugin_data_dir = prepare_plugin_data_dir(plugin_data_dir, legacy_data_dir)
+        if migrate_legacy_data:
+            logger.info("[zhutian] 已将旧 zhutian 数据复制到插件专属数据目录")
+        self.db = DataBase(plugin_data_dir / "zhutian.db")
         self._last_cmd_ts: dict[str, float] = {}   # 同人指令去抖：防连发时整档互相覆盖（双倍签到/丢奖励）
         self._profile_name_lock = asyncio.Lock()
-        self.panel_dir = StarTools.get_data_dir("zhutian") / "panels"
+        self.panel_dir = plugin_data_dir / "panels"
         self.render_on = bool(config.get("RENDER_ENABLE", True))
         # shortcut: 数据表暂从插件目录读取（随代码分发），表多体积大后改放 StarTools 数据目录
         self.content = ContentStore(PLUGIN_DIR / "data")
@@ -18902,6 +18911,8 @@ class ZhutianPlugin(Star):
         if not ok:
             yield event.plain_result("结束失败：神祇状态或对应职业已变化，当前任务仍保留。")
             return
+        ambush_msg = await self._apply_proxy_ambush(
+            doc, d, result, "deity", now, str(task.get("task_id", "")))
         overdue_msg = idle_proxy_mod.apply_overdue_penalty(
             doc, d, result, now, task.get("ends_at"), self.occ_exp_table)
         async with self.db.transaction():
@@ -18918,9 +18929,28 @@ class ZhutianPlugin(Star):
         lines.extend(f"· {name} ×{qty}" for name, qty in result["items"].items())
         if not result["items"]:
             lines.append("· 此次未获得物品。")
+        if ambush_msg:
+            lines.append(ambush_msg)
         if overdue_msg:
             lines.append(overdue_msg)
         yield event.plain_result("\n".join(lines))
+
+    async def _apply_proxy_ambush(self, source_doc: PlayerDoc, settled_doc: PlayerDoc,
+                                  result: dict, progress_track: str, now: float,
+                                  task_id: str) -> str | None:
+        if int(result.get("minutes", 0) or 0) < 1:
+            return None
+        world = tj_mod.world_ensure(await self.db.get_tianjiao())
+        rng = random.Random(
+            f"{source_doc.uid}:{progress_track}-proxy-ambush:{task_id}")
+        retaliation = tj_mod.select_proxy_ambush(
+            source_doc, self._tianjiao_rows(), world, now, rng)
+        if not retaliation:
+            return None
+        stolen = tj_mod.proxy_plunder(result.get("items") or {}, self._cls_of, rng)
+        return idle_proxy_mod.apply_proxy_ambush(
+            source_doc, settled_doc, result, progress_track,
+            retaliation["name"], stolen, now, self.occ_exp_table)
 
     @filter.command(CMD_SPIRIT_FORM, "凝聚洞天灵身")
     @_serialized_player_command
@@ -18997,6 +19027,8 @@ class ZhutianPlugin(Star):
         if not ok:
             yield event.plain_result("结束失败：灵身状态或对应职业已变化，当前任务仍保留。")
             return
+        ambush_msg = await self._apply_proxy_ambush(
+            doc, d, result, "spirit", now, str(task.get("task_id", "")))
         overdue_msg = idle_proxy_mod.apply_overdue_penalty(
             doc, d, result, now, task.get("ends_at"), self.occ_exp_table)
         async with self.db.transaction():
@@ -19014,6 +19046,8 @@ class ZhutianPlugin(Star):
         lines.extend(f"· {name} ×{qty}" for name, qty in result["items"].items())
         if not result["items"]:
             lines.append("· 此次未采得成株药材。")
+        if ambush_msg:
+            lines.append(ambush_msg)
         if overdue_msg:
             lines.append(overdue_msg)
         yield event.plain_result("\n".join(lines))

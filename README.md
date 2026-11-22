@@ -48,7 +48,7 @@ git clone https://github.com/wuhen007/astrbot_zhutianxiuxian.git \
 
 - `ACCESS_CONTROL.WHITELIST_GROUPS`：限制可使用插件的群号；留空时不按群号限制。
 - `RENDER_ENABLE`：控制图片面板渲染。启用需要可用的 Playwright/Chromium 环境；渲染不可用时相关面板会回退到文本输出。
-- 数据库与面板文件使用固定的 `zhutian` 数据目录名，修改插件仓库名或内部标识不会改变这一路径；升级前请备份 AstrBot 的插件数据。
+- 数据库与面板文件保存在 `data/plugin_data/astrbot_zhutianxiuxian`。从旧版本升级时，插件会在首次启动时将 `data/plugin_data/zhutian` 中缺失的数据复制到新目录，并保留旧目录作为回退副本；确认新目录数据正常后可自行清理旧目录。
 
 ## 开发验证
 
