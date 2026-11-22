@@ -13,6 +13,7 @@ BOARDS = {
     "天榜": "total_exp", "灵榜": "stones", "封神榜": "immortal_power",
     "完美世界榜": "xiangu_power", "至尊榜": "mortal_power",
     "遮天榜": "immortal_power", "神魄榜": "shenpo", "魔道榜": "modao",
+    "强化榜": "legacy_attribute_bonus", "洗根榜": "legacy_wash_count",
 }
 
 
@@ -23,6 +24,31 @@ def _level_id(doc: PlayerDoc) -> int:
 def _score(board: str, doc: PlayerDoc, level_table: list[dict],
            player_stats: Stats | None) -> tuple[int, str] | None:
     ext = doc.ext if isinstance(doc.ext, Mapping) else {}
+    legacy = ext.get("legacy_source") if isinstance(ext.get("legacy_source"), Mapping) else {}
+    if board == "强化榜":
+        fields = ("攻击加成", "防御加成", "生命加成")
+        if not any(key in legacy for key in fields):
+            return None
+        try:
+            score = int(sum(float(legacy.get(key, 0) or 0) for key in fields))
+        except (TypeError, ValueError):
+            return None
+        return score, f"强化值 {score:,}"
+    if board == "洗根榜":
+        if "洗根次数" not in legacy:
+            return None
+        try:
+            score = max(0, int(float(legacy.get("洗根次数") or 0)))
+        except (TypeError, ValueError):
+            return None
+        if score <= 0:
+            return None
+        root = legacy.get("灵根")
+        if isinstance(root, Mapping):
+            root_name = str(root.get("name") or root.get("type") or "未记录")
+        else:
+            root_name = str(root or "未记录")
+        return score, f"洗根次数 {score}｜灵根 {root_name}"
     if board == "天榜":
         level_id = _level_id(doc)
         if level_id >= 65:
@@ -37,7 +63,6 @@ def _score(board: str, doc: PlayerDoc, level_table: list[dict],
         score = int(float(motou_state(doc).get("modao", 0) or 0))
         return score, f"魔道值 {score:,}"
     if board == "神魄榜":
-        legacy = ext.get("legacy_source") if isinstance(ext.get("legacy_source"), Mapping) else {}
         score = int(float(ext.get("shenpo", legacy.get("神魄段数", 0)) or 0))
         return score, f"神魄段数 {score:,}"
     if board == "完美世界榜":
@@ -55,7 +80,6 @@ def _score(board: str, doc: PlayerDoc, level_table: list[dict],
         return None
     if board == "封神榜" and level_id < 42:
         return None
-    legacy = ext.get("legacy_source") if isinstance(ext.get("legacy_source"), Mapping) else {}
     if board == "遮天榜":
         secret_level = int(float(legacy.get("mijinglevel_id", max(0, doc.realm_index // 2)) or 0))
         if secret_level < 2:

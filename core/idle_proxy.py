@@ -89,7 +89,7 @@ def parse_duration(raw: str) -> tuple[int, bool]:
     match = re.fullmatch(r"(\d+)\s*(分钟|小时|天)?", text)
     if not match:
         raise ValueError("时长格式：灵身代行采药/采矿/狩猎/寻源/地脉引气/寻脉定源，"
-                         "神祇代行采药/采矿/狩猎/寻源；时长可用分钟/小时/天。")
+                         "神祇代行采药/采矿/狩猎/寻源/地脉引气/寻脉定源；时长可用分钟/小时/天。")
     value = int(match.group(1))
     minutes = value * {None: 1, "分钟": 1, "小时": 60, "天": 1_440}[match.group(2)]
     if minutes < 1:
@@ -182,7 +182,8 @@ def start_deity_herb_proxy(doc: PlayerDoc, now: float, minutes: int, task_id: st
 def start_deity_proxy(doc: PlayerDoc, now: float, minutes: int, task_id: str,
                       kind: str, group_id: str = "") -> tuple[bool, str, PlayerDoc]:
     task_types = {"herb": ("采药师", "采药"), "mine": ("采矿师", "采矿"),
-                  "hunt": ("猎户", "狩猎"), "source": ("源师", "寻源")}
+                  "hunt": ("猎户", "狩猎"), "source": ("源师", "寻源"),
+                  "earth_qi": ("源地师", "地脉引气"), "vein": ("源天师", "寻脉定源")}
     if kind not in task_types:
         return False, "神祇代行任务类型无效。", doc
     required_job, label = task_types[kind]
@@ -246,6 +247,35 @@ def _finish_progress(doc: PlayerDoc, state: dict, minutes: int, items: dict[str,
         "factor": factor, "spirit_tier": next_tier, "spirit_exp": spirit_exp,
         "occupation_level": level,
     }, d
+
+
+def apply_overdue_penalty(source_doc: PlayerDoc, settled_doc: PlayerDoc, result: dict,
+                          now: float, ends_at: Any,
+                          exp_table: Sequence[Mapping]) -> str | None:
+    if int(result.get("minutes", 0) or 0) < 1:
+        return None
+    try:
+        end = float(ends_at or 0)
+    except (TypeError, ValueError):
+        return None
+    if end <= 0 or float(now) <= end:
+        return None
+
+    overdue_minutes = int((float(now) - end) // 60)
+    penalty_rate = min(0.3, overdue_minutes / 60)
+    keep_rate = 1.0 - penalty_rate
+    result["items"] = {
+        name: count for name, qty in result["items"].items()
+        if (count := max(0, math.floor(int(qty) * keep_rate))) > 0
+    }
+    occupation_exp = math.floor(int(result["occupation_exp"]) * keep_rate)
+    level, exp = occupation.add_exp(
+        max(0, int(source_doc.ext.get("occupation_level", 1) or 1)),
+        max(0, int(source_doc.ext.get("occupation_exp", 0) or 0)),
+        occupation_exp, exp_table)
+    result["occupation_exp"], result["occupation_level"] = occupation_exp, level
+    settled_doc.ext["occupation_level"], settled_doc.ext["occupation_exp"] = level, exp
+    return f"任务超时{overdue_minutes}分钟，奖励减少{math.floor(penalty_rate * 100)}%"
 
 
 def finish_deity_herb_proxy(doc: PlayerDoc, now: float, rng: Any,
@@ -369,6 +399,80 @@ def finish_deity_source_proxy(doc: PlayerDoc, now: float, rng: Any,
     return True, result, d
 
 
+def _deity_vein_items(doc: PlayerDoc, minutes: int, factor: float,
+                      rng: Any, exp_table: Sequence[Mapping]) -> dict[str, int]:
+    base = math.floor((2.0 + rng.random() * 0.5) * minutes)
+    level = max(0, int(doc.ext.get("occupation_level", 1) or 1))
+    rate = occupation.rate_of(level, exp_table) * 10 or 1
+    high = math.floor(math.floor(0.5 * (rate + 1) * base) * factor)
+    middle = math.floor(math.floor(0.3 * (rate + 0.8) * base) * factor)
+    low = math.floor(math.floor(0.1 * (rate + 0.6) * base) * factor)
+    items = {name: count for name, count in (
+        ("超品源石", high), ("上品神源石", middle), ("神源液", middle),
+        ("超品神源石", low), ("神源药", low),
+    ) if count > 0}
+    if rng.random() < 0.15:
+        items["龙脉精华"] = 1
+    return items
+
+
+def finish_deity_vein_proxy(doc: PlayerDoc, now: float, rng: Any,
+                            exp_table: Sequence[Mapping]) -> tuple[bool, dict, PlayerDoc]:
+    state = state_of(doc)
+    deity = state["deity"]
+    task = deity["task"]
+    if deity["tier"] < 1 or not isinstance(task, dict) or task.get("kind") != "vein":
+        return False, {}, doc
+    if doc.ext.get("occupation") != "源天师":
+        return False, {}, doc
+
+    planned = max(1, min(MINUTES_MAX, int(task.get("minutes", 0) or 0)))
+    minutes = min(planned, max(0, int((float(now) - float(task.get("started_at", now))) // 60)))
+    factor = 0.5 + int(deity["tier"]) * 0.05
+    items = _deity_vein_items(doc, minutes, factor, rng, exp_table) if minutes else {}
+    result, d = _finish_progress(doc, state, minutes, items, exp_table, factor, 20,
+                                 progress_track="deity")
+    result.update({"planned_minutes": planned, "kind": "vein"})
+    return True, result, d
+
+
+def _earth_qi_items(doc: PlayerDoc, minutes: int, factor: float,
+                    exp_table: Sequence[Mapping]) -> dict[str, int]:
+    level = max(0, int(doc.ext.get("occupation_level", 1) or 1))
+    rate = occupation.rate_of(level, exp_table) * 10 or 1
+    rare_count = minutes // 30
+    realm_id = max(1, int(doc.realm_index) + 1)
+    realm_factor = realm_id / (80 if realm_id <= 21 else 40)
+    upper_base = math.floor(4 * (rate + 0.7) * rare_count)
+    medicine_base = math.floor((rate + 0.5) * rare_count)
+    upper = math.floor(math.floor(upper_base * realm_factor) * factor)
+    medicine = math.floor(math.floor(medicine_base * realm_factor) * factor)
+    items = {name: upper for name in ("上品源石", "超品源石", "神源石") if upper > 0}
+    if medicine > 0:
+        items["地源药"] = medicine
+    return items
+
+
+def finish_deity_earth_qi_proxy(doc: PlayerDoc, now: float,
+                                exp_table: Sequence[Mapping]) -> tuple[bool, dict, PlayerDoc]:
+    state = state_of(doc)
+    deity = state["deity"]
+    task = deity["task"]
+    if deity["tier"] < 1 or not isinstance(task, dict) or task.get("kind") != "earth_qi":
+        return False, {}, doc
+    if doc.ext.get("occupation") != "源地师":
+        return False, {}, doc
+
+    planned = max(1, min(MINUTES_MAX, int(task.get("minutes", 0) or 0)))
+    minutes = min(planned, max(0, int((float(now) - float(task.get("started_at", now))) // 60)))
+    factor = 0.5 + int(deity["tier"]) * 0.05
+    items = _earth_qi_items(doc, minutes, factor, exp_table) if minutes else {}
+    result, d = _finish_progress(doc, state, minutes, items, exp_table, factor,
+                                 progress_track="deity")
+    result.update({"planned_minutes": planned, "kind": "earth_qi"})
+    return True, result, d
+
+
 def finish_deity_proxy(doc: PlayerDoc, now: float, rng: Any,
                        exp_table: Sequence[Mapping]) -> tuple[bool, dict, PlayerDoc]:
     state = state_of(doc)
@@ -381,6 +485,10 @@ def finish_deity_proxy(doc: PlayerDoc, now: float, rng: Any,
         return finish_deity_hunt_proxy(doc, now, exp_table)
     if task.get("kind") == "source":
         return finish_deity_source_proxy(doc, now, rng, exp_table)
+    if task.get("kind") == "earth_qi":
+        return finish_deity_earth_qi_proxy(doc, now, exp_table)
+    if task.get("kind") == "vein":
+        return finish_deity_vein_proxy(doc, now, rng, exp_table)
     return False, {}, doc
 
 
@@ -512,20 +620,7 @@ def finish_earth_qi_proxy(doc: PlayerDoc, now: float,
     minutes = min(planned, max(0, int((float(now) - float(task.get("started_at", now))) // 60)))
     tier = int(spirit["tier"])
     factor = 0.5 + tier * 0.05
-    items: dict[str, int] = {}
-    if minutes:
-        level = max(0, int(doc.ext.get("occupation_level", 1) or 1))
-        rate = occupation.rate_of(level, exp_table) * 10 or 1
-        rare_count = minutes // 30
-        realm_id = max(1, int(doc.realm_index) + 1)
-        level_factor = realm_id / (80 if realm_id <= 21 else 40)
-        upper = math.floor(math.floor(4 * (rate + 0.7) * rare_count) * level_factor)
-        herb = math.floor(math.floor((rate + 0.5) * rare_count) * level_factor)
-        upper = math.floor(upper * factor)
-        herb = math.floor(herb * factor)
-        items = {name: upper for name in ("上品源石", "超品源石", "神源石") if upper > 0}
-        if herb > 0:
-            items["地源药"] = herb
+    items = _earth_qi_items(doc, minutes, factor, exp_table) if minutes else {}
 
     result, d = _finish_progress(doc, state, minutes, items, exp_table, factor)
     result.update({"planned_minutes": planned, "kind": "earth_qi"})

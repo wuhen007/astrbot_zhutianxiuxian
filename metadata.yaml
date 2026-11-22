@@ -2,7 +2,7 @@ name: astrbot_zhutianxiuxian
 display_name: 诸天修仙
 short_desc: 诸天万界修仙群聊游戏
 desc: 境界养成、秘境探索、战斗、职业装备、宗门互动与诸天长线玩法。
-version: 0.1.0
+version: 0.1.1
 author: wuhen
 repo: https://github.com/wuhen007/astrbot_zhutianxiuxian
 astrbot_version: ">=4.0,<5"

@@ -1329,7 +1329,7 @@ ITEM_TABLES = (
     "astrbot_zhutianxiuxian",
     "wuhen",
     "诸天万界修仙（Python 重构版）",
-    "0.1.0",
+    "0.1.1",
     "",
 )
 class ZhutianPlugin(Star):
@@ -2366,6 +2366,8 @@ class ZhutianPlugin(Star):
                 (f"{CMD_DEITY_MINE_PROXY} [分钟/小时/天]", "采矿师专属，神祇倍率 55%～95%"),
                 (f"{CMD_DEITY_HUNT_PROXY} [分钟/小时/天]", "猎户专属，结算五种猎物与神祇/职业经验"),
                 ("#神祇代行寻源 [分钟/小时/天]", "源师专属，获得纳戒源石道具与凡源药"),
+                ("#神祇代行地脉引气 [分钟/小时/天]", "源地师专属，获得上品/超品/神源石道具与地源药"),
+                ("#神祇代行寻脉定源 [分钟/小时/天]", "源天师专属，获得神源道具与神祇/职业经验，15% 概率获得龙脉精华"),
                 (CMD_DEITY_PROXY_END, "结算神祇代行并晋升神祇重天"),
                 (f"{CMD_MINE} 分钟", "采矿（采矿师，30 分钟周期）"),
                 (CMD_MINE_END, "结束采矿结算"),
@@ -2743,6 +2745,7 @@ class ZhutianPlugin(Star):
                 ("#天榜 / #灵榜 / #至尊榜 / #封神榜", "全服修为、灵石与凡人/仙人战力榜"),
                 ("#完美世界榜 / #遮天榜", "仙古战力榜与人体秘境战力榜"),
                 ("#神魄榜 / #魔道榜", "全服神魄段数与魔道值榜"),
+                ("#强化榜 / #洗根榜", "仅统计旧版档案已保存相应加成或洗根次数的道友"),
                 (f"{CMD_DUEL} @道友 / {CMD_DUEL_RANK}", "比试（胜+3 平+1）与积分榜"),
             ]},
             {"title": "群运营", "lines": [
@@ -17932,7 +17935,7 @@ class ZhutianPlugin(Star):
         async for _r in self._smart(event, "\n".join(lines)):
             yield _r
 
-    @filter.regex(r"^#(?:天榜|灵榜|封神榜|完美世界榜|至尊榜|遮天榜|神魄榜|魔道榜)$")
+    @filter.regex(r"^#(?:天榜|灵榜|封神榜|完美世界榜|至尊榜|遮天榜|神魄榜|魔道榜|强化榜|洗根榜)$")
     async def handle_legacy_rank(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
@@ -18843,7 +18846,7 @@ class ZhutianPlugin(Star):
                 await self.db.save_player(d.model_dump())
         yield event.plain_result(msg)
 
-    @filter.regex(r"^#神祇代行(采药|采矿|狩猎|寻源)(?:\s+.*)?$")
+    @filter.regex(r"^#神祇代行(采药|采矿|狩猎|寻源|地脉引气|寻脉定源)(?:\s+.*)?$")
     @_serialized_player_command
     async def handle_deity_proxy(self, event: AstrMessageEvent):
         if not self._allowed(event):
@@ -18857,7 +18860,7 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         message = self._msg_of(event).strip()
-        task_label = next(label for label in ("采药", "采矿", "狩猎", "寻源")
+        task_label = next(label for label in ("采药", "采矿", "狩猎", "寻源", "地脉引气", "寻脉定源")
                           if message.startswith(f"#神祇代行{label}"))
         raw = message[len(f"#神祇代行{task_label}"):].strip()
         try:
@@ -18867,7 +18870,8 @@ class ZhutianPlugin(Star):
             return
         ok, msg, d = idle_proxy_mod.start_deity_proxy(
             doc, time.time(), minutes, secrets.token_hex(8),
-            {"采药": "herb", "采矿": "mine", "狩猎": "hunt", "寻源": "source"}[task_label], group_id)
+            {"采药": "herb", "采矿": "mine", "狩猎": "hunt", "寻源": "source",
+             "地脉引气": "earth_qi", "寻脉定源": "vein"}[task_label], group_id)
         if not ok:
             yield event.plain_result(msg)
             return
@@ -18888,27 +18892,34 @@ class ZhutianPlugin(Star):
             return
         deity = idle_proxy_mod.deity_state_of(doc)
         task = deity.get("task")
-        if not isinstance(task, dict) or task.get("kind") not in {"herb", "mine", "hunt", "source"}:
+        if not isinstance(task, dict) or task.get("kind") not in {"herb", "mine", "hunt", "source", "earth_qi", "vein"}:
             yield event.plain_result("神祇当前没有等待结算的代行任务。")
             return
         seed = f"{doc.uid}:deity-proxy:{task.get('task_id', '')}"
+        now = time.time()
         ok, result, d = idle_proxy_mod.finish_deity_proxy(
-            doc, time.time(), random.Random(seed), self.occ_exp_table)
+            doc, now, random.Random(seed), self.occ_exp_table)
         if not ok:
             yield event.plain_result("结束失败：神祇状态或对应职业已变化，当前任务仍保留。")
             return
+        overdue_msg = idle_proxy_mod.apply_overdue_penalty(
+            doc, d, result, now, task.get("ends_at"), self.occ_exp_table)
         async with self.db.transaction():
             await self.db.save_player(d.model_dump())
             if result["items"]:
                 await self.db.add_items(doc.uid, result["items"])
         task_label, job = {"herb": ("采药", "采药师"), "mine": ("采矿", "采矿师"),
-                           "hunt": ("狩猎", "猎户"), "source": ("寻源", "源师")}[result["kind"]]
+                           "hunt": ("狩猎", "猎户"), "source": ("寻源", "源师"),
+                           "earth_qi": ("地脉引气", "源地师"),
+                           "vein": ("寻脉定源", "源天师")}[result["kind"]]
         lines = [f"【神祇{task_label}归来】实际 {result['minutes']}/{result['planned_minutes']} 分钟",
                  f"职业经验 +{result['occupation_exp']}｜{job} {result['occupation_level']} 级",
                  f"收益倍率 ×{result['factor']:.0%}｜神祇 {result['spirit_tier']} 重，经验 {result['spirit_exp']}/{result['spirit_tier'] * 1000}"]
         lines.extend(f"· {name} ×{qty}" for name, qty in result["items"].items())
         if not result["items"]:
             lines.append("· 此次未获得物品。")
+        if overdue_msg:
+            lines.append(overdue_msg)
         yield event.plain_result("\n".join(lines))
 
     @filter.command(CMD_SPIRIT_FORM, "凝聚洞天灵身")
@@ -18980,11 +18991,14 @@ class ZhutianPlugin(Star):
             yield event.plain_result("灵身当前没有等待结算的采集任务。")
             return
         seed = f"{doc.uid}:spirit-herb:{task.get('task_id', '')}"
+        now = time.time()
         ok, result, d = idle_proxy_mod.finish_proxy(
-            doc, time.time(), random.Random(seed), self.occ_exp_table)
+            doc, now, random.Random(seed), self.occ_exp_table)
         if not ok:
             yield event.plain_result("结束失败：灵身状态或对应职业已变化，当前任务仍保留。")
             return
+        overdue_msg = idle_proxy_mod.apply_overdue_penalty(
+            doc, d, result, now, task.get("ends_at"), self.occ_exp_table)
         async with self.db.transaction():
             await self.db.save_player(d.model_dump())
             if result["items"]:
@@ -19000,6 +19014,8 @@ class ZhutianPlugin(Star):
         lines.extend(f"· {name} ×{qty}" for name, qty in result["items"].items())
         if not result["items"]:
             lines.append("· 此次未采得成株药材。")
+        if overdue_msg:
+            lines.append(overdue_msg)
         yield event.plain_result("\n".join(lines))
 
     @filter.command(CMD_MINE, "采矿")

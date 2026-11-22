@@ -1,3 +1,5 @@
+import ast
+from pathlib import Path
 import unittest
 
 from core import rankings
@@ -68,3 +70,48 @@ class RankingsTests(unittest.TestCase):
         zetian = rankings.board_text("遮天榜", players, "secret", lambda _: table, stats)
         self.assertIn("秘境（人体秘境 2）｜战力 437", zetian)
         self.assertNotIn("凡人", zetian)
+
+    def test_enhancement_alias_ranks_only_preserved_legacy_bonus_fields(self):
+        players = [
+            PlayerDoc(uid="old-low", name="旧档低", ext={"legacy_source": {
+                "攻击加成": 1.9, "防御加成": 2.8, "生命加成": 3.1,
+            }}),
+            PlayerDoc(uid="old-high", name="旧档高", ext={"legacy_source": {
+                "攻击加成": 10.5, "防御加成": 20.5, "生命加成": 30.5,
+            }}),
+            PlayerDoc(uid="fresh", name="新修", ext={"enh": {"武器": 10}}),
+        ]
+        text = rankings.board_text("强化榜", players, "fresh", lambda _: [])
+        self.assertIn("1. 旧档高｜强化值 61", text)
+        self.assertIn("2. 旧档低｜强化值 7", text)
+        self.assertNotIn("新修", text)
+        self.assertIn("你的名次：未上榜", text)
+        self.assertNotIn("old-", text)
+
+    def test_wash_root_alias_ranks_positive_preserved_counts_only(self):
+        players = [
+            PlayerDoc(uid="washed", name="洗根多", ext={"legacy_source": {
+                "洗根次数": 12, "灵根": {"name": "神慧者"},
+            }}),
+            PlayerDoc(uid="washed-less", name="洗根少", ext={"legacy_source": {
+                "洗根次数": 3, "灵根": {"name": "先天道胎"},
+            }}),
+            PlayerDoc(uid="never", name="未洗根", ext={"legacy_source": {"灵根": {"name": "凡根"}}}),
+            PlayerDoc(uid="fresh", name="新修"),
+        ]
+        text = rankings.board_text("洗根榜", players, "washed-less", lambda _: [])
+        self.assertIn("1. 洗根多｜洗根次数 12｜灵根 神慧者", text)
+        self.assertIn("2. 洗根少｜洗根次数 3｜灵根 先天道胎", text)
+        self.assertNotIn("未洗根", text)
+        self.assertNotIn("新修", text)
+        self.assertIn("你的名次：第 2 名", text)
+
+    def test_legacy_ranking_aliases_are_registered_on_shared_route(self):
+        main_path = Path(__file__).resolve().parents[1] / "main.py"
+        tree = ast.parse(main_path.read_text(encoding="utf-8"))
+        handler = next(node for node in ast.walk(tree)
+                       if isinstance(node, ast.AsyncFunctionDef)
+                       and node.name == "handle_legacy_rank")
+        route = handler.decorator_list[0].args[0].value
+        self.assertIn("强化榜", route)
+        self.assertIn("洗根榜", route)
