@@ -71,7 +71,7 @@ def take(world: dict, doc: Any, now: float) -> tuple[bool, str]:
         if str(cur.get("uid")) == doc.uid:
             return False, "轮回路已在你手中。"
         if int(cur.get("realm", 0) or 0) >= realm:
-            return False, (f"轮回路在【{cur.get('name')}】手中（第 {int(cur.get('realm', 0)) + 1} 境），"
+            return False, (f"轮回路在「{cur.get('name')}」手中（第 {int(cur.get('realm', 0)) + 1} 境），"
                            f"境界不高于他，夺不来。")
         st["drops"] = list(st.get("drops") or [])
     st["controller"] = {"uid": doc.uid, "name": doc.name or doc.uid,
@@ -159,7 +159,7 @@ def list_text(world: Mapping | None, plane: str | None = None, now: float | None
         _purge(st, now)
     rows = [d for d in (st.get("drops") or [])
             if plane is None or str(d.get("plane")) == plane]
-    title = f"【遗落纳戒·{plane}】" if plane else "【遗落纳戒】"
+    title = f"--- 遗落纳戒 · {plane} ---" if plane else "--- 遗落纳戒 ---"
     if not rows:
         return title + "\n此处没有遗落纳戒。"
     lines = [title, f"在册 {len(rows)} 枚（{DROP_TTL // 3600} 小时内有效）"]
@@ -208,7 +208,7 @@ def claim(world: dict, row: Mapping, now: float) -> tuple[bool, str, int, dict[s
     st["drops"] = drops
     put(world, st)
     return (True,
-            (f"你拾起【{row.get('name')}】的遗落纳戒：灵石 {int(row.get('stones', 0)):,}，"
+            (f"你拾起「{row.get('name')}」的遗落纳戒：灵石 {int(row.get('stones', 0)):,}，"
              f"遗物 {'、'.join(f'{k}×{v}' for k, v in (row.get('items') or {}).items()) or '无'}。"),
             int(row.get("stones", 0)), dict(row.get("items") or {}))
 

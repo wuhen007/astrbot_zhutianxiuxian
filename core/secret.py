@@ -81,6 +81,40 @@ class Session:
     dungeon: str = ""      # 非空 = 表驱动副本（W7-5b，掉落池/系数来自副本地表）
 
 
+def combat_name(daohao: Any, uid: Any, nickname: Any = "") -> str:
+    """显示道号优先，其次当前平台昵称；永不把 UID 当成角色名。"""
+    uid = str(uid or "").strip()
+    uid_label = f"{uid[:8]}…" if uid else ""
+    for candidate in (daohao, nickname):
+        name = str(candidate or "").strip()
+        truncated_uid = (name.endswith("…") and len(name) > 8
+                         and uid.startswith(name[:-1]))
+        if name and name not in (uid, uid_label) and not truncated_uid:
+            return name
+    return "道友"
+
+
+def remember_defeat(ext: dict[str, Any], session: Session) -> None:
+    ext["secret_defeat"] = {"place": str(session.place), "floor": int(session.floor)}
+
+
+def defeat_notice(ext: Mapping[str, Any]) -> str | None:
+    record = ext.get("secret_defeat")
+    if not isinstance(record, Mapping) or not record.get("place"):
+        return None
+    try:
+        floor = max(0, int(record.get("floor") or 0))
+    except (TypeError, ValueError):
+        floor = 0
+    place = str(record["place"])
+    return (f"上次在「{place}」第 {floor} 层寻宝战败，已被迫脱出秘境，收获已经结算。"
+            f"重新探索请发「#降临秘境 {place}」。")
+
+
+def clear_defeat_notice(ext: dict[str, Any]) -> None:
+    ext.pop("secret_defeat", None)
+
+
 def place_factor(name: str) -> float:
     return PLACES.get(name, PLACES["青冥山"])[1]
 

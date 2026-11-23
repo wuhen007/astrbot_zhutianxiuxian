@@ -76,7 +76,7 @@ def unequip(doc: PlayerDoc, slot: str) -> tuple[bool, str, str | None]:
     old = cur.pop(slot, None)
     if not old:
         return False, f"{slot}位本来就没有装备。", None
-    return True, f"已卸下{slot}位的「{old}」，回到纳戒。", old
+    return True, f"【装备·卸下】已卸下{slot}位的「{old}」，回到纳戒。", old
 
 
 ENHANCE_MAX = 10

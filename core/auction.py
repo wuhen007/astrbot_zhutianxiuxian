@@ -322,11 +322,11 @@ def list_item(w: dict[str, Any], doc: Any, inv: Mapping[str, int],
     last = float(w["last_list"].get(str(doc.uid)) or 0)
     if now - last < LIST_CD_SECONDS:
         left = (LIST_CD_SECONDS - (now - last)) / 3600
-        return False, f"上架冷却中，还需 {left:.1f} 小时（原版 24h CD）。", {}
+        return False, f"【拍卖·上架冷却】上架冷却中，还需 {left:.1f} 小时（原版 24h CD）。", {}
     if int(inv.get(name, 0) or 0) < amount:
-        return False, f"纳戒里没有足够的【{name}】（需 {amount} 件）。", {}
+        return False, f"纳戒里没有足够的「{name}」（需 {amount} 件）。", {}
     if is_restricted(doc, name):
-        return False, f"【{name}】属私密/唯一产物，不可交易。", {}
+        return False, f"「{name}」属私密/唯一产物，不可交易。", {}
     w["seq"] += 1
     w["player"] = {
         "id": f"player-{w['seq']}", "kind": "player", "name": name,
@@ -335,7 +335,7 @@ def list_item(w: dict[str, Any], doc: Any, inv: Mapping[str, int],
         "bid_ts": now, "bidder": "0", "seller": str(doc.uid),
     }
     w["last_list"][str(doc.uid)] = now
-    return True, (f"已上架【{name}】×{amount}，起拍 {price:,} 灵石。\n"
+    return True, (f"已上架「{name}」×{amount}，起拍 {price:,} 灵石。\n"
                   f"{int(INTERVAL_SECONDS / 60)} 分钟无人加价即成交；流拍会退还物品。"), {name: -amount}
 
 

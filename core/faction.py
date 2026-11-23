@@ -116,9 +116,9 @@ def join(state: dict, name: str, uid: str, player_name: str, realm: int) -> tupl
     if not info:
         return False, f"没有「{name}」这个势力。#势力列表 查看。"
     if faction_of(state, uid):
-        return False, f"你已在【{faction_of(state, uid)}】，先 #退出势力 再改换门庭。"
+        return False, f"你已在「{faction_of(state, uid)}」，先 #退出势力 再改换门庭。"
     if int(realm) < int(info["requirement"]):
-        return False, f"【{name}】只收第 {int(info['requirement']) + 1} 境以上的修士（你第 {int(realm) + 1} 境）。"
+        return False, f"「{name}」只收第 {int(info['requirement']) + 1} 境以上的修士（你第 {int(realm) + 1} 境）。"
     row = state["factions"][name]
     members = dict(row.get("members") or {})
     role = "宗主" if not members else "门人"
@@ -126,7 +126,7 @@ def join(state: dict, name: str, uid: str, player_name: str, realm: int) -> tupl
     row["members"] = members
     state["factions"][name] = row
     tag = "成为开山宗主" if role == "宗主" else "成为门人"
-    return True, f"你加入【{info['icon']}{name}】，{tag}。"
+    return True, f"你加入「{info['icon']}{name}」，{tag}。"
 
 
 def leave(state: dict, uid: str) -> tuple[bool, str]:
@@ -143,7 +143,7 @@ def leave(state: dict, uid: str) -> tuple[bool, str]:
     row["members"] = members
     state["factions"][name] = row
     note = "，宗主之位已传给贡献最高者" if was_leader and members else ""
-    return True, f"你已脱离【{name}】{note}。"
+    return True, f"你已脱离「{name}」{note}。"
 
 
 def contribute(state: dict, uid: str, stones: int) -> tuple[bool, str, int]:
@@ -152,7 +152,7 @@ def contribute(state: dict, uid: str, stones: int) -> tuple[bool, str, int]:
         return False, "你尚未加入任何势力，何谈贡献。", 0
     amount = int(stones)
     if amount <= 0:
-        return False, "供奉数量需大于 0。", 0
+        return False, "【势力·供奉数量无效】供奉数量需大于 0。", 0
     row = state["factions"][name]
     points = amount * CONTRIB_RATE
     before = int(row.get("contribution", 0) or 0)
@@ -166,9 +166,9 @@ def contribute(state: dict, uid: str, stones: int) -> tuple[bool, str, int]:
     row["members"] = members
     state["factions"][name] = row
     if row["level"] > level_of(before):
-        return True, (f"供奉 {amount:,} 灵石 → 贡献 +{points:,}；【{name}】升为 {row['level']} 级！"
+        return True, (f"【势力·供奉】供奉 {amount:,} 灵石 → 贡献 +{points:,}；「{name}」升为 {row['level']} 级！"
                       f"基金 {row['fund']:,}。"), points
-    return True, (f"供奉 {amount:,} 灵石 → 贡献 +{points:,}（势力共 {row['contribution']:,}）；"
+    return True, (f"【势力·供奉】供奉 {amount:,} 灵石 → 贡献 +{points:,}（势力共 {row['contribution']:,}）；"
                   f"基金 {row['fund']:,}。"), points
 
 
@@ -190,11 +190,11 @@ def pay(state: dict, uid: str) -> tuple[bool, str, int]:
         return False, "你尚未加入任何势力，无俸可领。", 0
     row = state["factions"][name]
     if int(row.get("fund", 0) or 0) < amount:
-        return False, (f"【{name}】基金不足发俸（需 {amount:,}，现存 {int(row.get('fund', 0)):,}），"
+        return False, (f"「{name}」基金不足发俸（需 {amount:,}，现存 {int(row.get('fund', 0)):,}），"
                        f"快去 #势力贡献 数量 添些香火。"), 0
     row["fund"] = int(row["fund"]) - amount
     state["factions"][name] = row
-    return True, f"领取【{name}】俸禄 {amount:,} 灵石（{role}·{int(row.get('level', 1))} 级）。", amount
+    return True, f"领取「{name}」俸禄 {amount:,} 灵石（{role}·{int(row.get('level', 1))} 级）。", amount
 
 
 def list_text(state: Mapping, uid: str = "") -> str:
@@ -205,7 +205,7 @@ def list_text(state: Mapping, uid: str = "") -> str:
         row = (state.get("factions") or {}).get(name) or {}
         members = row.get("members") or {}
         lines.append(
-            f"{info['icon']}【{name}】{int(row.get('level', 1))} 级"
+            f"{info['icon']}「{name}」{int(row.get('level', 1))} 级"
             f"｜成员 {len(members)} 人｜基金 {int(row.get('fund', 0)):,}"
             f"｜门槛 第 {int(info['requirement']) + 1} 境"
             f"{' ← 你在此' if mine == name else ''}"
@@ -255,16 +255,16 @@ def jyh_visit(doc: Any, inv: Mapping[str, int], realm_index: int,
     if realm_index < 41:
         return False, "造访剑云海需成仙（主轨第 42 境）方可承受剑魔帝主之威。", 0
     if int((inv or {}).get(JYH_ITEM, 0) or 0) < 1:
-        return False, f"需持【{JYH_ITEM}】×1 方可入海（诸天掉落）。", 0
+        return False, f"需持「{JYH_ITEM}」×1 方可入海（诸天掉落）。", 0
     nl = chr(10)
     return True, nl.join([
         "**剑云海机缘**",
         "",
         "剑魔帝主负手立于万顷剑海之前，静候你的选择。",
         "",
-        "- **修炼资源：** 灵石与剑云海圣药",
-        "- **拜师传人：** 继承《永恒终极剑道》",
-        "- **帝主庇护：** 黑暗牢笼豁免与副本增益",
+        "· **修炼资源：** 灵石与剑云海圣药",
+        "· **拜师传人：** 继承《永恒终极剑道》",
+        "· **帝主庇护：** 黑暗牢笼豁免与副本增益",
         "",
         "> 此次机缘仅可选择一次。（点击或 #剑云海选择1/2/3）"]), 1
 
@@ -277,7 +277,7 @@ def jyh_choose(doc: Any, choice: int,
     if choice not in (1, 2, 3):
         return False, "请选择 1/2/3。", {}, 0
     if not consume_token(JYH_ITEM, 1):
-        return False, f"【{JYH_ITEM}】已不在纳戒，机缘作废。", {}, 0
+        return False, f"「{JYH_ITEM}」已不在纳戒，机缘作废。", {}, 0
     ext = getattr(doc, "ext", None)
     if isinstance(ext, dict):
         ext[JYH_FLAG] = True

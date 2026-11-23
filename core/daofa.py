@@ -46,7 +46,7 @@ def open_for(doc: PlayerDoc, now: float) -> tuple[bool, str]:
     d.ext["daofaxianshu"] = FLAG
     d.ext["daofaxianshu_endtime"] = base + SUBSCRIBE_MS
     d.ext.setdefault("daofa_days", 0)
-    return True, (f"已为 {d.name or d.uid} 开通道法仙术 30 天"
+    return True, (f"【道法仙术·开通】已为 {d.name or d.uid} 开通道法仙术 30 天"
                   f"（累计剩余 {remaining_days(d, now):.1f} 天）。")
 
 

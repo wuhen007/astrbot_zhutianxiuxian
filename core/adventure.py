@@ -55,7 +55,7 @@ def tower_fight(
     ext = doc.ext if isinstance(doc.ext, Mapping) else {}
     floor = int(ext.get("tower_floor", 0) or 0)
     if floor >= TOWER_MAX:
-        return False, "已达到镇妖塔最高层数（50000 层）。", {}, {}
+        return False, "【镇妖塔·已达上限】已达到镇妖塔最高层数（50000 层）。", {}, {}
     boss = tower_boss(floor)
     reward = tower_reward(floor)
     from . import battle as battle_mod

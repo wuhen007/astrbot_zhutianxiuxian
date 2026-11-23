@@ -79,7 +79,7 @@ def magic_girl_advance(doc: PlayerDoc) -> tuple[bool, str]:
     nxt_name, cost, eff = MG_STAGES[stage + 1]
     hopes = int(zt.get("hopes", 0) or 0)
     if hopes < cost:
-        return False, f"进阶【{nxt_name}】需希望碎片 {cost}（现有 {hopes}）——探索见泷原可得。"
+        return False, f"进阶「{nxt_name}」需希望碎片 {cost}（现有 {hopes}）——探索见泷原可得。"
     if "魔法少女小圆" not in list(zt.get("imprints") or []):
         return False, "需先完成「魔法少女小圆」投影（获得世界印记）。"
     zt["hopes"] = hopes - cost
@@ -93,7 +93,7 @@ def magic_girl_advance(doc: PlayerDoc) -> tuple[bool, str]:
     if isinstance(ext, dict):
         ext["zhutian"] = zt
     _save_extra(doc, st)
-    return True, (f"≡≡≡ 魔法少女进阶 ≡≡≡\n{MG_STAGES[stage][0]} → 【{nxt_name}】！\n"
+    return True, (f"≡≡≡ 魔法少女进阶 ≡≡≡\n{MG_STAGES[stage][0]} → 「{nxt_name}」！\n"
                   f"化身 eff ×{eff:g}｜希望碎片 -{cost}｜"
                   + ("宇宙法则的终极权限已在你手。" if stage + 1 == len(MG_STAGES) - 1 else
                      "救赎之力更进一层。"))
@@ -104,7 +104,7 @@ def purify(doc: PlayerDoc, inv: Mapping[str, int]) -> tuple[bool, str, dict[str,
     st = _st(doc)
     zt = _zt(doc)
     if int((inv or {}).get(PURIFY_ITEM, 0) or 0) < 1:
-        return False, f"你并没有【{PURIFY_ITEM}】——见泷原探索可得。", {}
+        return False, f"你并没有「{PURIFY_ITEM}」——见泷原探索可得。", {}
     dust = max(0, int(st.get("dust", 0) or 0) - 3)
     st["dust"] = dust
     zt["hopes"] = int(zt.get("hopes", 0) or 0) + 3
@@ -124,7 +124,7 @@ def reset_timeline(doc: PlayerDoc) -> tuple[bool, str]:
     if dust > 5:
         return False, f"灵魂宝石污浊 {dust}/20 尚重——先 #净化灵魂宝石 压至 ≤5。"
     if int(zt.get("energy", 0) or 0) < 2:
-        return False, "重置时间线需镜能 2 点（每日重置）。"
+        return False, "【时间线·镜能不足】重置时间线需镜能 2 点（每日重置）。"
     zt["energy"] = int(zt.get("energy", 0) or 0) - 2
     st["dust"] = DUST_INIT
     st["timeline"] = int(st.get("timeline", 0) or 0) + 1
@@ -165,7 +165,7 @@ def consume_mirror(doc: PlayerDoc, now: float | None = None,
     st["protagonist"] = pick["name"]
     _save_extra(doc, st)
     return True, (f"【消耗诸天镜】神魂离体，投影诸天——归位时你已是别人故事的主角。\n"
-                  f"灵根 {old} → 【{pick['name']}】（{pick['type']}｜eff ×{pick['eff']:g}）。\n"
+                  f"灵根 {old} → 「{pick['name']}」（{pick['type']}｜eff ×{pick['eff']:g}）。\n"
                   "属性面板以 #我的灵根 复核。")
 
 
@@ -200,7 +200,7 @@ def thought_check(inv: Mapping[str, int], item: str, qty: int) -> str | None:
     if qty <= 0:
         return "数量须为正整数。"
     if int((inv or {}).get(item, 0) or 0) < qty:
-        return f"你并没有【{item}】×{qty}。"
+        return f"你并没有「{item}」×{qty}。"
     return None
 
 

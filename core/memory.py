@@ -176,9 +176,9 @@ def activate(doc: Any, now: float | None = None) -> tuple[bool, str]:
     if stage_of(doc) > 0:
         return False, "你已在记忆命途中。"
     if int(getattr(doc, "realm_index", 0) or 0) < ACTIVATE_REALM:
-        return False, f"开启记忆命途需第 {ACTIVATE_REALM + 1} 境以上。"
+        return False, f"【记忆命途·境界不足】开启记忆命途需第 {ACTIVATE_REALM + 1} 境以上。"
     if int(doc.stones) < ACTIVATE_COST:
-        return False, f"开启需 {ACTIVATE_COST:,} 灵石（当前 {int(doc.stones):,}）。"
+        return False, f"【记忆命途·灵石不足】开启需 {ACTIVATE_COST:,} 灵石（当前 {int(doc.stones):,}）。"
     from . import linggen
     doc.stones -= ACTIVATE_COST
     snap = linggen.snapshot(root_of(1))
@@ -199,7 +199,7 @@ def simulate(doc: Any, rng: random.Random) -> tuple[bool, str]:
         return False, "尚未开启记忆命途（#开启记忆命途）。"
     st = state_of(doc)
     if len(st["factors"]) >= STAGES[stage - 1]["cap"]:
-        return False, "已达本阶段因子上限，请先 #命途行进。"
+        return False, "【记忆命途·因子已满】已达本阶段因子上限，请先 #命途行进。"
     if int(st.get("sim", 0) or 0) < SIM_MAX:
         return False, f"模拟值不足 100%（当前 {int(st.get('sim', 0))}%）。"
     left = [f for f in FACTORS if f not in st["factors"]]
@@ -223,7 +223,7 @@ def advance(doc: Any) -> tuple[bool, str]:
         return False, "无漏净子已是最终阶段。"
     nxt = STAGES[stage]
     if int(getattr(doc, "realm_index", 0) or 0) < int(nxt["realm"]):
-        return False, f"下一阶段【{nxt['name']}】需第 {int(nxt['realm']) + 1} 境。"
+        return False, f"下一阶段「{nxt['name']}」需第 {int(nxt['realm']) + 1} 境。"
     st = state_of(doc)
     need = (3, 6, 9, 12)[stage - 1]
     if len(st["factors"]) < need:
@@ -236,7 +236,7 @@ def advance(doc: Any) -> tuple[bool, str]:
     snap = linggen.snapshot(root_of(stage + 1))
     snap["awaken"] = int(doc.ext.get("linggen", {}).get("awaken", 0) or 0)
     doc.ext["linggen"] = snap
-    return True, (f"【{nxt['name']}】命途向前一步，灵根与生命本源重塑。\n"
+    return True, (f"「{nxt['name']}」命途向前一步，灵根与生命本源重塑。\n"
                   f"生命本源 {life_max(st, stage + 1)}｜物品 {item_mult(st, stage + 1)} 倍"
                   f"｜悟道 +{effects(doc)['wudao']:.0%}")
 

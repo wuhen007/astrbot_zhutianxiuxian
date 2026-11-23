@@ -184,7 +184,7 @@ def redeem(doc: PlayerDoc, rows: Any, code: str, now: float,
             entry = e
             break
     if entry is None:
-        return False, "兑换码无效（#兑换码图鉴 查看在册名单）。", {}, 0
+        return False, "【兑换码·无效】兑换码无效（#兑换码图鉴 查看在册名单）。", {}, 0
     name, items, stones, _ = _rewards_of(entry)
     redeemed = list(st.get("redeemed") or [])
     if code.upper() in redeemed or name in redeemed:

@@ -65,13 +65,20 @@ def state_for(cal: dict, group_id: str, now: float,
     if not isinstance(groups, dict):
         groups = cal["stone_king_groups"] = {}
     key = str(group_id)
-    state = groups.get(key)
     current_week = week_key(now)
+    changed = False
+    if cal.get("stone_king_cleanup_week") != current_week:
+        for group_key, group_state in list(groups.items()):
+            if not isinstance(group_state, dict) or group_state.get("week_key") != current_week:
+                del groups[group_key]
+        cal["stone_king_cleanup_week"] = current_week
+        changed = True
+    state = groups.get(key)
     if not isinstance(state, dict) or state.get("week_key") != current_week:
         state = create_state(key, now, rng)
         groups[key] = state
         return state, True
-    return state, False
+    return state, changed
 
 
 def king_of(state: dict) -> dict:

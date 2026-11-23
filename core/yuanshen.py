@@ -350,7 +350,7 @@ def consolidate(doc: Any) -> tuple[bool, str]:
         need_tier = CONSOLIDATE_TIER_BASE + int(lv)
         tier = authority_21(doc)
         if tier < need_tier:
-            return False, (f"凝练【{LEVEL_NAMES[int(lv) + 1]}】需主修权柄达 {need_tier} 重天"
+            return False, (f"凝练「{LEVEL_NAMES[int(lv) + 1]}」需主修权柄达 {need_tier} 重天"
                            f"（当前 {tier} 重天）。")
     if cur < cost:
         return False, (f"凝练需元神 {cost:,}（当前 {cur:,}）。\n"
@@ -362,7 +362,7 @@ def consolidate(doc: Any) -> tuple[bool, str]:
     save(doc, st)
     _ = heart_of(doc)      # 等级变化 → 心神上限同步
     return True, (f"紫府洞开，元神凝形！\n"
-                  f"元神境界：【{LEVEL_NAMES[int(st['level'])]}】\n"
+                  f"元神境界：「{LEVEL_NAMES[int(st['level'])]}」\n"
                   f"消耗元神 {cost:,}，余 {st['cur']:,}/{st['max']:,}。\n"
                   f"心神上限同步为 {heart_max(doc)}。")
 
@@ -398,7 +398,7 @@ def take_pills(doc: Any, inv: Mapping[str, int], item_index: Mapping[str, Mappin
     if which and which not in ("全部", "all", "一键"):
         rows = [r for r in rows if r["name"] == which]
         if not rows:
-            return False, f"纳戒里没有【{which}】这种天药。", {}
+            return False, f"纳戒里没有「{which}」这种天药。", {}
     used: dict[str, int] = {}
     gain = 0
     healed = 0.0
@@ -448,15 +448,15 @@ def _check(doc: Any, skill: str, want: str, now: float) -> tuple[dict | None, st
     name = str(skill or "").strip()
     cfg = SKILLS.get(name)
     if not cfg:
-        return None, f"【{name}】不在元神十五法门之列。"
+        return None, f"「{name}」不在元神十五法门之列。"
     if not has_skill(doc, name):
-        return None, f"你尚未掌握【{name}】（精神宇宙的功法掉落可得）。"
+        return None, f"你尚未掌握「{name}」（精神宇宙的功法掉落可得）。"
     if str(cfg.get("type")) != want:
-        return None, f"【{name}】是{TYPE_LABEL.get(str(cfg.get('type')), '其他')}法门，请用对应指令。"
+        return None, f"「{name}」是{TYPE_LABEL.get(str(cfg.get('type')), '其他')}法门，请用对应指令。"
     st = ensure(doc)
     left = _cd_left(st, name, now)
     if left > 0:
-        return None, f"【{name}】尚在冷却，还需 {left // 60} 分 {left % 60} 秒。"
+        return None, f"「{name}」尚在冷却，还需 {left // 60} 分 {left % 60} 秒。"
     return cfg, ""
 
 
@@ -475,7 +475,7 @@ def cultivate(doc: Any, skill: str, now: float | None = None) -> tuple[bool, str
     st["cur"] = min(cap, before + add)
     _mark_cd(doc, st, str(skill).strip(), now)
     real = int(st["cur"]) - before
-    return True, (f"你运转【{skill}】，紫府中元神之光渐盛。\n"
+    return True, (f"你运转「{skill}」，紫府中元神之光渐盛。\n"
                   f"元神恢复 {real:,}（当前 {st['cur']:,}/{cap:,}）。")
 
 
@@ -491,12 +491,12 @@ def refine(doc: Any, skill: str, now: float | None = None) -> tuple[bool, str]:
         return False, "元神上限为 0，请先 #凝练元神。"
     cost = int(math.ceil(cap * float(cfg["ratio"])))
     if int(st.get("cur", 0) or 0) < cost:
-        return False, f"淬炼需消耗 {cost:,} 元神（当前 {int(st.get('cur', 0)):,}）。"
+        return False, f"【元神淬炼·元神不足】淬炼需消耗 {cost:,} 元神（当前 {int(st.get('cur', 0)):,}）。"
     boost = int(math.ceil(cap * float(cfg.get("boost") or 0)))
     st["cur"] = int(st["cur"]) - cost
     st["max"] = cap + boost
     _mark_cd(doc, st, str(skill).strip(), now)
-    return True, (f"你以【{skill}】淬炼元神，元神之火在紫府中熊熊燃烧——\n"
+    return True, (f"你以「{skill}」淬炼元神，元神之火在紫府中熊熊燃烧——\n"
                   f"消耗元神：{cost:,}\n元神上限：+{boost:,}（现 {st['max']:,}）")
 
 
@@ -641,7 +641,7 @@ def panel(doc: Any, now: float | None = None) -> str:
     cur, cap = heart_of(doc, now)
     lv = level_of(doc)
     lines = ["═══ 精神宇宙·神识云游 ═══",
-             f"元神：【{level_name(doc)}】｜{cur_of(doc):,}/{max_of(doc):,}",
+             f"元神：「{level_name(doc)}」｜{cur_of(doc):,}/{max_of(doc):,}",
              f"心神：{cur}/{cap}｜每次神游消耗 {heart_cost(doc, HEART_ENTRY)} 点（每 {HEART_RECOVER_SECONDS // 60} 分钟恢复 1 点）",
              "每层完成有限观想后，需以元神战胜守关残魂；主动 #归位 保留全部收获。",
              "─────────────────────"]
@@ -649,7 +649,7 @@ def panel(doc: Any, now: float | None = None) -> str:
         req = int(place.get("require") or 0)
         ok = lv is not None and int(lv) >= req
         best = "、".join(place.get("best") or []) or "未知"
-        lines.append(f"{'✅' if ok else '🔒'}【{place['name']}】（{int(place.get('depth') or 0)} 层）")
+        lines.append(f"{'✅' if ok else '🔒'}「{place['name']}」（{int(place.get('depth') or 0)} 层）")
         lines.append(f"   要求：{LEVEL_NAMES[min(req, len(LEVEL_NAMES) - 1)]}"
                      f"｜入场：{heart_cost(doc, HEART_ENTRY)} 心神 + {int(place.get('entry') or 0):,} 元神")
         lines.append(f"   珍品：{best}")
@@ -699,14 +699,14 @@ def enter(doc: Any, name: str, now: float | None = None) -> tuple[bool, str]:
     now = time.time() if now is None else float(now)
     place = find_place(name)
     if not place:
-        return False, f"未找到精神位面【{name}】。发 #精神宇宙 查看可进入的位面。"
+        return False, f"未找到精神位面「{name}」。发 #精神宇宙 查看可进入的位面。"
     lv = level_of(doc)
     req = int(place.get("require") or 0)
     if lv is None:
         return False, "你尚未凝练元神（#凝练元神）。"
     if int(lv) < req:
-        return False, (f"元神等级不足：需【{LEVEL_NAMES[min(req, len(LEVEL_NAMES) - 1)]}】"
-                       f"（当前【{level_name(doc)}】）。")
+        return False, (f"元神等级不足：需「{LEVEL_NAMES[min(req, len(LEVEL_NAMES) - 1)]}」"
+                       f"（当前「{level_name(doc)}」）。")
     if journey(doc):
         return False, "你的神识正在别处云游，先 #归位 再入其他位面。"
     entry = int(place.get("entry") or 0)
@@ -715,7 +715,7 @@ def enter(doc: Any, name: str, now: float | None = None) -> tuple[bool, str]:
     entry_cost = heart_cost(doc, HEART_ENTRY)
     ok, left, cap = consume_heart(doc, entry_cost, now)
     if not ok:
-        return False, (f"进入精神宇宙需 {entry_cost} 点心神，你当前 {left}/{cap}，"
+        return False, (f"【精神宇宙·心神不足】进入精神宇宙需 {entry_cost} 点心神，你当前 {left}/{cap}，"
                        f"约 {heart_minutes_left(doc, now)} 分钟后恢复 1 点。")
     add_cur(doc, -entry)
     first = _layer_of(place, 1)
@@ -981,8 +981,8 @@ def deep(doc: Any, now: float | None = None,
         lv = level_of(doc) or 0
         if lv < need:
             return False, (f"守关意识感知到你的元神尚未圆满：下一层需"
-                           f"【{LEVEL_NAMES[min(need, len(LEVEL_NAMES) - 1)]}】"
-                           f"（当前【{level_name(doc)}】）。"), {}
+                           f"「{LEVEL_NAMES[min(need, len(LEVEL_NAMES) - 1)]}」"
+                           f"（当前「{level_name(doc)}」）。"), {}
     layer = _layer_of(place, layer_no)
     res = guardian_battle(doc, place, layer, rng=rng)
     lines = [f"【{place['name']}·守关元神战】",

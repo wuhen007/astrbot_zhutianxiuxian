@@ -111,7 +111,7 @@ def create(doc: PlayerDoc, typ: str, name: str, now: float | None = None,
     now = time.time() if now is None else float(now)
     st = state_of(doc)
     if st.get("name"):
-        return False, f"你已开创自身之道【{st['name']}】（{st['type']}），万道不二。"
+        return False, f"你已开创自身之道「{st['name']}」（{st['type']}），万道不二。"
     typ = (typ or "").strip()
     if typ not in TYPES:
         return False, "用法：#创造自身之道 攻伐/护体/涅槃/时空/轮回/因果/封禁 名称。"
@@ -136,7 +136,7 @@ def create(doc: PlayerDoc, typ: str, name: str, now: float | None = None,
     st["type"], st["name"], st["created_at"] = typ, name, now
     save(doc, st)
     return True, (f"≡≡≡ 大道初开 ≡≡≡\n"
-                  f"你以【{typ}】为基，开创自身之道——【{name}】！\n"
+                  f"你以【{typ}】为基，开创自身之道——「{name}」！\n"
                   f"段位 0（道基虚道）｜消耗潜力 200、修为血气各 {CREATE_COST:,}。\n"
                   f"#修炼自身之道*次数 累积段位，段满 #突破自身之道 入下一境。")
 
@@ -202,7 +202,7 @@ def breakthrough(doc: PlayerDoc, now: float | None = None) -> tuple[bool, str]:
     nxt_name, nxt_mult = stage_of(nxt_seg)
     cost = 500_000 * nxt_mult
     if _pay_potential(doc, 50 * nxt_mult):
-        return False, f"突破需仙道潜力 {50 * nxt_mult} 点。"
+        return False, f"【大道突破·仙道潜力不足】突破需仙道潜力 {50 * nxt_mult} 点。"
     err = _pay_exp_xq(doc, cost)
     if err:
         ext = getattr(doc, "ext", {})
@@ -211,10 +211,10 @@ def breakthrough(doc: PlayerDoc, now: float | None = None) -> tuple[bool, str]:
     st["seg"] = nxt_seg
     save(doc, st)
     if nxt_seg == SEG_MAX:
-        return True, (f"≡≡≡ 己道大圆满 ≡≡≡\n【{st['name']}】第 500 段——"
+        return True, (f"≡≡≡ 己道大圆满 ≡≡≡\n「{st['name']}」第 500 段——"
                       "祭道·祭尽诸我！可 #祭道。")
     return True, (f"【突破自身之道】第 {seg} → {nxt_seg} 段，"
-                  f"踏入【{nxt_name}】（乘数 ×{nxt_mult}）｜"
+                  f"踏入「{nxt_name}」（乘数 ×{nxt_mult}）｜"
                   f"消耗潜力 {50 * nxt_mult}、修为血气各 {cost:,}。")
 
 
@@ -227,12 +227,12 @@ def emperor_sutra(doc: PlayerDoc, name: str, now: float | None = None,
     if st.get("sutra"):
         return False, f"你已著就帝经《{st['sutra']}》——一人一部，万古不刊。", {}
     if _authority(doc) < SUTRA_GATE:
-        return False, f"著帝经需权柄 ≥{SUTRA_GATE}（大帝折算），当前 {_authority(doc)}。"
+        return False, f"著帝经需权柄 ≥{SUTRA_GATE}（大帝折算），当前 {_authority(doc)}。", {}
     name = (name or "").strip().strip("《》")
     if not (2 <= len(name) <= 10):
-        return False, "帝经名 2~10 字，例：#创造帝经 岁月剑经。"
+        return False, "帝经名 2~10 字，例：#创造帝经 岁月剑经。", {}
     if _pay_exp_xq(doc, SUTRA_COST):
-        return False, f"著经需修为 {SUTRA_COST:,}（原 10 亿 ÷1000）。"
+        return False, f"著经需修为 {SUTRA_COST:,}（原 10 亿 ÷1000）。", {}
     st["sutra"] = name
     save(doc, st)
     learned = list((getattr(doc, "ext", {}) or {}).get("gongfa") or [])
@@ -327,7 +327,7 @@ def unique_dao(doc: PlayerDoc, reg: dict[str, Any], now: float | None = None,
     if st.get("unique"):
         return False, "你已立于唯一道之上——诸天万界，再无 higher。", {}, reg
     if not st.get("jidao"):
-        return False, "需已达【祭道】——先 #祭道。", {}, reg
+        return False, "需已达「祭道」——先 #祭道。", {}, reg
     dt = (getattr(doc, "ext", {}) or {}).get("daotreasure")
     dt = dt if isinstance(dt, Mapping) else {}
     if not dt.get("owned"):
@@ -354,7 +354,7 @@ def unique_dao(doc: PlayerDoc, reg: dict[str, Any], now: float | None = None,
     return True, ("≡≡≡ 唯 一 道 之 上 ≡≡≡\n"
                   "祭尽诸我之后，你把「道」本身也祭了——\n"
                   "自此诸天万界，唯此一道，唯一人立。\n"
-                  "境界称号与道果：【唯一道之上】｜气血补满｜此位诸天唯一。"), {}, r
+                  "境界称号与道果：「唯一道之上」｜气血补满｜此位诸天唯一。"), {}, r
 
 
 def panel(doc: Any) -> str:
@@ -362,7 +362,7 @@ def panel(doc: Any) -> str:
     sname, mult = stage_of(st["seg"])
     lines = ["--- 自身之道 ---"]
     if st.get("name"):
-        lines.append(f"道名：【{st['name']}】（{st['type']}）｜段位 {st['seg']}/{SEG_MAX}"
+        lines.append(f"道名：「{st['name']}」（{st['type']}）｜段位 {st['seg']}/{SEG_MAX}"
                      f"（{sname}｜乘数 ×{mult}）")
         lines.append(f"帝经：{'《' + st['sutra'] + '》' if st.get('sutra') else '未著（#创造帝经）'}"
                      f"｜祭道：{'已成' if st.get('jidao') else '未成'}"

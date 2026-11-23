@@ -113,7 +113,7 @@ def end_cultivate(
     # 周期取整（原版：满足 30 分钟才结算一次，不足不给收益）
     floored = int(counted // period_minutes) * period_minutes if period_minutes > 0 else int(counted)
     if floored < period_minutes:
-        return True, "闭关不足一个周期（30 分钟），未能有所精进。", d
+        return True, "【闭关·周期不足】闭关不足一个周期（30 分钟），未能有所精进。", d
 
     gained = int(floored * exp_per_min)
     # W8-C2 先天至宝修炼收益倍率；计时缩短已折算进 credited 分钟。
@@ -165,7 +165,7 @@ def end_cultivate(
         notes.append(f"已达单次上限（{max_minutes} 分钟）")
     tail = f"（{'；'.join(notes)}）" if notes else ""
     return True, (
-        f"闭关 {int(elapsed)} 分钟（计 {floored} 分钟），"
+        f"【闭关·出关】闭关 {int(elapsed)} 分钟（计 {floored} 分钟），"
         f"{'血气增进' if int(float(lian.get('times', 0) or 0)) > 0 else '修为增进'} {gained} 点{tail}。\n"
         f"当前修为：{d.exp}"
     ), d

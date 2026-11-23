@@ -124,16 +124,16 @@ def upgrade_workshop(world: Mapping[str, Any], kind: str, stones: int,
     cost = workshop_cost(kind, lv)
     need_ws = lv + 1
     if int(stones) < cost:
-        return False, f"升级{kind}需灵石 {cost}，道友当前 {int(stones)}。", w, 0
+        return False, f"【小世界·灵石不足】升级{kind}需灵石 {cost}，道友当前 {int(stones)}。", w, 0
     if int(world_stones) < need_ws:
-        return False, f"升级{kind}还需{WORKSHOP_NAME}×{need_ws}。", w, 0
+        return False, f"【小世界·材料不足】升级{kind}还需{WORKSHOP_NAME}×{need_ws}。", w, 0
     w["workshops"][kind] = lv + 1
     return True, f"{kind} 升至 {lv + 1} 级（{WORKSHOPS[kind]['desc']}），耗灵石 {cost}、{WORKSHOP_NAME}×{need_ws}。", w, cost
 
 
 def workshop_text(world: Mapping[str, Any]) -> str:
     w = _defaults(world)
-    lines = [f"【{w.get('name')}·工坊】"]
+    lines = [f"「{w.get('name')}·工坊」"]
     for kind, cfg in WORKSHOPS.items():
         lv = workshop_level(w, kind)
         nxt = "已满级" if lv >= WORKSHOP_MAX else f"升级需灵石 {workshop_cost(kind, lv)} + {WORKSHOP_NAME}×{lv + 1}"
@@ -193,13 +193,13 @@ def steal(target: Mapping[str, Any], thief_exp: int,
     fields = [dict(f) for f in (w.get("fields") or [])]
     mature = [f for f in fields if float(f.get("remaining", 0)) <= 0]
     if not mature:
-        return False, f"【{w.get('name')}】药田里没有成熟的作物。", dict(target), "", 0
+        return False, f"「{w.get('name')}」药田里没有成熟的作物。", dict(target), "", 0
     if int(thief_exp) < AVATAR_COST:
         return False, "修为太浅（需 100 万修为），潜不进去。", dict(target), "", 0
     rate = steal_rate(w)
     if rng.random() >= rate:
         return False, (
-            f"你潜入【{w.get('name')}】，被守卫察觉（成功率 {int(rate * 100)}%），"
+            f"你潜入「{w.get('name')}」，被守卫察觉（成功率 {int(rate * 100)}%），"
             f"仓皇退回并掉落灵石 {STEAL_FAIL_PENALTY}。"
         ), dict(target), "", STEAL_FAIL_PENALTY
     pick = mature[0]
@@ -208,7 +208,7 @@ def steal(target: Mapping[str, Any], thief_exp: int,
     fields.remove(pick)
     w["fields"] = fields
     return True, (
-        f"你趁夜摸进【{w.get('name')}】，摘走了一株{item}（守卫 {int(w.get('guard') or 0)} 级，"
+        f"你趁夜摸进「{w.get('name')}」，摘走了一株{item}（守卫 {int(w.get('guard') or 0)} 级，"
         f"成功率 {int(rate * 100)}%）。"
     ), w, item, 0
 
@@ -224,7 +224,7 @@ def create_world(name: str, realm_id: int, inv: Mapping[str, int]) -> tuple[bool
         "name": name, "level": 1, "avatar": False,
         "last_harvest": time.time(), "fields": [], "water_ts": 0.0,
     }
-    return True, f"小世界【{name}】开辟成功！（{WORLD_LEVELS[1]['name']}，灵气 1000，药田 1 块）", world
+    return True, f"小世界「{name}」开辟成功！（{WORLD_LEVELS[1]['name']}，灵气 1000，药田 1 块）", world
 
 
 def upgrade_cost(level: int) -> dict[str, int]:
@@ -245,7 +245,7 @@ def upgrade_world(world: Mapping[str, Any], inv: Mapping[str, int]) -> tuple[boo
     d["level"] = lv + 1
     cfg = WORLD_LEVELS[lv + 1]
     return True, (
-        f"小世界演化至 {lv + 1} 级【{cfg['name']}】：灵气 {cfg['aura']}，"
+        f"小世界演化至 {lv + 1} 级「{cfg['name']}」：灵气 {cfg['aura']}，"
         f"时间流速 1:{cfg['ratio']}，药田 {cfg['fields']} 块。"
     ), d
 
@@ -327,7 +327,7 @@ def plant(world: Mapping[str, Any], seed: str) -> tuple[bool, str, dict[str, Any
         if missing:
             return False, (
                 f"{seed} 需要特殊环境：{'、'.join(need)}；"
-                f"当前缺少【{'、'.join(missing)}】（#使用材料名创造环境）。"
+                f"当前缺少「{'、'.join(missing)}」（#使用材料名创造环境）。"
             ), dict(world)
     harvest_name, aura_need = SEEDS[seed]
     aura = WORLD_LEVELS[lv]["aura"]
@@ -338,7 +338,7 @@ def plant(world: Mapping[str, Any], seed: str) -> tuple[bool, str, dict[str, Any
         grow_hours *= 0.75
     fields.append({"seed": seed, "remaining": round(grow_hours, 2)})
     w["fields"] = fields
-    return True, f"已栽种 {seed}（{len(fields)}/{cap} 田），预计 {grow_hours:.1f} 现实小时后成熟。", w
+    return True, f"【药园·栽种】已栽种 {seed}（{len(fields)}/{cap} 田），预计 {grow_hours:.1f} 现实小时后成熟。", w
 
 
 def water(world: Mapping[str, Any]) -> tuple[bool, str, dict[str, Any]]:
@@ -369,7 +369,7 @@ def view(world: Mapping[str, Any], exp: int, shanhe_bonus: bool = False) -> str:
     cfg = WORLD_LEVELS[lv]
     fields = w.get("fields") or []
     lines = [
-        f"【{w.get('name')}】{cfg['name']} {lv} 级",
+        f"「{w.get('name')}」{cfg['name']} {lv} 级",
         f"灵气 {cfg['aura']}｜时间流速 1:{cfg['ratio']}｜药田 {len(fields)}/{cfg['fields']}"
         f"｜栖息地 {len(w['pets'])}/{habitat_capacity(w, shanhe_bonus)}",
         f"分身挂机：{'开启' if w.get('avatar') else '未开启（#将分身化入小世界，需 100 万修为，当前 ' + str(exp) + '）'}",
@@ -377,7 +377,7 @@ def view(world: Mapping[str, Any], exp: int, shanhe_bonus: bool = False) -> str:
     if w["env"]:
         lines.append("特殊环境：" + "、".join(w["env"]))
     if w["temple"].get("built"):
-        lines.append(f"【{BAITIAN_TEMPLE_NAME}】已落成（每 {int(BAITIAN_TEMPLE_INTERVAL_HOURS)}h 产出，收获时一并领取）")
+        lines.append(f"「{BAITIAN_TEMPLE_NAME}」已落成（每 {int(BAITIAN_TEMPLE_INTERVAL_HOURS)}h 产出，收获时一并领取）")
     for i, f in enumerate(fields, 1):
         r = float(f.get("remaining", 0))
         if r <= 0:
@@ -444,13 +444,13 @@ def create_environment(world: Mapping[str, Any],
     env_name = ENVIRONMENTS.get(item_name)
     if not env_name:
         return False, (
-            f"无法使用【{item_name}】创造环境。可用道具：\n"
+            f"无法使用「{item_name}」创造环境。可用道具：\n"
             + "\n".join(f"· {k} → {v}（{ENVIRONMENT_DESC[v]}）" for k, v in ENVIRONMENTS.items())
         ), dict(world)
     if env_name in w["env"]:
-        return False, f"你的小世界已拥有【{env_name}】环境。", dict(world)
+        return False, f"你的小世界已拥有「{env_name}」环境。", dict(world)
     w["env"].append(env_name)
-    return True, f"成功使用【{item_name}】创造【{env_name}】环境！效果：{ENVIRONMENT_DESC[env_name]}", w
+    return True, f"成功使用「{item_name}」创造「{env_name}」环境！效果：{ENVIRONMENT_DESC[env_name]}", w
 
 
 def stage_of(world: Mapping[str, Any], field: Mapping[str, Any]) -> int:
@@ -491,14 +491,14 @@ def build_temple(world: Mapping[str, Any], yuanshi: int,
     """建立败天神殿。返回 (ok, 提示, world, 耗源石, 耗世界石)。"""
     w = _defaults(world)
     if w["temple"].get("built"):
-        return False, f"你的【{BAITIAN_TEMPLE_NAME}】早已建成。", w, 0, 0
+        return False, f"你的「{BAITIAN_TEMPLE_NAME}」早已建成。", w, 0, 0
     if int(yuanshi) < BAITIAN_TEMPLE_SOURCE_COST:
         return False, (
-            f"建立【{BAITIAN_TEMPLE_NAME}】需源石 {BAITIAN_TEMPLE_SOURCE_COST}"
+            f"建立「{BAITIAN_TEMPLE_NAME}」需源石 {BAITIAN_TEMPLE_SOURCE_COST}"
             f"（当前 {int(yuanshi)}）。"
         ), w, 0, 0
     if int(world_stones) < BAITIAN_TEMPLE_WORLD_STONE_COST:
-        return False, f"建立【{BAITIAN_TEMPLE_NAME}】还需{WORKSHOP_NAME}×{BAITIAN_TEMPLE_WORLD_STONE_COST}。", w, 0, 0
+        return False, f"建立「{BAITIAN_TEMPLE_NAME}」还需{WORKSHOP_NAME}×{BAITIAN_TEMPLE_WORLD_STONE_COST}。", w, 0, 0
     w["temple"] = {"built": True, "last_settle": time.time()}
     return True, (
         f"【{BAITIAN_TEMPLE_NAME}·落成】败天遗法自此有归。\n"
@@ -555,7 +555,7 @@ def water_item(world: Mapping[str, Any], index: int,
     w = _defaults(world)
     pct = WATER_ITEMS.get(item)
     if not pct:
-        return False, f"没有【{item}】这种浇灌道具（草木精华露/岁月流金沙/掌天灵液）。", dict(world)
+        return False, f"没有「{item}」这种浇灌道具（草木精华露/岁月流金沙/掌天灵液）。", dict(world)
     fields = [dict(f) for f in (w.get("fields") or [])]
     if not fields:
         return False, "药田空空如也，先 #小世界栽种。", dict(world)
@@ -568,7 +568,7 @@ def water_item(world: Mapping[str, Any], index: int,
     f["remaining"] = round(max(0.0, before * (1 - pct)), 2)
     w["fields"] = fields
     return True, (
-        f"以【{item}】浇灌 {index} 号 {f.get('seed')}：剩余生长时间 "
+        f"以「{item}」浇灌 {index} 号 {f.get('seed')}：剩余生长时间 "
         f"{before:.1f} → {f['remaining']:.1f} 现实小时（-{int(pct * 100)}%）。"
     ), w
 
@@ -579,7 +579,7 @@ def batch_water_item(world: Mapping[str, Any],
     w = _defaults(world)
     hours = WATER_ITEM_BATCH_HOURS.get(item)
     if not hours:
-        return False, f"没有【{item}】这种浇灌道具。", dict(world)
+        return False, f"没有「{item}」这种浇灌道具。", dict(world)
     fields = [dict(f) for f in (w.get("fields") or [])]
     growing = [f for f in fields if float(f.get("remaining", 0)) > 0]
     if not growing:
@@ -587,7 +587,7 @@ def batch_water_item(world: Mapping[str, Any],
     mature = _apply_reduce(fields, lambda r: r - hours)
     w["fields"] = fields
     return True, (
-        f"一键浇灌【{item}】：{len(growing)} 株各 -{int(hours)} 小时（已成熟 {mature} 株）。"
+        f"一键浇灌「{item}」：{len(growing)} 株各 -{int(hours)} 小时（已成熟 {mature} 株）。"
     ), w
 
 
@@ -673,7 +673,7 @@ def maybe_wild_beast(world: Mapping[str, Any], real_hours: float, rng: Any,
     }
     return w, (
         f"【野外仙兽出没！】\n"
-        f"一只 {beast['quality']} 级【{beast['name']}】（类型：{beast['type']}）出现在了小世界中！\n"
+        f"一只 {beast['quality']} 级「{beast['name']}」（类型：{beast['type']}）出现在了小世界中！\n"
         f"特性：{'【' + '】【'.join(beast['traits']) + '】' if traits else '无'}\n"
         f"使用 #驯服仙兽 消耗封灵符尝试驯服它！"
         f"（{TAME_VALID_MINUTES} 分钟内有效；普通/上品/极品封灵符成功率 50%/70%/90%）"
@@ -714,7 +714,7 @@ def tame(world: Mapping[str, Any], talisman: str, rng: Any,
         return False, f"栖息地已满（{len(w['pets'])}/{cap}），无法安置更多仙宠。", w
     w["pets"].append(pet)
     return True, (
-        f"封灵符金光暴涨，{beast['quality']} 级【{beast['name']}】俯首帖耳，入驻栖息地！\n"
+        f"封灵符金光暴涨，{beast['quality']} 级「{beast['name']}」俯首帖耳，入驻栖息地！\n"
         f"可用 #分配仙宠{beast['name']}到灵田/丹房/器阁/符台/矿脉 安排工作。"
     ), w
 
@@ -772,16 +772,16 @@ def place_pet(world: Mapping[str, Any], name: str, pet_type: str, quality: str,
     if not name:
         return False, "格式：#安置仙宠 仙宠名", dict(world)
     if any(p.get("name") == name for p in w["pets"]):
-        return False, f"【{name}】已在栖息地中。", dict(world)
+        return False, f"「{name}」已在栖息地中。", dict(world)
     cap = habitat_capacity(w, shanhe_bonus)
     if len(w["pets"]) >= cap:
-        return False, f"栖息地已满（{len(w['pets'])}/{cap}），演化小世界或执掌【山河社稷图】可扩位。", dict(world)
+        return False, f"栖息地已满（{len(w['pets'])}/{cap}），演化小世界或执掌「山河社稷图」可扩位。", dict(world)
     w["pets"].append({
         "name": name, "type": pet_type, "quality": quality,
         "traits": list(traits or []), "energy": 100, "max_energy": 100,
         "workshop": None, "guard": False, "cycle": 0.0,
     })
-    return True, f"【{name}】入驻栖息地（{len(w['pets'])}/{cap}），可 #分配仙宠{name}到工坊 安排工作。", w
+    return True, f"「{name}」入驻栖息地（{len(w['pets'])}/{cap}），可 #分配仙宠{name}到工坊 安排工作。", w
 
 
 def assign_pet(world: Mapping[str, Any], name: str,
@@ -792,9 +792,9 @@ def assign_pet(world: Mapping[str, Any], name: str,
         return False, f"工坊只有：{'、'.join(WORKSHOPS)}。", dict(world)
     pet = next((p for p in w["pets"] if p.get("name") == name), None)
     if not pet:
-        return False, f"栖息地里没有【{name}】（#安置仙宠 先入驻）。", dict(world)
+        return False, f"栖息地里没有「{name}」（#安置仙宠 先入驻）。", dict(world)
     if pet.get("guard"):
-        return False, f"【{name}】正在担任守卫，先 #撤下仙宠守卫。", dict(world)
+        return False, f"「{name}」正在担任守卫，先 #撤下仙宠守卫。", dict(world)
     lv = max(1, workshop_level(w, workshop))
     same = [p for p in w["pets"] if p.get("workshop") == workshop and not p.get("guard")]
     if len(same) >= lv:
@@ -802,7 +802,7 @@ def assign_pet(world: Mapping[str, Any], name: str,
     matched = pet.get("type") in WORKSHOP_TYPES.get(workshop, ())
     pet["workshop"] = workshop
     tip = "" if matched else f"（{pet.get('type')}系与{workshop}不合，产出效率 ×0.5）"
-    return True, f"【{name}】已分配至{workshop}{tip}", w
+    return True, f"「{name}」已分配至{workshop}{tip}", w
 
 
 def recall_pet(world: Mapping[str, Any], name: str) -> tuple[bool, str, dict[str, Any]]:
@@ -810,12 +810,12 @@ def recall_pet(world: Mapping[str, Any], name: str) -> tuple[bool, str, dict[str
     w = _defaults(world)
     pet = next((p for p in w["pets"] if p.get("name") == name), None)
     if not pet:
-        return False, f"栖息地里没有【{name}】。", dict(world)
+        return False, f"栖息地里没有「{name}」。", dict(world)
     if not pet.get("workshop"):
-        return False, f"【{name}】本就在栖息地休息。", dict(world)
+        return False, f"「{name}」本就在栖息地休息。", dict(world)
     ws = pet["workshop"]
     pet["workshop"] = None
-    return True, f"【{name}】已从{ws}召回，在栖息地休息恢复精力。", w
+    return True, f"「{name}」已从{ws}召回，在栖息地休息恢复精力。", w
 
 
 def set_guard(world: Mapping[str, Any], name: str) -> tuple[bool, str, dict[str, Any]]:
@@ -823,14 +823,14 @@ def set_guard(world: Mapping[str, Any], name: str) -> tuple[bool, str, dict[str,
     w = _defaults(world)
     pet = next((p for p in w["pets"] if p.get("name") == name), None)
     if not pet:
-        return False, f"栖息地里没有【{name}】（#安置仙宠 先入驻）。", dict(world)
+        return False, f"栖息地里没有「{name}」（#安置仙宠 先入驻）。", dict(world)
     if pet.get("guard"):
-        return False, f"【{name}】已经是守卫了。", dict(world)
+        return False, f"「{name}」已经是守卫了。", dict(world)
     if pet.get("workshop"):
-        return False, f"【{name}】正在{pet['workshop']}工作，先召回再守卫。", dict(world)
+        return False, f"「{name}」正在{pet['workshop']}工作，先召回再守卫。", dict(world)
     pet["guard"] = True
     n = sum(1 for p in w["pets"] if p.get("guard"))
-    return True, f"【{name}】担任仙宠守卫（守卫宠 {n} 只+守卫阵 {int(w['guard'])} 级，偷菜成功率再降）。", w
+    return True, f"「{name}」担任仙宠守卫（守卫宠 {n} 只+守卫阵 {int(w['guard'])} 级，偷菜成功率再降）。", w
 
 
 def unset_guard(world: Mapping[str, Any]) -> tuple[bool, str, dict[str, Any]]:
@@ -840,7 +840,7 @@ def unset_guard(world: Mapping[str, Any]) -> tuple[bool, str, dict[str, Any]]:
     if not pet:
         return False, "当前没有仙宠守卫。", dict(world)
     pet["guard"] = False
-    return True, f"已撤下仙宠守卫【{pet['name']}】，它回栖息地休息。", w
+    return True, f"【药园·守卫】已撤下仙宠守卫「{pet['name']}」，它回栖息地休息。", w
 
 
 def energy_period(energy: float, max_energy: float, hours: float,
@@ -1062,7 +1062,7 @@ def pets_text(world: Mapping[str, Any], shanhe_bonus: bool = False) -> str:
     w = _defaults(world)
     cap = habitat_capacity(w, shanhe_bonus)
     sup = _ensure_supplies(w)
-    lines = [f"【{w.get('name')}·栖息地】{len(w['pets'])}/{cap}",
+    lines = [f"「{w.get('name')}·栖息地」{len(w['pets'])}/{cap}",
              f"工坊物资：仙宠口粮×{sup['仙宠口粮']}、界源矿石×{sup['界源矿石']}、"
              f"工坊构件×{sup['工坊构件']}" + (f"、欠餐×{sup['欠餐']}" if sup['欠餐'] else "")]
     if not w["pets"]:
@@ -1157,10 +1157,11 @@ def harvest_full(world: Mapping[str, Any], now: float | None = None,
         extras["tame_msg"] = tame_msg
     if out.get("__stones__", 0) == 0 and not grown and not extras:
         return False, "资源未凝结成数，稍后再来。", w, {}, {}
-    lines = [f"收获（现实 {real_hours:.1f} 小时 × 流速 1:{ratio} = 有效 {eff_hours:.1f} 小时）："]
+    lines = ["--- 小世界收获 ---",
+             f"收获（现实 {real_hours:.1f} 小时 × 流速 1:{ratio} = 有效 {eff_hours:.1f} 小时）："]
     lines += [f"· {'灵石' if k == '__stones__' else k}×{v}" for k, v in out.items()]
     if temple_reward:
-        lines.append(f"· 【{BAITIAN_TEMPLE_NAME}】供奉 {temple_hours:.0f} 小时："
+        lines.append(f"· 「{BAITIAN_TEMPLE_NAME}」供奉 {temple_hours:.0f} 小时："
                      f"源石×{temple_reward['yuanshi']}、功法感悟×{temple_reward['insight']}")
     for key, label in (("yuanshi", "源石"), ("insight", "功法感悟"),
                        ("exp", "修为"), ("xueqi", "血气")):

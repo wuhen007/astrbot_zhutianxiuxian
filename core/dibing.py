@@ -63,7 +63,7 @@ def forge(gold: str, name: str) -> tuple[bool, str, dict]:
         "potential": round(rar * 0.3, 2), "nurture": 0, "fused": [],
     }
     return True, (
-        f"神纹交织，炉火冲霄——本命帝兵【{name}】出世！\n"
+        f"神纹交织，炉火冲霄——本命帝兵「{name}」出世！\n"
         f"品阶：雏形｜三维 {rar * 800:,}｜全属性 +{d['all']}｜暴击 +3%｜潜力 {d['potential']}/40\n"
         f"九金融合可提升潜力，齐备后 #雷劫洗礼帝兵 终极一跃。"
     ), d
@@ -86,7 +86,7 @@ def fuse(d: Mapping, gold: str) -> tuple[bool, str, dict]:
     w["potential"] = min(MAX_POTENTIAL, round(float(w.get("potential", 0)) + 3, 2))
     total = len(set(fused) | {w.get("gold")})
     return True, (
-        f"【{w['name']}】熔入「{gold}」，器身再凝一道仙纹！\n"
+        f"「{w['name']}」熔入「{gold}」，器身再凝一道仙纹！\n"
         f"潜力 {w['potential']}/40｜已融仙金 {total}/9"
         + ("\n九金齐备！可 #雷劫洗礼帝兵 终极一跃。" if total >= 9 else "")
     ), w
@@ -120,7 +120,7 @@ def tribulation(
                        f"（现备 {int(gold_stock)} 枚；任意仙金皆可）。"), w
     w["stage"] = stage + 1
     return True, (
-        f"九金共鸣，天雷灌顶——【{w['name']}】渡过雷劫，进阶【{STAGES[stage + 1]}】！\n"
+        f"九金共鸣，天雷灌顶——「{w['name']}」渡过雷劫，进阶【{STAGES[stage + 1]}】！\n"
         f"（当前品阶 {stage + 2}/{len(STAGES)}，蕴养上限提升）"
     ), w
 
@@ -135,14 +135,14 @@ def inscribe(d: Mapping, text: str, realm_index: int) -> tuple[bool, str, dict]:
     w = copy.deepcopy(dict(d))
     stage = int(w.get("stage", 0))
     if stage < 4:
-        return False, f"【{w['name']}】尚是{STAGES[stage]}，需至【圣兵】方可承载铭文。", w
+        return False, f"「{w['name']}」尚是{STAGES[stage]}，需至【圣兵】方可承载铭文。", w
     if int(realm_index) < INSCRIBE_REALM:
-        return False, f"刻写铭文需第 {INSCRIBE_REALM + 1} 境以上（原版圣人王门槛）。", w
+        return False, f"【帝兵·境界不足】刻写铭文需第 {INSCRIBE_REALM + 1} 境以上（原版圣人王门槛）。", w
     if int(w.get("inscribed_stage", -1)) >= stage:
         return False, f"本阶（{STAGES[stage]}）已刻过铭文，雷劫进阶后可再刻。", w
     marks = list(w.get("inscriptions") or [])
     if len(marks) >= INSCRIBE_CAP:
-        return False, f"已刻 {INSCRIBE_CAP} 道铭文，器身再承不住更多道韵。", w
+        return False, f"【帝兵·铭文已满】已刻 {INSCRIBE_CAP} 道铭文，器身再承不住更多道韵。", w
     text = (text or "").strip()[:8]
     if not text:
         return False, "请给铭文取个名字（十字以内）。", w
@@ -151,7 +151,7 @@ def inscribe(d: Mapping, text: str, realm_index: int) -> tuple[bool, str, dict]:
     w["inscribed_stage"] = stage
     w["all"] = round(float(w.get("all", 0)) + 0.05, 2)
     w["bao"] = round(float(w.get("bao", 0)) + 0.03, 4)
-    return True, (f"剑锋映月，道韵入器——【{w['name']}】新添铭文「{text}」。\n"
+    return True, (f"剑锋映月，道韵入器——「{w['name']}」新添铭文「{text}」。\n"
                   f"全属性 +5%（现 +{w['all']}）｜暴击 +3%（现 {w['bao']:.0%}）"
                   f"｜铭文 {len(marks)}/{INSCRIBE_CAP}"), w
 
@@ -175,7 +175,7 @@ def nurture(d: Mapping, times: int, exp: int, xueqi: float) -> tuple[bool, str, 
     w["hp"] = int(w.get("hp", 0)) + boost
     w["all"] = round(float(w.get("all", 0)) + times, 2)
     return True, (
-        f"温养 {times} 次，【{w['name']}】器灵渐醒：三维 +{boost:,}，全属性 +{times}"
+        f"【帝兵·温养】温养 {times} 次，「{w['name']}」器灵渐醒：三维 +{boost:,}，全属性 +{times}"
         f"（蕴养 {w['nurture']}/{cap}）"
     ), w, {"exp": cost, "xueqi": cost}
 

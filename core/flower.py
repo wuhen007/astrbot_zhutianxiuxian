@@ -245,7 +245,7 @@ def level_name(level: int) -> str:
 
 def activate(doc: Any, inv: Mapping[str, int]) -> tuple[bool, str, dict[str, int]]:
     if state_of(doc) is not None:
-        return False, "已踏上花粉进化路，无需重复开启。", {}
+        return False, "【花粉进化路·已开启】已踏上花粉进化路，无需重复开启。", {}
     if doc.realm_index < ACTIVATE_GATE or doc.physique_index < ACTIVATE_GATE:
         return False, (f"踏上花粉路需练气/炼体双轨各达第 {ACTIVATE_GATE + 1} 境"
                        f"（当前 {doc.realm_index + 1} / {doc.physique_index + 1}）。"), {}
@@ -263,7 +263,7 @@ def set_plane(doc: Any, name: str) -> tuple[bool, str, dict[str, int]]:
         return False, f"未知位面。可选：{' / '.join(PLANES)}。", {}
     st["plane"] = name
     set_state(doc, st)
-    return True, f"已置身【{name}】，该位面法则允许的花粉进化上限为第 {PLANES[name]} 境。", {}
+    return True, f"已置身「{name}」，该位面法则允许的花粉进化上限为第 {PLANES[name]} 境。", {}
 
 
 def sense(doc: Any, inv: Mapping[str, int], now: float,
@@ -279,19 +279,19 @@ def sense(doc: Any, inv: Mapping[str, int], now: float,
     medium = media_of_quality(required_quality(target))
     delta: dict[str, int] = {medium: 3 + rng.randrange(3)}
     lines = [f"【感应异变】冥冥中捕捉到一缕进化道韵｜进化积淀 +{SENSE_ACCUM}",
-             f"获得【{medium}】×{delta[medium]}（下一境第 {target} 境所需品阶）"]
+             f"获得「{medium}」×{delta[medium]}（下一境第 {target} 境所需品阶）"]
     if rng.random() < 0.35:
         delta["净化花露"] = 1
-        lines.append("额外获得【净化花露】×1")
+        lines.append("额外获得「净化花露」×1")
     if rng.random() < 0.18:
         fruit = "祖种异果" if int(st["level"]) >= 14 else (
             "本源异果" if int(st["level"]) >= 7 else "进化异果")
         delta[fruit] = 1
-        lines.append(f"异变凝出【{fruit}】×1")
+        lines.append(f"异变凝出「{fruit}」×1")
     for item, gate, extra in ((SEED, 10, "祖种"), (JAR, 12, "石罐")):
         if int(st["level"]) >= gate and not _have(inv, item) and rng.random() < 0.03:
             delta[item] = 1
-            lines.append(f"圣墟机缘显现：【{item}】×1（{extra}已认主）")
+            lines.append(f"圣墟机缘显现：「{item}」×1（{extra}已认主）")
     st["sense_date"] = today
     st["accum"] = int(st["accum"]) + SENSE_ACCUM
     _clamp(st)
@@ -339,29 +339,29 @@ def evolve(doc: Any, inv: Mapping[str, int], asked: str, now: float,
         return False, "尚未踏上花粉路（#踏上花粉路）。", {}
     level = int(st["level"])
     if level >= 25:
-        return False, "已至【唯一道之上】，花粉路再无进阶。", {}
+        return False, "已至「唯一道之上」，花粉路再无进阶。", {}
     if int(st["root"]) >= ROOT_MAX:
         return False, f"进化根基损伤已满 {ROOT_MAX}，先用 #重塑进化根基 修复。", {}
     target = level + 1
     cap = PLANES.get(str(st["plane"]), 11)
     if target <= 17 and target > cap:
-        return False, (f"【{st['plane']}】法则上限第 {cap} 境，第 {target} 境需前往更高位面"
+        return False, (f"「{st['plane']}」法则上限第 {cap} 境，第 {target} 境需前往更高位面"
                        "（#花粉位面 大阴间 / 阳间）。"), {}
     if target >= 18 and doc.realm_index < 30:
         return False, f"第 {target} 境需主修权柄达第 31 境（当前 {doc.realm_index + 1}）。", {}
     cur, need = dao_progress(st, level)
     if need and cur < need:
-        return False, f"【{DAO_RULES[level][0]}】未圆满（{cur}/{need}），先 #花粉悟道。", {}
+        return False, f"「{DAO_RULES[level][0]}」未圆满（{cur}/{need}），先 #花粉悟道。", {}
     if level in TRIB_RULES and level not in st["completed"]:
-        return False, f"【{TRIB_RULES[level][0]}】未渡尽，先 #花粉渡劫。", {}
+        return False, f"「{TRIB_RULES[level][0]}」未渡尽，先 #花粉渡劫。", {}
     quality = required_quality(target)
     medium = _pick_medium(inv, quality, asked)
     if medium is None:
-        return False, f"缺少【{media_of_quality(quality)}】（或更高品阶）进化媒介，#感应异变 可得。", {}
+        return False, f"缺少「{media_of_quality(quality)}」（或更高品阶）进化媒介，#感应异变 可得。", {}
     if int(MEDIA[medium]["quality"]) < quality:
-        return False, f"【{medium}】品阶不足，第 {target} 境需 {media_of_quality(quality)}。", {}
+        return False, f"「{medium}」品阶不足，第 {target} 境需 {media_of_quality(quality)}。", {}
     if not _have(inv, medium):
-        return False, f"纳戒里没有【{medium}】。", {}
+        return False, f"纳戒里没有「{medium}」。", {}
     cost = evo_cost(level)
     if doc.exp < cost or _xueqi(doc) < cost:
         return False, f"进化需修为与血气各 {cost:,}（当前 {int(doc.exp):,} / {_xueqi(doc):,}）。", {}
@@ -417,7 +417,7 @@ def eat_fruit(doc: Any, inv: Mapping[str, int], asked: str) -> tuple[bool, str, 
     if name not in FRUITS:
         return False, "纳戒里没有可服用的花粉路异果。", {}
     if not _have(inv, name):
-        return False, f"纳戒里没有【{name}】。", {}
+        return False, f"纳戒里没有「{name}」。", {}
     row = FRUITS[name]
     st["accum"] = int(st["accum"]) + row["accum"]
     st["risk"] = int(st["risk"]) + row["risk"]
@@ -425,7 +425,7 @@ def eat_fruit(doc: Any, inv: Mapping[str, int], asked: str) -> tuple[bool, str, 
     st["root"] = int(st["root"]) + row["root"]
     _clamp(st)
     set_state(doc, st)
-    return True, (f"服下【{name}】｜进化积淀 +{row['accum']}｜隐患 +{row['risk']}｜"
+    return True, (f"服下「{name}」｜进化积淀 +{row['accum']}｜隐患 +{row['risk']}｜"
                   f"始祖污染 +{row['pollution']}｜根基损伤 +{row['root']}"), {name: -1}
 
 
@@ -437,14 +437,14 @@ def purify(doc: Any, inv: Mapping[str, int], asked: str) -> tuple[bool, str, dic
         return False, "隐患与始祖污染皆为空，无需净化。", {}
     name = asked or next((p for p in ("净化花露", "本源圣药") if _have(inv, p)), "")
     if name not in PURIFY:
-        return False, "缺少【净化花露】或【本源圣药】。", {}
+        return False, "缺少「净化花露」或「本源圣药」。", {}
     if not _have(inv, name):
-        return False, f"纳戒里没有【{name}】。", {}
+        return False, f"纳戒里没有「{name}」。", {}
     row = PURIFY[name]
     before = int(st["pollution"])
     st["risk"] = max(0, int(st["risk"]) - row["risk"])
     st["pollution"] = max(0, before - row["pollution"])
-    lines = [f"【本源净化】以【{name}】洗去花粉隐患 -{row['risk']}、始祖污染 -{row['pollution']}"]
+    lines = [f"【本源净化】以「{name}」洗去花粉隐患 -{row['risk']}、始祖污染 -{row['pollution']}"]
     if before > 0 and int(st["pollution"]) == 0:
         st["accum"] = int(st["accum"]) + PURIFY_CLEAR_BONUS
         lines.append(f"破而后立！污染清零，进化积淀 +{PURIFY_CLEAR_BONUS}")
@@ -461,14 +461,14 @@ def reshape(doc: Any, inv: Mapping[str, int], asked: str) -> tuple[bool, str, di
         return False, "进化根基完好，无需重塑。", {}
     name = asked or next((p for p in ("净化花露", "本源圣药") if _have(inv, p)), "")
     if name not in PURIFY:
-        return False, "缺少【净化花露】或【本源圣药】。", {}
+        return False, "缺少「净化花露」或「本源圣药」。", {}
     if not _have(inv, name):
-        return False, f"纳戒里没有【{name}】。", {}
+        return False, f"纳戒里没有「{name}」。", {}
     cut = int(PURIFY[name]["root"])
     st["root"] = max(0, int(st["root"]) - cut)
     _clamp(st)
     set_state(doc, st)
-    return True, f"【重塑进化根基】以【{name}】修复损伤 -{cut}，当前根基损伤 {st['root']}/{ROOT_MAX}。", {name: -1}
+    return True, f"【重塑进化根基】以「{name}」修复损伤 -{cut}，当前根基损伤 {st['root']}/{ROOT_MAX}。", {name: -1}
 
 
 def wudao(doc: Any, inv: Mapping[str, int], now: float, rng: random.Random,
@@ -479,13 +479,13 @@ def wudao(doc: Any, inv: Mapping[str, int], now: float, rng: random.Random,
         return False, "尚未踏上花粉路（#踏上花粉路）。", {}
     level = int(st["level"])
     if level not in DAO_RULES:
-        return False, f"当前花粉境【{level_name(level)}】无道则可悟（道则自第 9 境起）。", {}
+        return False, f"当前花粉境「{level_name(level)}」无道则可悟（道则自第 9 境起）。", {}
     cur, need = dao_progress(st, level)
     if cur >= need:
-        return False, f"【{DAO_RULES[level][0]}】已圆满，可尝试 #进化。", {}
+        return False, f"「{DAO_RULES[level][0]}」已圆满，可尝试 #进化。", {}
     if ancestor:
         if not (_have(inv, SEED) and _have(inv, JAR)):
-            return False, f"祖种悟道需持有【{SEED}】与【{JAR}】。", {}
+            return False, f"祖种悟道需持有「{SEED}」与「{JAR}」。", {}
         if int(st["seed_wudao"]) >= SEED_WUDAO_LIMIT:
             return False, f"本轮祖种悟道已用尽 {SEED_WUDAO_LIMIT} 次，待祖种沉寂结束后刷新。", {}
         st["seed_wudao"] = int(st["seed_wudao"]) + 1
@@ -509,7 +509,7 @@ def wudao(doc: Any, inv: Mapping[str, int], now: float, rng: random.Random,
     _clamp(st)
     set_state(doc, st)
     tail = "道则圆满！可 #花粉渡劫 / #进化。" if cur + gain >= need else f"道韵 {cur + gain}/{need}"
-    return True, (f"【{label}】悟得道韵 +{gain}（{tail}）｜消耗修为与血气各 {cost:,}"
+    return True, (f"「{label}」悟得道韵 +{gain}（{tail}）｜消耗修为与血气各 {cost:,}"
                   + (f"｜今日 {st['dao_count']}/{WUDAO_DAILY_LIMIT}" if not ancestor
                      else f"｜本轮祖种 {st['seed_wudao']}/{SEED_WUDAO_LIMIT}")), {}
 
@@ -519,7 +519,7 @@ def breed(doc: Any, inv: Mapping[str, int], now: float) -> tuple[bool, str, dict
     if st is None:
         return False, "尚未踏上花粉路（#踏上花粉路）。", {}
     if not (_have(inv, SEED) and _have(inv, JAR)):
-        return False, f"孕育需持有【{SEED}】与【{JAR}】。", {}
+        return False, f"孕育需持有「{SEED}」与「{JAR}」。", {}
     settled = _settle_breed(st, now)
     if settled:
         set_state(doc, st)
@@ -570,10 +570,10 @@ def tribulation(doc: Any, now: float, rng: random.Random) -> tuple[bool, str, di
     if not rule:
         return False, f"第 {level} 境无专属花劫，无需渡劫。", {}
     if level in st["completed"]:
-        return False, f"【{rule[0]}】已渡尽，可尝试 #进化。", {}
+        return False, f"「{rule[0]}」已渡尽，可尝试 #进化。", {}
     cur, need = dao_progress(st, level)
     if need and cur < need:
-        return False, f"【{DAO_RULES[level][0]}】未圆满（{cur}/{need}），先 #花粉悟道。", {}
+        return False, f"「{DAO_RULES[level][0]}」未圆满（{cur}/{need}），先 #花粉悟道。", {}
     cost = max(100_000, int(evo_cost(level) * rule[3]))
     if doc.exp < cost or _xueqi(doc) < cost:
         return False, f"渡劫需修为与血气各 {cost:,}。", {}
@@ -636,9 +636,9 @@ def extreme(doc: Any) -> tuple[bool, str, dict[str, int]]:
         if name in st["extremes"] or level < need_level:
             continue
         if accum < cost:
-            return False, f"下一极境【{name}】需进化积淀 {cost}（当前 {accum}）。", {}
+            return False, f"下一极境「{name}」需进化积淀 {cost}（当前 {accum}）。", {}
         if risk > max_risk:
-            return False, f"【{name}】要求花粉隐患 ≤{max_risk}（当前 {risk}），先 #净化隐患。", {}
+            return False, f"「{name}」要求花粉隐患 ≤{max_risk}（当前 {risk}），先 #净化隐患。", {}
         st["accum"] = accum - cost
         st["risk"] = max(0, risk - 12)
         st["extremes"].append(name)
@@ -647,7 +647,7 @@ def extreme(doc: Any) -> tuple[bool, str, dict[str, int]]:
         n = len(st["extremes"])
         return True, (f"【极尽蜕变·{name}】进化积淀 -{cost}｜隐患 -12\n"
                       f"极境 {n} 项：进化成功率 +{n}%｜悟道收益 +{3 * n}%｜等效权柄 +{n}"), {}
-    return False, "已达当前可挑战的极境尽头，继续提升花粉境。", {}
+    return False, "【花粉极境·已达上限】已达当前可挑战的极境尽头，继续提升花粉境。", {}
 
 
 def levels_text() -> str:
@@ -678,14 +678,14 @@ def panel(doc: Any, now: float) -> str:
     else:
         seed_txt = f"祖种悟道 {st['seed_wudao']}/{SEED_WUDAO_LIMIT}"
     lines = [
-        "【花粉进化路】" + (f"（{settled}）" if settled else ""),
+        "--- 花粉进化路 ---" + (f"（{settled}）" if settled else ""),
         f"境界：第 {level} 境 · {level_name(level)}｜等效权柄 {equivalent_level(doc)} 重天",
         f"进化积淀 {st['accum']}｜花粉隐患 {st['risk']}/{RISK_MAX}｜"
         f"始祖污染 {st['pollution']}/{POLLUTION_MAX}｜根基损伤 {st['root']}/{ROOT_MAX}",
         f"极境 {len(st['extremes'])}/{len(EXTREMES)} 项｜所在位面 {st['plane']}"
         f"（进化上限第 {PLANES.get(str(st['plane']), 11)} 境）",
         ("道则：" + (f"{DAO_RULES[level][0]} {cur}/{need}" if need else "当前境界无道则")),
-        ("渡劫：" + (f"【{trib[0]}】" + ("已渡尽" if level in st["completed"] else "未渡尽")
+        ("渡劫：" + (f"「{trib[0]}」" + ("已渡尽" if level in st["completed"] else "未渡尽")
                     if trib else "当前境界无花劫")),
         f"祖种：{seed_txt}",
         f"今日感应：{'已感应' if st['sense_date'] == _date_key(now) else '可感应'}｜"

@@ -412,7 +412,7 @@ def purchase_stone(y: dict, garden: str, stones: list[dict], no: int,
     currency, price = cfg["currency"], int(stone["price"])
     balance = int(stones_have) if currency == "灵石" else int(y.get("amount", 0) or 0)
     if balance < price:
-        return False, f"购买{stone['name']}需要 {price:,}{currency}。", {"currency": "", "amount": 0}
+        return False, f"【源石坊·余额不足】购买{stone['name']}需要 {price:,}{currency}。", {"currency": "", "amount": 0}
     if currency == "源石":
         y["amount"] = balance - price
     bought.append(int(no))
@@ -423,7 +423,7 @@ def purchase_stone(y: dict, garden: str, stones: list[dict], no: int,
         "purchase_currency": currency, "purchase_price": price,
         "purchased_at": float(now),
     }
-    return True, f"已购【{stone['name']}】。选择 #一刀切、#层层剥石 或 #封源切法。", {
+    return True, f"已购「{stone['name']}」。选择 #一刀切、#层层剥石 或 #封源切法。", {
         "currency": currency, "amount": price,
     }
 
@@ -556,7 +556,7 @@ def ledger_text(y: Mapping) -> str:
         refund = int(row.get("refund", 0) or 0)
         got = (f"回购 +{refund:,}{row.get('refund_cur', '灵石')}" if refund else
                f"源石 +{int(row.get('source', 0)):,}" if int(row.get("source", 0) or 0)
-               else ("【" + str(row["item"]) + "】" if row.get("item") else "空石"))
+               else ("「" + str(row["item"]) + "」" if row.get("item") else "空石"))
         lines.append(f"{t}｜{row.get('garden')}｜{int(row.get('price', 0)):,}"
                      f"{row.get('cur')}{fee} → {got}")
     lines.append(f"累计切石 {int(y.get('cuts', len(ledger)) or 0)} 块｜近 {len(ledger)} 笔："

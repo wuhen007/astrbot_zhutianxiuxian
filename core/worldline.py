@@ -221,7 +221,7 @@ def cancel_session(st: dict) -> tuple[bool, str]:
     if not isinstance(st.get("session"), dict):
         return False, "当前没有待确认的支取。"
     st["session"] = None
-    return True, "已取消本次支取，时间长河复归平静。"
+    return True, "【时间线·已取消】已取消本次支取，时间长河复归平静。"
 
 
 def parse_picks(arg: str, count: int) -> tuple[bool, list[int], str]:
@@ -383,7 +383,7 @@ def settle_withdraw(doc: Any, st: dict, picks: Sequence[int], unit_weight: int,
     st["session"] = None
     weight = max(1, int(unit_weight or 1))
     res = add_debt(doc, st, weight * total, f"支取「{name}」×{total}", now, max_hp, rng)
-    lines = [f"时间线支取成功：【{name}】×{total} 已落入纳戒。",
+    lines = [f"【时间线·支取】时间线支取成功：「{name}」×{total} 已落入纳戒。",
              "挪用自：" + "、".join(f"{o['label']}(×{o['qty']})" for o in chosen),
              f"因果债计价：{weight} × {total} = {weight * total} 点。"]
     lines += debt_lines(res)
@@ -477,7 +477,7 @@ def strike(attacker: Any, atk_st: dict, target: Any, tgt_st: dict,
     lines: list[str] = []
 
     if tgt_level >= GATE_SCOPE:
-        lines.append(f"目标道果已成路尽，你只能抹去其在【{LINE_LABEL['L6']}】的既定痕迹。")
+        lines.append(f"目标道果已成路尽，你只能抹去其在「{LINE_LABEL['L6']}」的既定痕迹。")
         if isinstance(target.ext, dict):
             target.ext["ancient_wound"] = int(target.ext.get("ancient_wound") or 0) + 1
         _push_destroyed(tgt_st, "L6", now)
@@ -512,13 +512,13 @@ def _apply_fact(target: Any, tgt_st: dict, ftype: str, name: str, now: float) ->
         learned = [g for g in (ext.get("gongfa") or []) if str(g) != name]
         removed = len(ext.get("gongfa") or []) - len(learned)
         ext["gongfa"] = learned
-        return (f"{target.name} 遗忘了【{name}】。" if removed
-                else f"【{name}】的习得事实已被抹去（其本就未曾习得）。")
+        return (f"{target.name} 遗忘了「{name}」。" if removed
+                else f"「{name}」的习得事实已被抹去（其本就未曾习得）。")
     if ftype == "创道":
         if str(ext.get("own_dao") or "") == name:
             ext["dao_broken"] = name
             ext.pop("own_dao", None)
-        return f"【{name}】的开创事实被改写，{target.name} 的道果根基出现断层。"
+        return f"「{name}」的开创事实被改写，{target.name} 的道果根基出现断层。"
     if ftype == "证道":
         before = int(target.realm_index or 0)
         target.realm_index = max(0, before - 1)
@@ -531,11 +531,11 @@ def _apply_fact(target: Any, tgt_st: dict, ftype: str, name: str, now: float) ->
         if name not in lost:
             lost.append(name)
         ext["unique_lost"] = lost[-32:]
-        return f"【{name}】的获得事实被改写，{target.name} 的唯一性权柄失去锚点。"
+        return f"「{name}」的获得事实被改写，{target.name} 的唯一性权柄失去锚点。"
     if ftype == "关系":
         ext["bond_broken"] = int(ext.get("bond_broken") or 0) + 1
         return f"{target.name} 的一段因果牵连被剪断（道侣/师徒/宗门关系出现裂痕）。"
-    return f"【{name}】的获得事实正从现世松动。"
+    return f"「{name}」的获得事实正从现世松动。"
 
 
 # ---------------------------------------------------------------- 众生代偿

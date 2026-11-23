@@ -302,7 +302,7 @@ def tower_text(e: dict) -> str:
         f"旧表误差 {t['stale']}｜同行 {t['escort']}｜当前失败率 {tower_risk(e):.0%}",
     ]
     if ev:
-        lines.append(f"待抉择【{ev}】{TOWER_EVENTS[ev]['npc']}：" +
+        lines.append(f"待抉择「{ev}」「{TOWER_EVENTS[ev]['npc']}」：" +
                      " / ".join(f"{k}({v[0]}分)" for k, v in TOWER_EVENTS[ev]["choices"].items()))
         lines.append("格式：「#复活地球 抉择 选项 确认」")
     return "\n".join(lines)
@@ -401,12 +401,12 @@ def resolve_action(e: dict, a: dict, rng: random.Random) -> str:
         e["tower_notes"] = len(t["clues"])
         if clue == "读数":
             t["stale"] = False
-        return f"观察【{clue}】完成：线索 {len(t['clues'])}/3（永久保留）、本轮已校准。" \
+        return f"观察「{clue}」完成：线索 {len(t['clues'])}/3（永久保留）、本轮已校准。" \
                "本轮周期结束，死亡重塑回塔监狱。"
     if k == "talk":
         ev = TOWER_ORDER[min(int(rng.random() * 4), 3)]
         e["tower"]["event"] = ev
-        return f"【{ev}】{TOWER_EVENTS[ev]['npc']}：可 抉择 选项 确认（详见 事件 / 塔规）。"
+        return f"「{ev}」「{TOWER_EVENTS[ev]['npc']}」：可 抉择 选项 确认（详见 事件 / 塔规）。"
     if k == "tower_choice":
         t = e["tower"]
         t.update(ally=True, calibrated=True, stale=p["stale"], escort=p["escort"], event=None)
@@ -476,13 +476,13 @@ def resolve_action(e: dict, a: dict, rng: random.Random) -> str:
         out = []
         if cfg.get("facility"):
             e["facilities"][cfg["facility"]] = True
-            out.append(f"设施【{cfg['facility']}】落成")
+            out.append(f"设施「{cfg['facility']}」落成")
         elif cfg.get("body"):
             e["body"][cfg["body"]] = True
             out.append("本命法器已佩")
         else:
             _add(e["bag"], name, 1)
-            out.append(f"【{name}】×1 入袋")
+            out.append(f"「{name}」×1 入袋")
         return f"制作完成：{'，'.join(out)}。"
     if k == "element":
         b = e["body"]
@@ -516,7 +516,7 @@ def resolve_action(e: dict, a: dict, rng: random.Random) -> str:
                            "casts": min(2, e["body"]["realm"]), "risk": cfg["risk"],
                            "cargo": dict(cfg["items"]), "signal": sig,
                            "discoveries": [cfg["unlock"]] if cfg.get("unlock") else []}
-        return (f"抵达【{p['target']}】：窗口 5、风险 {cfg['risk']:.0%}。"
+        return (f"抵达「{p['target']}」：窗口 5、风险 {cfg['risk']:.0%}。"
                 + ("探测到异常信号，建议 调查 信号 → 核验 → 抉择。" if sig else "暂未发现信号。")
                 + " 可 应对 / 深入 / 地表修炼 / 撤离 确认。")
     if k in ("field_mode", "deep", "field_cultivate", "investigate", "verify", "signal_choice"):
@@ -615,7 +615,7 @@ def resolve_action(e: dict, a: dict, rng: random.Random) -> str:
             s["crisis"] = CRISIS_STAGES[0]
             s["crisis_stage"] = 0
             s["crisis_choices"] = []
-            return f"公共危机【{s['crisis']}】开启：单人事件，不改全服。可 公议 选项 确认（共 3 段）。"
+            return f"公共危机「{s['crisis']}」开启：单人事件，不改全服。可 公议 选项 确认（共 3 段）。"
         s["crisis_choices"].append(p["choice"])
         s["crisis_stage"] += 1
         s["contribution"] += 2
@@ -678,7 +678,7 @@ def abandon(doc: Any, e: dict, ts: float, confirmed: bool) -> tuple[str, bool]:
                 "确认请发送「#复活地球 放弃 确认」。"), False
     s = e.get("snapshot") or {}
     _restore(doc, e)
-    return (f"已放弃复活地球，主线恢复至第 {int(s.get('realm_index', 0)) + 1} 境 / "
+    return (f"【复活地球·放弃】已放弃复活地球，主线恢复至第 {int(s.get('realm_index', 0)) + 1} 境 / "
             f"灵石 {int(s.get('stones', 0)):,}。本世记录已清除。"), True
 
 
@@ -823,7 +823,7 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random) -> tuple[str, b
         if e["station"]["contract"]:
             return prefix + "已有委托，先执行子命令「交付委托」或「取消委托」。", True
         e["station"]["contract"] = target
-        return prefix + f"已领【{target}】：材料 {CONTRACTS[target]['cost']}，交付时扣除。", True
+        return prefix + f"已领「{target}」：材料 {CONTRACTS[target]['cost']}，交付时扣除。", True
     if verb == "取消委托":
         e["station"]["contract"] = None
         return prefix + "委托已取消（不扣费）。", True
@@ -838,7 +838,7 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random) -> tuple[str, b
         e["credits"] += cfg["credits"]
         e["station"]["contribution"] += cfg["contrib"]
         e["station"]["contract"] = None
-        return prefix + f"交付【{name}】完成：积分 +{cfg['credits']}，贡献 +{cfg['contrib']}。", True
+        return prefix + f"交付「{name}」完成：积分 +{cfg['credits']}，贡献 +{cfg['contrib']}。", True
     if verb == "还款":
         qty = int(target) if str(target).isdigit() else 0
         if qty <= 0 or qty > e["station"]["debt"]:
@@ -883,10 +883,10 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random) -> tuple[str, b
         if e["body"]["realm"] < 4:
             return prefix + "化神分路需元婴。", True
         if e["body"]["path"] and e["body"]["path"] != target:
-            return prefix + f"本世已选【{e['body']['path']}】，不可改道。", True
+            return prefix + f"本世已选「{e['body']['path']}」，不可改道。", True
         e["body"]["path"] = target
         e["body"]["mortal_steps"] = 0
-        return prefix + f"已选【{target}】分路：{len(PATH_STAGES[target])} 段经历，用 事件 / 抉择 选项 确认 推进。", True
+        return prefix + f"已选「{target}」分路：{len(PATH_STAGES[target])} 段经历，用 事件 / 抉择 选项 确认 推进。", True
 
     # ---- 计时动作 ----
     if verb == "观察":
@@ -921,7 +921,7 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random) -> tuple[str, b
         b = e["body"]
         if b["path"] and e["place"] == "空间站":
             if not target:
-                return prefix + f"当前【{b['path']}】第 {b['mortal_steps'] + 1} 段：可用 事件 查看选项。", True
+                return prefix + f"当前「{b['path']}」第 {b['mortal_steps'] + 1} 段：可用 事件 查看选项。", True
             return prefix + _start(e, "path", f"抉择 {target}", 10, ts, choice=target), True
         return prefix + "当前没有待抉择事件（塔监狱 / 信号 / 化神分路）。", True
     if verb == "推演":
@@ -969,9 +969,9 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random) -> tuple[str, b
         if e["body"]["realm"] < cfg["realm"]:
             return prefix + f"【{target}】需本世 {REALMS[cfg['realm']]}。", True
         if cfg.get("need_facility") and not e["facilities"].get(cfg["need_facility"]):
-            return prefix + f"【{target}】需设施【{cfg['need_facility']}】。", True
+            return prefix + f"【{target}】需设施「{cfg['need_facility']}」。", True
         if cfg.get("need_knowledge") and not e["knowledge"].get(cfg["need_knowledge"]):
-            return prefix + f"【{target}】需知识【{cfg['need_knowledge']}】。", True
+            return prefix + f"【{target}】需知识「{cfg['need_knowledge']}」。", True
         if e["credits"] < cfg["credits"] or not _have(e["bag"], cfg["items"]):
             return prefix + f"【{target}】需 {cfg['credits']} 积分 + {cfg['items']}。", True
         e["credits"] -= cfg["credits"]
@@ -1025,7 +1025,7 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random) -> tuple[str, b
             return prefix + f"【{target}】需 {REALMS[cfg['realm']]} + {cfg['cost']} 积分。", True
         # 原版 unlock 是探索后写入的永久知识，不是门槛；need 才是前置知识
         if cfg.get("need") and not e["knowledge"].get(cfg["need"]):
-            return prefix + f"【{target}】需知识【{cfg['need']}】。", True
+            return prefix + f"【{target}】需知识「{cfg['need']}」。", True
         e["credits"] -= cfg["cost"]
         return prefix + _start(e, "expedition", f"探索 {target}", cfg["minutes"], ts,
                                target=target, signal_roll=rng.random()), True

@@ -310,7 +310,7 @@ def resolve_action(s: dict, a: dict, rng: random.Random) -> str:
         if skill == "祷告" and "holy" in s["traits"]:
             gain += 1
         s["skills"][skill] = min(30, int(s["skills"][skill]) + gain)
-        return f"训练【{skill}】完成：熟练度 {s['skills'][skill]}/30（+{gain}）。"
+        return f"训练「{skill}」完成：熟练度 {s['skills'][skill]}/30（+{gain}）。"
     if k == "work":
         s["coins"] += 15
         return "帮工完成：铜币 +15。"
@@ -323,7 +323,7 @@ def resolve_action(s: dict, a: dict, rng: random.Random) -> str:
             s["hp"] = min(_hp_cap(s), int(s["hp"]) + 50)
         else:
             s["mp"] = min(_mp_cap(s), int(s["mp"]) + 40)
-        return f"使用【{name}】完成：HP {int(s['hp'])} / MP {int(s['mp'])}。"
+        return f"使用「{name}」完成：HP {int(s['hp'])} / MP {int(s['mp'])}。"
     if k == "forge":
         s["weapon"] = True
         return "锻造完成：职业武装已成（应对威力 +8，三终局前置）。"
@@ -335,7 +335,7 @@ def resolve_action(s: dict, a: dict, rng: random.Random) -> str:
         r = REGIONS[a["index"]]
         s["encounter"] = {"region": a["index"], "repeat": a["repeat"]}
         s["place"] = r["name"]
-        return (f"抵达【{r['name']}】。遭遇待抉择，可发：\n"
+        return (f"抵达「{r['name']}」。遭遇待抉择，可发：\n"
                 + " / ".join(r["choices"]) + "\n格式：「#剑与魔法 抉择 选项」")
     if k == "choice":
         idx = a["index"]
@@ -349,7 +349,7 @@ def resolve_action(s: dict, a: dict, rng: random.Random) -> str:
         if a["roll"] < danger:
             hurt += 30
         s["hp"] = int(s["hp"]) - hurt
-        head = f"【{r['name']}】{choice}：战力 {power} vs 威胁 {threat}，危险率 {danger:.0%}，受伤 {hurt}。"
+        head = f"「{r['name']}」{choice}：战力 {power} vs 威胁 {threat}，危险率 {danger:.0%}，受伤 {hurt}。"
         if s["hp"] <= 0:
             s["hp"] = 1
             s["wounded"] = True
@@ -433,7 +433,7 @@ def abandon(doc: Any, s: dict, confirmed: bool) -> tuple[str, bool, list]:
                 "确认请发送「#剑与魔法 放弃 确认」。"), False, []
     snap = s.get("snapshot") or {}
     _restore(doc, s)
-    return (f"已放弃剑与魔法，主线恢复至第 {int(snap.get('realm_index', 0)) + 1} 境 / "
+    return (f"【剑与魔法·放弃】已放弃剑与魔法，主线恢复至第 {int(snap.get('realm_index', 0)) + 1} 境 / "
             f"灵石 {int(snap.get('stones', 0)):,}。本篇记录已清除。"), True, []
 
 
@@ -475,7 +475,7 @@ def ascend(doc: Any, s: dict, ts: float, confirmed: bool,
     return (f"飞升成功：主线第 {int(doc.realm_index) + 1} 境"
             + ("（不降级，保留原有境界）" if before >= ASCEND_REALM else "（真界境后期，修为清零）")
             + f"、灵石 +{int(s['coins']) * COIN_RATE:,}、附加命格 +{added}、命格槽 {doc.ext['mingge_slots']}、"
-              f"信物【{gift}】入纳戒。本篇封存只读。"), True, [("items", {gift: 1})] if gift else []
+              f"信物「{gift}」入纳戒。本篇封存只读。"), True, [("items", {gift: 1})] if gift else []
 
 
 def dispatch(doc: Any, rest: str, ts: float, rng: random.Random,
@@ -548,17 +548,17 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random,
         if s["drawn_at"] is None:
             return prefix + "须先执行子命令「抽取词条」。", True, []
         if s["profession"]:
-            return prefix + f"已就职【{s['profession']}】，本世不可改。", True, []
+            return prefix + f"已就职「{s['profession']}」，本世不可改。", True, []
         s["profession"] = target
         s["skills"][PROFESSIONS[target]] = 5
-        return prefix + f"就职【{target}】完成，主熟练度 {PROFESSIONS[target]} = 5。", True, []
+        return prefix + f"就职「{target}」完成，主熟练度 {PROFESSIONS[target]} = 5。", True, []
     if verb in ("购买", "存入", "取出", "丢弃"):
         if not target:
             return prefix + f"{verb} 物品 数量（数量默认 1）。", True, []
         if verb == "购买":
             price = GOODS.get(target)
             if not price:
-                return prefix + f"【{target}】不可购买（" + " / ".join(k for k, v in GOODS.items() if v > 0) + "）。", True, []
+                return prefix + f"「{target}」不可购买（" + " / ".join(k for k, v in GOODS.items() if v > 0) + "）。", True, []
             qty = max(1, min(99, qty))
             cost = price * qty
             if s["coins"] < cost:
@@ -567,7 +567,7 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random,
                 return prefix + f"背包不足（{load(s)}/{BAG_CAP}），先执行子命令「存入」腾位。", True, []
             s["coins"] -= cost
             _add(s["bag"], target, qty)
-            return prefix + f"购买【{target}】×{qty}，花费 {cost:,} 铜币。", True, []
+            return prefix + f"购买「{target}」×{qty}，花费 {cost:,} 铜币。", True, []
         src, dst = (s["bag"], s["storage"]) if verb == "存入" else (s["storage"], s["bag"])
         if verb != "存入" and verb == "取出" and load(s) + qty > BAG_CAP:
             return prefix + f"背包不足（{load(s)}/{BAG_CAP}）。", True, []
@@ -576,10 +576,10 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random,
             return prefix + f"{verb}失败：{target} 数量不足。", True, []
         if verb == "丢弃":
             _add(s["bag"], target, -qty)
-            return prefix + f"丢弃【{target}】×{qty}。", True, []
+            return prefix + f"丢弃「{target}」×{qty}。", True, []
         _add(src, target, -qty)
         _add(dst, target, qty)
-        return prefix + f"{verb}【{target}】×{qty} 完成。", True, []
+        return prefix + f"{verb}「{target}」×{qty} 完成。", True, []
 
     # ---- 计时动作 ----
     if verb == "训练":
@@ -599,7 +599,7 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random,
         if target not in ("疗伤药", "魔力药"):
             return prefix + "可用：疗伤药 / 魔力药。", True, []
         if not _has(s["bag"], target, 1):
-            return prefix + f"没有【{target}】。", True, []
+            return prefix + f"没有「{target}」。", True, []
         _add(s["bag"], target, -1)
         return prefix + _start(s, "use", f"使用 {target}", 3, ts, target=target), True, []
     if verb == "锻造":
@@ -624,7 +624,7 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random,
             return prefix + "地区：" + " / ".join(r["name"] for r in REGIONS), True, []
         r = REGIONS[idx]
         if idx > s["chapter"] or s["level"] < r["level"]:
-            return prefix + f"【{r['name']}】未开放（需进度 {idx}/6、等级 ≥{r['level']}）。", True, []
+            return prefix + f"「{r['name']}」未开放（需进度 {idx}/6、等级 ≥{r['level']}）。", True, []
         _add(s["bag"], "野营口粮", -1)
         minutes = r["minutes"] - (1 if "wanderer" in s["traits"] else 0)
         return prefix + _start(s, "explore", f"探索 {r['name']}", minutes, ts,
@@ -643,7 +643,7 @@ def dispatch(doc: Any, rest: str, ts: float, rng: random.Random,
         if target in ENDINGS:
             need = CHOICE_SKILL[target]
             if int(s["skills"][need]) < 10 or not s["weapon"]:
-                return prefix + f"终局【{target}】需 {need} ≥10（现 {s['skills'][need]}）且已锻造职业武装。", True, []
+                return prefix + f"终局「{target}」需 {need} ≥10（现 {s['skills'][need]}）且已锻造职业武装。", True, []
         cost = _magic_cost(s, target)
         if s["mp"] < cost:
             return prefix + f"魔力不足：需 {cost}（现 {int(s['mp'])}），可 休养 / 使用 魔力药。", True, []

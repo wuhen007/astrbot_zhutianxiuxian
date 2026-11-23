@@ -368,9 +368,9 @@ def repair(doc: Any, part: str, mat: str, inv: Mapping[str, int],
     if err:
         return _no(err)
     if not is_repair(mat):
-        return _no(f"【{mat}】不是修复/温养材料。发 #本命材料 看名录。")
+        return _no(f"「{mat}」不是修复/温养材料。发 #本命材料 看名录。")
     if int(inv.get(mat, 0) or 0) < 1:
-        return _no(f"纳戒里没有【{mat}】。")
+        return _no(f"纳戒里没有「{mat}」。")
     st = state_of(doc)
     d = st[part]
     cap = int(d["dura_max"] or 5000)
@@ -382,7 +382,7 @@ def repair(doc: Any, part: str, mat: str, inv: Mapping[str, int],
     d["spirit"]["mood"] = min(MOOD_MAX, int(d["spirit"]["mood"] or 0) + mood)
     d["spirit"]["affinity"] = min(AFFINITY_MAX, int(d["spirit"]["affinity"] or 0) + aff)
     commit(doc, st, part, d)
-    return _ok(f"【{'温养' if part == '法宝' else '修复'}成功】消耗【{mat}】×1\n"
+    return _ok(f"【{'温养' if part == '法宝' else '修复'}成功】消耗「{mat}」×1\n"
                f"耐久 +{heal}（{d['durability']}/{cap}）｜器灵心情 +{mood}｜契合 +{aff}",
                {mat: -1})
 
@@ -405,10 +405,10 @@ def quench(doc: Any, part: str, mat: str, count: int, inv: Mapping[str, int],
     if err:
         return _no(err)
     if not is_quench(mat):
-        return _no(f"【{mat}】不是淬炼材料。发 #本命材料 看名录。")
+        return _no(f"「{mat}」不是淬炼材料。发 #本命材料 看名录。")
     count = max(1, min(int(count or 1), BATCH_MAX))
     if int(inv.get(mat, 0) or 0) < count:
-        return _no(f"纳戒里【{mat}】不足 {count} 件（现有 {int(inv.get(mat, 0) or 0)}）。")
+        return _no(f"纳戒里「{mat}」不足 {count} 件（现有 {int(inv.get(mat, 0) or 0)}）。")
     st = state_of(doc)
     d = st[part]
     atk, dfn, hp, rates, qv, law, aff, mood = QUENCH_MATS[mat]
@@ -453,7 +453,7 @@ def quench(doc: Any, part: str, mat: str, count: int, inv: Mapping[str, int],
     nxt = caps[lv] if lv < len(caps) else cap
     from collections import Counter
     summary = "、".join(f"{k}×{v}" for k, v in Counter(omen_lines).items())
-    return _ok(f"【淬炼·{level_name(part, lv)}】投入【{mat}】×{used}\n"
+    return _ok(f"【淬炼·{level_name(part, lv)}】投入「{mat}」×{used}\n"
                f"异象：{summary}\n"
                f"淬炼值 +{gained:,}（{d['quench']:,}/{nxt:,}）｜"
                f"三维提升至 {int(d['atk']):,}/{int(d['def']):,}/{int(d['hp']):,}\n"
@@ -502,14 +502,14 @@ def _embed_one(doc: Any, part: str, kind: str, mat: str,
     pool = CORE_MATS if kind == "core" else AUX_MATS
     slot, cap = (CORE_SLOT[part], CORE_CAP) if kind == "core" else (AUX_SLOT[part], AUX_CAP)
     if mat not in pool:
-        return False, f"【{mat}】不是该槽材料", {}
+        return False, f"「{mat}」不是该槽材料", {}
     bag = d["core" if kind == "core" else "aux"]
     if len(bag) >= cap:
         return False, f"{slot}已满 {cap}/{cap}", {}
     if mat in bag:
-        return False, f"【{mat}】已镶过（唯一材料）", {}
+        return False, f"「{mat}」已镶过（唯一材料）", {}
     if int(inv.get(mat, 0) or 0) < 1:
-        return False, f"缺【{mat}】", {}
+        return False, f"缺「{mat}」", {}
     atk, dfn, hp, bao, law, _a, _m, _q = pool[mat]
     bias = BIAS[part]
     scale = 0.45 if kind == "core" else 0.24
@@ -548,7 +548,7 @@ def _embed_one(doc: Any, part: str, kind: str, mat: str,
     st[part] = d
     set_state(doc, st)
     tail = "｜" + "·".join(extra) if extra else ""
-    return True, f"成功{part}{slot}镶嵌【{mat}】 {len(bag)}/{cap}{tail}", {mat: -1}
+    return True, f"【本命·镶嵌】成功{part}{slot}镶嵌「{mat}」 {len(bag)}/{cap}{tail}", {mat: -1}
 
 
 def embed(doc: Any, part: str, kind: str, mat: str,
@@ -621,7 +621,7 @@ def summon(doc: Any, part: str, rng: random.Random) -> tuple[bool, str, dict[str
                    f"集齐后方可 #召唤{SPIRIT[part]}。")
     sp = d["spirit"]
     if sp.get("name") and sp.get("gender"):
-        return _ok(f"{SPIRIT[part]}【{sp['name']}】已在侧（{sp['gender']}），"
+        return _ok(f"{SPIRIT[part]}「{sp['name']}」已在侧（{sp['gender']}），"
                    f"契合 {sp['affinity']}｜阶段 {stage_of(d)}。")
     sp["personality"] = sp.get("personality") or rng.choice(PERSONALITIES)
     sp["affinity"] = min(AFFINITY_MAX, int(sp["affinity"] or 0) + 80)
@@ -631,7 +631,7 @@ def summon(doc: Any, part: str, rng: random.Random) -> tuple[bool, str, dict[str
         return _ok(f"≡≡≡ {SPIRIT[part]}·应召而来 ≡≡≡\n"
                    f"一缕灵识自{level_name(part, d['level'])}中睁开眼，性格【{sp['personality']}】。\n"
                    f"请发 #{SPIRIT[part]}命名 名字（≤{NAME_MAX} 字）")
-    return _ok(f"{SPIRIT[part]}已具名【{sp['name']}】，请发 #{SPIRIT[part]}性别 男|女 定其形。")
+    return _ok(f"{SPIRIT[part]}已具名「{sp['name']}」，请发 #{SPIRIT[part]}性别 男|女 定其形。")
 
 
 def name_spirit(doc: Any, part: str, name: str) -> tuple[bool, str, dict[str, int]]:
@@ -647,10 +647,10 @@ def name_spirit(doc: Any, part: str, name: str) -> tuple[bool, str, dict[str, in
     if not sp.get("personality"):
         return _no(f"请先 #召唤{SPIRIT[part]}。")
     if sp.get("name"):
-        return _no(f"{SPIRIT[part]}已命名【{sp['name']}】，不可更改。")
+        return _no(f"{SPIRIT[part]}已命名「{sp['name']}」，不可更改。")
     sp["name"] = name
     commit(doc, st, part, d)
-    return _ok(f"命名为【{name}】，请用 #{SPIRIT[part]}性别 男|女 设定性别。")
+    return _ok(f"命名为「{name}」，请用 #{SPIRIT[part]}性别 男|女 设定性别。")
 
 
 def set_gender(doc: Any, part: str, gender: str) -> tuple[bool, str, dict[str, int]]:
@@ -769,7 +769,7 @@ def resonance(doc: Any, part: str, now: float | None = None) -> tuple[bool, str,
     d["resonance_until"] = now + RESONANCE_SECONDS
     commit(doc, st, part, d)
     return _ok(f"【{'剑' if part == '武器' else '护' if part == '护具' else '宝'}境共鸣成功】\n"
-               f"魂魄共鸣 ×{sm:.2f}｜契合共鸣 ×{fit:.2f}｜天赋【{tname or '无'}】\n"
+               f"魂魄共鸣 ×{sm:.2f}｜契合共鸣 ×{fit:.2f}｜天赋「{tname or '无'}」\n"
                f"临时三维 +{bonus['atk']:,}/{bonus['def']:,}/{bonus['hp']:,}（1 小时内进战斗乘区）")
 
 
@@ -807,7 +807,7 @@ def ultimate(doc: Any, key: str, count: int, inv: Mapping[str, int],
         return _no(err)
     count = max(1, min(int(count or 1), BATCH_MAX))
     if int(inv.get(mat, 0) or 0) < count:
-        return _no(f"纳戒里【{mat}】不足 {count} 件（现有 {int(inv.get(mat, 0) or 0)}）。")
+        return _no(f"纳戒里「{mat}」不足 {count} 件（现有 {int(inv.get(mat, 0) or 0)}）。")
     bias = BIAS[part]
     sm = soul_multiplier(d)
     win, fail, lines = 0, 0, []
@@ -834,7 +834,7 @@ def ultimate(doc: Any, key: str, count: int, inv: Mapping[str, int],
         lines.append("天工回响")
     d["echo"] = echo
     commit(doc, st, part, d)
-    return _ok(f"【{key}】完成：成功 {win} / 失败 {fail}（消耗【{mat}】×{count}）\n"
+    return _ok(f"【{key}】完成：成功 {win} / 失败 {fail}（消耗「{mat}」×{count}）\n"
                f"异象：{'、'.join(lines)}\n"
                f"当前成功率 {ultimate_chance(d):.0%}｜残响 {int(echo.get(key, 0) or 0)}/{ECHO_MAX}",
                {mat: -count})
@@ -869,7 +869,7 @@ def spirit_battle(doc: Any, part: str, rng: random.Random) -> tuple[bool, str, d
         sp["mood"] = min(MOOD_MAX, int(sp["mood"] or 0) + 8)
         commit(doc, st, part, d)
         return _ok(f"≡≡≡ 器灵对战·{sp['name']} 胜 ≡≡≡\n" + "\n".join(log)
-                   + f"\n战利品：【{mat}】×1｜契合 +30｜心情 +8", {mat: 1})
+                   + f"\n战利品：「{mat}」×1｜契合 +30｜心情 +8", {mat: 1})
     sp["mood"] = max(0, int(sp["mood"] or 0) - 6)
     commit(doc, st, part, d)
     return _ok(f"≡≡≡ 器灵对战·{sp['name']} 未竟全功 ≡≡≡\n" + "\n".join(log)
@@ -966,7 +966,7 @@ def panel(doc: Any, now: float | None = None) -> str:
                      f"共鸣 {reso_txt}")
         sp = d["spirit"]
         if sp.get("name"):
-            lines.append(f"　{SPIRIT[part]}【{sp['name']}】{sp['gender'] or '?'}｜"
+            lines.append(f"　{SPIRIT[part]}「{sp['name']}」{sp['gender'] or '?'}｜"
                          f"契合 {sp['affinity']}（{stage_of(d)}）｜心情 {sp['mood']}｜"
                          f"天赋 {sp['talent'] or '未醒'}")
     if int(st["武器"]["sheath"] or 0):

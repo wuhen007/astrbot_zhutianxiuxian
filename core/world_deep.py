@@ -82,14 +82,14 @@ def set_clow_deck(zt: dict, cards: list[str]) -> tuple[bool, str, dict]:
         return False, f"尚未封印：{'、'.join(missing)}（#探索友枝町 收集）。", s
     s["deck"] = names
     s["combo"] = combo_of(names)
-    tail = f"激活组合【{s['combo']}】！" if s["combo"] else "三牌未成组合（组合表见 #库洛牌组合 无参查看）。"
+    tail = f"激活组合「{s['combo']}」！" if s["combo"] else "三牌未成组合（组合表见 #库洛牌组合 无参查看）。"
     return True, f"出战卡组已编组：{'、'.join(names)}。{tail}", s
 
 
 def moon_trial(zt: dict, realm_index: int, rng: random.Random) -> tuple[bool, str, dict]:
     s = sakura_of(zt)
     if s["moon_pass"]:
-        return False, "已通过月之审判（#小樱进阶 继续）。", s
+        return False, "【月之审判·通过】已通过月之审判（#小樱进阶 继续）。", s
     cards = list(zt.get("clow_cards") or [])
     if len(cards) < MOON_MIN_CARDS:
         return False, f"月之审判需至少封印 {MOON_MIN_CARDS} 张库洛牌（当前 {len(cards)}）。", s
@@ -99,7 +99,7 @@ def moon_trial(zt: dict, realm_index: int, rng: random.Random) -> tuple[bool, st
     rate = min(0.95, 0.3 + (int(s["prof"]) / 100) * 0.5 + combo_bonus)
     pity = int(s["moon_tries"]) >= 2
     head = (f"【月之审判】审判者月的法阵展开……\n"
-            + ("库洛牌组合【月华守护】展开，成功率 +25%。\n" if combo_bonus else "")
+            + ("库洛牌组合「月华守护」展开，成功率 +25%。\n" if combo_bonus else "")
             + (f"两次审判的经验共鸣，本次必定通过。\n" if pity else f"当前审判成功率 {rate:.0%}。\n"))
     if pity or rng.random() < rate:
         s["moon_pass"] = True
@@ -116,7 +116,7 @@ def moon_trial(zt: dict, realm_index: int, rng: random.Random) -> tuple[bool, st
 def dream_trial(zt: dict, realm_index: int) -> tuple[bool, str, dict]:
     s = sakura_of(zt)
     if s["dream_pass"]:
-        return False, "已通过梦之试炼。", s
+        return False, "【梦之试炼·通过】已通过梦之试炼。", s
     if not s["moon_pass"]:
         return False, "需先通过月之审判（#月之审判）。", s
     cards = len(list(zt.get("clow_cards") or []))
@@ -138,14 +138,14 @@ def dream_trial(zt: dict, realm_index: int) -> tuple[bool, str, dict]:
         return True, "梦境破碎，晨光洒落——你通过了梦之试炼！魔杖化作「梦之杖」。", s
     title, need, ok = stages[step]
     if not ok:
-        return False, f"【{title}】\n需要：{need}（当前不满足）。", s
+        return False, f"「{title}」\n需要：{need}（当前不满足）。", s
     s["dream"] = step + 1
     bonus = "（梦之杖共鸣，进度额外 +1）" if s["wand"] == "梦之杖" else ""
     if step == len(stages) - 1:
         s["dream_pass"] = True
         s["wand"] = "梦之杖"
-        return True, f"【{title}】\n{need} 达成{bonus}——梦之试炼通过！魔杖化作「梦之杖」。", s
-    return True, f"【{title}】\n{need} 达成{bonus}——进入下一重梦境。", s
+        return True, f"「{title}」\n{need} 达成{bonus}——梦之试炼通过！魔杖化作「梦之杖」。", s
+    return True, f"「{title}」\n{need} 达成{bonus}——进入下一重梦境。", s
 
 
 def advance_sakura(zt: dict, realm_index: int) -> tuple[bool, str, dict]:

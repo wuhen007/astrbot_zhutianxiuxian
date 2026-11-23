@@ -175,12 +175,12 @@ def settle(cal: dict, row: dict, name: str, my_power: int,
     holder = holder_of(cal, place, name)
     if not holder:
         s["place"], s["build"] = place, 0
-        return True, f"入驻成功，【{name}】当前驻地为：{place}。"
+        return True, f"入驻成功，「{name}」当前驻地为：{place}。"
     hs = state_of(cal, holder)
     atk = int(my_power * (0.9 + 0.2 * rng.random()) + s["build"] * 100 + s["array_hp"] / 2)
     dfn = int(holder_power * (0.9 + 0.2 * rng.random()) + hs["build"] * 100 + hs["array_hp"])
     if atk <= dfn:
-        return False, (f"【{name}】攻伐【{holder}】驻地 {place}，造成 {atk:,} 攻势，"
+        return False, (f"「{name}」攻伐「{holder}」驻地 {place}，造成 {atk:,} 攻势，"
                        f"却被 {dfn:,} 的护宗大阵尽数挡回。")
     old_build = hs["build"]
     hs["place"] = s["place"]              # 原版：败方接手攻方旧驻地
@@ -189,7 +189,7 @@ def settle(cal: dict, row: dict, name: str, my_power: int,
     s["place"], s["build"] = place, old_build
     commit(cal, name, s)
     commit(cal, holder, hs)
-    return True, (f"【{name}】以 {atk:,} 攻势破去【{holder}】{dfn:,} 防御，一举夺下 {place}！"
+    return True, (f"「{name}」以 {atk:,} 攻势破去「{holder}」{dfn:,} 防御，一举夺下 {place}！"
                   f"建设度继承 {old_build}，对方建设度降为 {hs['build']}、大阵尽碎。")
 
 
@@ -216,7 +216,7 @@ def vein(doc, s: dict, rows: list[dict], fund: int, level: int,
     p["vein_day"] = key
     p["contribution"] = int(p["contribution"] or 0) + gain
     commit_personal(doc, p)
-    return True, (f"开采【{s['place']}】灵脉：入袋 {gain:,} 灵石，宗门灵石池 +{pool_add:,}"
+    return True, (f"开采「{s['place']}」灵脉：入袋 {gain:,} 灵石，宗门灵石池 +{pool_add:,}"
                   f"（池上限 {pool_cap(level):,}）。个人贡献 +{gain:,}。"), gain, pool_add
 
 
@@ -230,7 +230,7 @@ def build(s: dict, fund: int, realm_index: int) -> tuple[bool, str, int, int]:
         return False, f"宗门灵石池不足，还需 {cost:,} 灵石。", 0, 0
     add = max(0, int(realm_index)) // 7 + 1
     s["build"] += add
-    return True, (f"消耗宗门灵石 {cost:,}，建设度 +{add}（当前 {s['build']}）。"
+    return True, (f"【宗门·建设】消耗宗门灵石 {cost:,}，建设度 +{add}（当前 {s['build']}）。"
                   "建设度可提升洞天抢夺攻势。"), cost, add
 
 

@@ -73,7 +73,7 @@ def where_to_get(
     if item_name in shop_names:
         outs.append("坊市：#商店 有售")
     if item_name in drop_pool_names:
-        outs.append("秘境：#降临秘境 / #寻宝 可得")
+        outs.append("秘境：#降临秘境 / #秘境寻宝 可得")
     # 产物流：该物品是某配方产物
     for r in recipes:
         if r.get("name") == item_name:

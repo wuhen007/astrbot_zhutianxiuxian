@@ -186,7 +186,7 @@ def _operator_action(state: dict, npc: dict, flows: dict, rng: Rng) -> None:
         if active and rng.next() < 0.2:
             target = rng.choice(active)
             npc["plan"] = {"stockId": target["id"], "phase": "accumulate", "left": 3}
-            add_news(state, f"【{npc['name']}】近日频频出入{target['name']}。", target["id"], npc["name"])
+            add_news(state, f"「{npc['name']}」近日频频出入{target['name']}。", target["id"], npc["name"])
         return
     stock = next((s for s in state["stocks"] if s["id"] == plan["stockId"]), None)
     if not stock or stock.get("delistedAt") is not None:
@@ -198,7 +198,7 @@ def _operator_action(state: dict, npc: dict, flows: dict, rng: Rng) -> None:
         plan["phase"] = "pump"
     elif phase == "pump":
         flows[stock["id"]] += _npc_trade(state, npc, stock, "buy", 500, rng)
-        add_news(state, f"【{npc['name']}】邀约持仓者共同「护盘」{stock['name']}。", stock["id"], npc["name"])
+        add_news(state, f"「{npc['name']}」邀约持仓者共同「护盘」{stock['name']}。", stock["id"], npc["name"])
         plan["phase"] = "distribute"
     elif phase == "distribute":
         flows[stock["id"]] -= _npc_trade(state, npc, stock, "sell", 600, rng)
@@ -213,9 +213,9 @@ def _update_cycle(state: dict, stock: dict, rng: Rng) -> None:
         if state["slot"] >= cyc["endSlot"]:
             if cyc["outcome"] == "bankruptcy":
                 stock["delistedAt"] = state["slot"]
-                add_news(state, f"【{stock['name']}】资不抵债，商会破产摘牌！", stock["id"])
+                add_news(state, f"「{stock['name']}」资不抵债，商会破产摘牌！", stock["id"])
             else:
-                add_news(state, f"【{stock['name']}】走出阴霾，生意重回正轨。", stock["id"])
+                add_news(state, f"「{stock['name']}」走出阴霾，生意重回正轨。", stock["id"])
             stock["cycle"] = None
         return
     if rng.next() < 0.002:
@@ -228,9 +228,9 @@ def _update_cycle(state: dict, stock: dict, rng: Rng) -> None:
                          "slump": -(30 + int(rng.next() * 90)),
                          "crisis": -(80 + int(rng.next() * 220))}[kind],
         }
-        add_news(state, {"boom": f"【{stock['name']}】风口已至，行情启动！",
-                         "slump": f"【{stock['name']}】行业寒潮，生意日渐惨淡。",
-                         "crisis": f"【{stock['name']}】爆发商会危机，前景未卜！"}[kind], stock["id"])
+        add_news(state, {"boom": f"「{stock['name']}」风口已至，行情启动！",
+                         "slump": f"「{stock['name']}」行业寒潮，生意日渐惨淡。",
+                         "crisis": f"「{stock['name']}」爆发商会危机，前景未卜！"}[kind], stock["id"])
 
 
 def tick_market(state: dict) -> None:
@@ -330,14 +330,14 @@ def find_stock(state: dict, value: str) -> dict | None:
 
 def buy(state: dict, doc: PlayerDoc, stock: dict, shares: int, now: float) -> tuple[bool, str]:
     if stock.get("delistedAt") is not None:
-        return False, f"【{stock['name']}】已摘牌，无法交易。"
+        return False, f"「{stock['name']}」已摘牌，无法交易。"
     shares = int(shares)
     if shares <= 0 or shares > 100_000:
         return False, "买入张数须在 1~100000 之间。"
     acc = account_of(doc)
     ds = debt_status(state, doc)
     if ds["overdue"] or ds["insolvent"]:
-        return False, "【钱万三】逾期或资不抵债，暂停新买入（#还款 后可恢复）。"
+        return False, "「钱万三」逾期或资不抵债，暂停新买入（#还款 后可恢复）。"
     if now - float(acc.get("last_trade") or 0) < TRADE_CD:
         return False, f"交易过于频繁，{TRADE_CD} 秒冷却。"
     price = int(stock["price"])
@@ -355,17 +355,17 @@ def buy(state: dict, doc: PlayerDoc, stock: dict, shares: int, now: float) -> tu
     acc["invested"] += cost
     acc["fees"] += fee
     acc["last_trade"] = now
-    return True, (f"买入【{stock['name']}】{shares:,} 张 @ {price:,}，花费 {cost + fee:,} 灵石（含手续费 {fee:,}）。\n"
+    return True, (f"买入「{stock['name']}」{shares:,} 张 @ {price:,}，花费 {cost + fee:,} 灵石（含手续费 {fee:,}）。\n"
                   f"现价涨跌：{stock['changeBps']:+.0f}bps")
 
 
 def sell(state: dict, doc: PlayerDoc, stock: dict, shares: int, now: float) -> tuple[bool, str]:
     if stock.get("delistedAt") is not None:
-        return False, f"【{stock['name']}】已摘牌，持仓作废。"
+        return False, f"「{stock['name']}」已摘牌，持仓作废。"
     acc = account_of(doc)
     hold = acc["holdings"].get(stock["id"])
     if not hold or hold["shares"] <= 0:
-        return False, f"你没有【{stock['name']}】持仓。"
+        return False, f"你没有「{stock['name']}」持仓。"
     shares = min(int(shares), hold["shares"]) if int(shares) > 0 else hold["shares"]
     if shares <= 0:
         return False, "卖出张数须为正（填 -1 清仓）。"
@@ -384,7 +384,7 @@ def sell(state: dict, doc: PlayerDoc, stock: dict, shares: int, now: float) -> t
     acc["last_trade"] = now
     if hold["shares"] == 0:
         acc["holdings"].pop(stock["id"], None)
-    return True, (f"卖出【{stock['name']}】{shares:,} 张 @ {price:,}，回款 {gross - fee:,}（手续费 {fee:,}）。\n"
+    return True, (f"卖出「{stock['name']}」{shares:,} 张 @ {price:,}，回款 {gross - fee:,}（手续费 {fee:,}）。\n"
                   f"本笔盈亏：{profit:+,} 灵石｜累计已实现：{acc['realized']:+,}")
 
 
@@ -403,7 +403,7 @@ def take_loan(state: dict, doc: PlayerDoc, amount: int, now: float) -> tuple[boo
     acc["loan"] = {"principal": amount, "initialPrincipal": amount,
                    "interest": 0, "interestCharged": 0,
                    "startSlot": state["slot"], "dueSlot": state["slot"] + LOAN_TERM_TICKS}
-    return True, (f"【钱万三】拍板借你 {amount:,} 灵石——日息 {LOAN_DAILY_BPS}bps，"
+    return True, (f"「钱万三」拍板借你 {amount:,} 灵石——日息 {LOAN_DAILY_BPS}bps，"
                   f"7 天内连本带息 #还款，逾期利滚利，莫怪商号无情。")
 
 
@@ -459,8 +459,8 @@ def repay(state: dict, doc: PlayerDoc, amount: int | None = None) -> tuple[bool,
             return False, f"还款需 {owed:,} 灵石（本金 {principal:,} + 利息 {interest:,}），当前 {doc.stones:,}。"
         doc.stones -= owed
         acc["loan"] = None
-        return True, (f"还清 {owed:,} 灵石（{'逾期罚息 1.5 倍' if overdue else '按期'}）。"
-                      f"【钱万三】笑道：「好信誉，下次再来。」")
+        return True, (f"【钱庄·还清】还清 {owed:,} 灵石（{'逾期罚息 1.5 倍' if overdue else '按期'}）。"
+                      f"「钱万三」笑道：「好信誉，下次再来。」")
     pay = min(int(amount), int(doc.stones), debt)
     if pay < 1:
         return False, "还款数量须为正，或灵石不足。"
@@ -473,7 +473,7 @@ def repay(state: dict, doc: PlayerDoc, amount: int | None = None) -> tuple[bool,
     acc["financeCost"] = int(acc.get("financeCost", 0)) + ip
     if loan["principal"] <= 0 and loan["interest"] <= 0:
         acc["loan"] = None
-        return True, f"已还清 {pay:,} 灵石（先息后本），【钱万三】收起借据。"
+        return True, f"【钱庄·还清】已还清 {pay:,} 灵石（先息后本），「钱万三」收起借据。"
     return True, (f"还款 {pay:,} 灵石（先息 {ip:,} / 后本 {pp:,}）。"
                   f"剩余本金 {loan['principal']:,}、利息 {loan['interest']:,}。")
 
@@ -598,7 +598,7 @@ def tip(state: dict, doc: PlayerDoc, npc_name: str | None = None,
                         "direction": direction, "resolved": False, "kind": "tip",
                         "message": lean})
     acc["tips"] = acc["tips"][-40:]
-    return True, (f"【{npc['name']}·{npc['title']}】压低声音：\n"
+    return True, (f"「{npc['name']}·{npc['title']}」压低声音：\n"
                   f"「{stock['name']}嘛……老夫近来{lean}。」\n"
                   f"「{hint}」\n"
                   f"（茶水费 {TIP_COST:,} 灵石；30 分钟后 #灵市追问 {npc['name']} 可核验）")
@@ -622,7 +622,7 @@ def chat(state: dict, name: str, doc: PlayerDoc | None = None) -> str:
             c["favor"] = min(100, int(c["favor"]) + 1)
             acc["chats"][npc["id"]] = {"slot": state["slot"], "message": line}
             note = f"\n（熟悉度 +1 → {c['favor']}/100）"
-    return (f"【{npc['name']}·{npc['title']}】\n"
+    return (f"「{npc['name']}·{npc['title']}」\n"
             f"「{line}」\n"
             f"（此人近来常在{stock['name']}进出，风格：{npc['style']}）" + note)
 
@@ -675,7 +675,7 @@ def audit(state: dict, doc: PlayerDoc, npc_name: str,
         lines.append("· 暂无成交记录。")
     hold = (ns.get("holdings", {}).get(stock["id"], {}) if stock else {})
     if stock:
-        lines.append(f"· 当前持有【{stock['name']}】{int(hold.get('shares', 0)):,} 张")
+        lines.append(f"· 当前持有「{stock['name']}」{int(hold.get('shares', 0)):,} 张")
     lines.append(f"· 可用灵石 {int(ns.get('cash', 0)):,}｜历史已实现盈亏 {int(ns.get('realized', 0)):+,}")
     return True, "\n".join(lines)
 
@@ -711,7 +711,7 @@ def followup(state: dict, doc: PlayerDoc, npc_name: str) -> tuple[bool, str]:
         c["wrong"] = int(c["wrong"]) + 1
         c["favor"] = max(0, int(c["favor"]) - 3)
         verdict = "未兑现（熟悉度 -3）"
-    return True, (f"追问【{npc['name']}】：当时报价 {int(t['price']):,} → 核验价 {int(point['price']):,}，"
+    return True, (f"追问「{npc['name']}」：当时报价 {int(t['price']):,} → 核验价 {int(point['price']):,}，"
                   f"方向「{'看多' if t['direction'] > 0 else '看空'}」{verdict}。")
 
 
@@ -731,16 +731,16 @@ def debt_text(state: dict, doc: PlayerDoc) -> str:
     """#灵市债务：借据四态与催债文案（原版 debtStatus）。"""
     ds = debt_status(state, doc)
     if not ds["has"]:
-        return "【钱万三】账上干净，无欠款。"
+        return "「钱万三」账上干净，无欠款。"
     lines = ["--- 灵市债务 ---",
              f"本金 {ds['principal']:,}｜未付利息 {ds['interest']:,}｜合计 {ds['debt']:,}",
              f"净资产（含持仓市值）{ds['net']:+,}"]
     if ds["insolvent"]:
-        lines.append("【钱万三】收起笑容：「资不抵债，先还钱再谈别的。」")
+        lines.append("「钱万三」收起笑容：「资不抵债，先还钱再谈别的。」")
     elif ds["overdue"]:
-        lines.append("【钱万三】叩了叩借据：「期限已过，先把账结了。」")
+        lines.append("「钱万三」叩了叩借据：「期限已过，先把账结了。」")
     else:
-        lines.append("【钱万三】笑道：「借据尚在期内，按时还便是。」")
+        lines.append("「钱万三」笑道：「借据尚在期内，按时还便是。」")
     lines.append("逾期或资不抵债时暂停新买入；仍可卖出、还款、继续修炼。")
     lines.append("还款：#还款 全部 / #还款 数量（部分还款先息后本）")
     return "\n".join(lines)

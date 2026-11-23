@@ -55,6 +55,14 @@ def _stones(doc: Any) -> int:
     return int(doc.get("stones", 0) or 0) if isinstance(doc, Mapping) else int(doc.stones or 0)
 
 
+def sync_health(doc: Any, hp_cur: int, hp_max: int) -> None:
+    """Write the resolved current/max health used by the battle gates."""
+    ext = _ext(doc)
+    hp_max = max(0, int(hp_max or 0))
+    ext["hp_max"] = hp_max
+    ext["hp"] = min(hp_max, max(0, int(hp_cur or 0)))
+
+
 def rob_check(a: Any, b: Any, now: float, b_busy: bool = False) -> str | None:
     """打劫前置检查：通过返回 None，否则返回拒绝文案。"""
     if _xueqi(a) < 0:

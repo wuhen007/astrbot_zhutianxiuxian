@@ -111,7 +111,7 @@ def master_add(state: dict, uid: str) -> tuple[bool, str]:
     if uid in masters:
         return False, "此人已是修仙管理员。"
     masters.append(uid)
-    return True, f"已授予 {uid} 修仙管理员权柄（共 {len(masters)} 人）。"
+    return True, f"【管理员·授予】已授予 {uid} 修仙管理员权柄（共 {len(masters)} 人）。"
 
 
 def master_del(state: dict, uid: str) -> tuple[bool, str]:
@@ -120,7 +120,7 @@ def master_del(state: dict, uid: str) -> tuple[bool, str]:
     if uid not in masters:
         return False, "此人本就不是修仙管理员。"
     masters.remove(uid)
-    return True, f"已收回 {uid} 的修仙管理员权柄（剩 {len(masters)} 人）。"
+    return True, f"【管理员·收回】已收回 {uid} 的修仙管理员权柄（剩 {len(masters)} 人）。"
 
 
 def master_text(state: Mapping[str, Any]) -> str:
@@ -170,7 +170,7 @@ def notify_set(state: dict, gid: str) -> tuple[bool, str]:
     if not gid:
         return False, "请在群聊里发送，或改用「#全局推送消息 群号」。"
     state["notify_groups"] = [gid]
-    return True, f"已将群 {gid} 设为唯一公告群。"
+    return True, f"【公告·设定】已将群 {gid} 设为唯一公告群。"
 
 
 def notify_add(state: dict, gid: str) -> tuple[bool, str]:
@@ -181,7 +181,7 @@ def notify_add(state: dict, gid: str) -> tuple[bool, str]:
     if gid in groups:
         return False, f"群 {gid} 已在公告名单里。"
     groups.append(gid)
-    return True, f"已把群 {gid} 加入公告名单（共 {len(groups)} 个）。"
+    return True, f"【公告·加入】已把群 {gid} 加入公告名单（共 {len(groups)} 个）。"
 
 
 def notify_del(state: dict, gid: str) -> tuple[bool, str]:
@@ -190,7 +190,7 @@ def notify_del(state: dict, gid: str) -> tuple[bool, str]:
     if gid not in groups:
         return False, f"群 {gid} 不在公告名单里。"
     groups.remove(gid)
-    return True, f"已从公告名单移除群 {gid}（剩 {len(groups)} 个）。"
+    return True, f"【公告·移除】已从公告名单移除群 {gid}（剩 {len(groups)} 个）。"
 
 
 def notify_text(state: Mapping[str, Any]) -> str:
@@ -274,7 +274,7 @@ def knock_to_mortal(doc: Any) -> tuple[bool, str]:
         st["known"].append(plane.DEFAULT_PLANE)
     if before == plane.DEFAULT_PLANE and not st.get("travel"):
         return True, f"{getattr(doc, 'name', doc.uid)} 本就在凡间。"
-    return True, f"已将 {getattr(doc, 'name', doc.uid)} 从【{before}】打落凡间。"
+    return True, f"【管理员·贬落】已将 {getattr(doc, 'name', doc.uid)} 从「{before}」打落凡间。"
 
 
 def jail(doc: Any, minutes: int, now: float) -> tuple[bool, str]:
@@ -448,7 +448,7 @@ def init_cancel(state: dict) -> tuple[bool, str]:
     if not isinstance(state.get("init"), dict):
         return False, "当前没有待确认的初始化。"
     state["init"] = None
-    return True, "已取消本次诸天初始化，万界安然。"
+    return True, "【诸天·取消】已取消本次诸天初始化，万界安然。"
 
 
 def make_code(seed: int | None = None) -> str:
@@ -475,5 +475,5 @@ def epoch_grant(doc: Any, amount: int) -> tuple[bool, str]:
     if amount <= 0:
         return False, "格式：「#发放纪元积累 数量 @玩家」（正整数）。"
     got = fashan.add_era(doc, amount)
-    return True, (f"已发放纪元积累 {got} 点给 {getattr(doc, 'name', doc.uid)}"
+    return True, (f"【纪元·发放】已发放纪元积累 {got} 点给 {getattr(doc, 'name', doc.uid)}"
                   f"（现 {fashan.era_of(doc)} 点）。")

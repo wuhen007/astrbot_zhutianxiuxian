@@ -189,7 +189,7 @@ def merchant_text() -> str:
     lines.append("购买：#购买黑市商品 编号")
     lines.append("")
     lines.append("--- 绝美仙子（红尘仙缘签）---")
-    lines.append(f"· #求取问道签|历练签|寻缘签（{XIANGZI_COST:,} 灵石，效果持续 24 小时）")
+    lines.append(f"· #求取 问道签 / #求取 历练签 / #求取 寻缘签（{XIANGZI_COST:,} 灵石，效果持续 24 小时）")
     return "\n".join(lines)
 
 
@@ -211,7 +211,7 @@ def buy(doc: PlayerDoc, catalog: tuple[tuple[str, int, str], ...], idx: int,
 def ask_sign(doc: PlayerDoc, sign: str, now: float | None = None) -> tuple[bool, str]:
     sign = (sign or "").strip()
     if sign not in XIANGZI_SIGNS:
-        return False, "用法：#求取问道签 / #求取历练签 / #求取寻缘签。"
+        return False, "用法：#求取 问道签 / #求取 历练签 / #求取 寻缘签。"
     if int(getattr(doc, "stones", 0) or 0) < XIANGZI_COST:
         return False, f"求签需灵石 {XIANGZI_COST:,}（当前 {int(getattr(doc, 'stones', 0) or 0):,}）。"
     now = time.time() if now is None else float(now)

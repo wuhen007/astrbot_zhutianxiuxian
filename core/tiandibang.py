@@ -255,7 +255,7 @@ def use_ticket(s: dict, uid: str, now: float) -> tuple[bool, str]:
     if int(e["chances"]) > 0:
         return False, "今日尚有挑战次数，无需动用「摘榜令」。"
     e["chances"] = 1
-    return True, f"消耗一枚「{TICKET_NAME}」，今日追加 1 次挑战。"
+    return True, f"【天机榜·追加】消耗一枚「{TICKET_NAME}」，今日追加 1 次挑战。"
 
 
 # ---------------------------------------------------------------- 周结算
@@ -351,7 +351,7 @@ def buy(s: dict, uid: str, raw: str, table: Iterable[Mapping[str, Any]],
     if int(e["score"]) < cost:
         return False, f"积分不足，还差 {cost - int(e['score']):,} 分兑换「{name}」×{qty}。", "", 0, 0
     e["score"] = int(e["score"]) - cost
-    return True, (f"兑换成功！获得「{name}」×{qty}，剩余积分 {e['score']:,}。"
+    return True, (f"【天机榜·兑换】兑换成功！获得「{name}」×{qty}，剩余积分 {e['score']:,}。"
                   "可在「#我的纳戒」中查看。"), name, qty, cost
 
 

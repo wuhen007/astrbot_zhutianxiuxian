@@ -57,7 +57,7 @@ def shenjie_entry_gate(progress: int, stones: int, modao: int, linggen_type: str
     if not ok:
         return False, why
     if int(progress) < SHENSHI_NEED:
-        return False, f"供奉进度不足（{progress}/{SHENSHI_NEED}），先 #供奉神石。"
+        return False, f"【神界·供奉不足】供奉进度不足（{progress}/{SHENSHI_NEED}），先 #供奉神石。"
     if int(stones) < SHENJIE_STONES:
         return False, f"灵石不足（需 {SHENJIE_STONES}）。"
     if used_today:
@@ -77,7 +77,7 @@ def evil_profile(doc: Mapping[str, Any]) -> str:
     """#我的邪道 简版展示（魔头 PvP 禁术链延后，展示已实装维度）。"""
     modao = int(doc.get("ext", {}).get("modao", 0) or 0)
     yeli = int(doc.get("ext", {}).get("yeli", 0) or 0)
-    lines = [f"魔道值：{modao}", f"业力值：{yeli}"]
+    lines = ["--- 邪道状态 ---", f"魔道值：{modao}", f"业力值：{yeli}"]
     if modao > 0:
         lines.append("禁术体系（镇魂/魂奴/人傀/道果）尚封印中，魔道将随版本释放。")
     else:

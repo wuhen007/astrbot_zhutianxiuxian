@@ -33,7 +33,7 @@ def daoxin_qty(doc, item: dict[str, Any], qty: int) -> tuple[int, str]:
         return max(1, int(qty)), ""
     cur = int(doc.ext.get("daoxin", 0) or 0)
     if cur >= DAOXIN_CAP:
-        return 0, f"道心已圆满（{cur}/{DAOXIN_CAP}），不必再服【{item.get('name', '道心果')}】。"
+        return 0, f"道心已圆满（{cur}/{DAOXIN_CAP}），不必再服「{item.get('name', '道心果')}」。"
     need = min(max(1, int(qty)), max(1, math.ceil((DAOXIN_CAP - cur) / per)))
     note = (f"道心将满，只取 {need} 颗（余 {int(qty) - need} 颗留在纳戒）。"
             if need < int(qty) else "")
@@ -62,7 +62,7 @@ def set_lock(doc, name: str, on: bool) -> tuple[bool, str]:
         cur.discard(name)
         verb = "解锁"
     doc.ext["locked_items"] = sorted(cur)
-    return True, (f"已{verb}「{name}」——{'出售时会被拦下，正常使用不受影响' if on else '可正常出售'}。"
+    return True, (f"【纳戒·{verb}】已{verb}「{name}」——{'出售时会被拦下，正常使用不受影响' if on else '可正常出售'}。"
                   f"当前锁定 {len(cur)} 件。")
 
 
@@ -119,7 +119,7 @@ def sell(doc, item: dict[str, Any], qty: int) -> tuple[bool, str, Any]:
         return False, f"「{item['name']}」无人收购（出售价为 0）。", doc
     d = doc.model_copy(deep=True)
     d.stones += total
-    return True, f"出售「{item['name']}」×{qty}，获得 {total} 灵石，当前 {d.stones}。", d
+    return True, f"【纳戒·出售】出售「{item['name']}」×{qty}，获得 {total} 灵石，当前 {d.stones}。", d
 
 
 def use_item(

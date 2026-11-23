@@ -277,7 +277,7 @@ def create_boss(w: dict[str, Any], uid: str, name: str, avg_atk: int,
     w["enabled"] = True
     note(w, f"{name or uid[:8]} 唤醒 {bid} 号若陀龙王（血条 {hp:,}）", ts)
     tail = "" if not existing else "（你已在别的团本，本团暂空，待他人加入）"
-    return True, (f"若陀龙王 {bid} 号苏醒，共享血条 {hp:,}，已定下 5 件掉落{tail}。\n"
+    return True, (f"【团本·开团】若陀龙王 {bid} 号苏醒，共享血条 {hp:,}，已定下 5 件掉落{tail}。\n"
                   f"发 #加入讨伐若陀龙王{bid} 入团，#讨伐若陀龙王 出手，"
                   f"击杀后 #若陀龙王奖励 竞价分配。")
 
@@ -448,7 +448,7 @@ def fight(w: dict[str, Any], doc: Any, stats: Any, cur_hp: int, hp_max: int,
         s["kills"] = int(s["kills"]) + 1
         set_player(doc, s)
         ops.append(("items", str(doc.uid), {TERMINATOR_ITEM: TERMINATOR_QTY}))
-        lines.append(f"【终结一击】{_name_of(team, str(doc.uid))} 斩下龙首，独得【{TERMINATOR_ITEM}】×{TERMINATOR_QTY}。")
+        lines.append(f"【终结一击】{_name_of(team, str(doc.uid))} 斩下龙首，独得「{TERMINATOR_ITEM}」×{TERMINATOR_QTY}。")
         lines.append("掉落已解锁：#若陀龙王奖励 查看，#若陀龙王出价编号*价格 竞价，团长 #若陀龙王分配编号。")
         note(w, f"{bid} 号龙王被 {_name_of(team, str(doc.uid))} 终结", ts)
     else:
@@ -517,8 +517,8 @@ def bid(w: dict[str, Any], doc: Any, arg: Any, ts: float) -> tuple[str, list[tup
     lot["bidder"] = str(doc.uid)
     lot["bidder_name"] = str(getattr(doc, "name", "") or str(doc.uid)[:8])
     lot["bids"] = int(lot.get("bids", 0) or 0) + 1
-    note(w, f"{lot['bidder_name']} 为 {bid_id} 号第 {lot['no']} 件【{lot['name']}】出价 {price:,}", ts)
-    return (f"出价成功：第 {lot['no']} 件【{lot['name']}】现价 {price:,} 灵石"
+    note(w, f"{lot['bidder_name']} 为 {bid_id} 号第 {lot['no']} 件「{lot['name']}」出价 {price:,}", ts)
+    return (f"出价成功：第 {lot['no']} 件「{lot['name']}」现价 {price:,} 灵石"
             f"（{lot['bidder_name']}，第 {lot['bids']} 次出价）。\n"
             f"下一位至少需出 {min_bid(price):,}；分配时中标者付款，全队平分。"), []
 
@@ -567,9 +567,9 @@ def assign(w: dict[str, Any], doc: Any, arg: Any, balances: Mapping[str, int],
             ops.append(("stones", uid, share))
     lot["amount"] = 0
     done = _finish_if_done(team)
-    note(w, f"{bid_id} 号第 {lot['no']} 件【{lot['name']}】以 {price:,} 归 "
+    note(w, f"{bid_id} 号第 {lot['no']} 件「{lot['name']}」以 {price:,} 归 "
             f"{lot.get('bidder_name')}，{len(members)} 人各分 {share:,}", ts)
-    return (f"分配完成：第 {lot['no']} 件【{lot['name']}】归 {lot.get('bidder_name')}，"
+    return (f"分配完成：第 {lot['no']} 件「{lot['name']}」归 {lot.get('bidder_name')}，"
             f"付款 {price:,} 灵石。\n全队 {len(members)} 人各得 {share:,} 灵石"
             f"（floor({price:,}/{len(members)})，余数不发）。\n"
             + ("5 件已分完，本团本归档；#龙王榜 仍可回看伤害占比。" if done
@@ -679,7 +679,7 @@ def rules_text() -> str:
         f"   队伍上限 {MAX_MEMBERS} 人；每次出手 {int(BATTLE_CD)} 秒 CD（原版只在击杀时写、且重启即丢，本移植改为每次写并持久化）。",
         "6. 击杀后开放竞拍：加价不少于 30%，价格填 1 / 0 / 非法 / 缺价一律自动取最低合规价；",
         "   #若陀龙王分配编号 由团长执行，中标者付款拿货，全队平分 floor(成交价 / 当前人数)；",
-        f"   终结者独得【{TERMINATOR_ITEM}】×{TERMINATOR_QTY}。",
+        f"   终结者独得「{TERMINATOR_ITEM}」×{TERMINATOR_QTY}。",
         "7. 龙王榜取前 20 名按累计伤害降序，附自己占比；5 件分完团本归档但保留榜单可回看。",
         "8. 纠偏：帮助 yaml 的 #退出若陀龙王团本$ 多了个 $；#加入讨伐若陀龙王(1,2,3) 只取首个数字；",
         "   (编号)*(价格) 的 * 是字面分隔符；6 条药园残留 rule 被注释且无实现，不搬；",

@@ -437,7 +437,7 @@ def select_node(st: Mapping, idx: int) -> tuple[bool, str, dict]:
     if i < 1 or i > len(nodes):
         return False, f"星图只有 1-{len(nodes)} 条路。", st2
     st2["pending_node"] = i
-    return True, f"已定途：{nodes[i - 1]['name']}（{NODE_LABEL.get(nodes[i - 1]['type'])}）", st2
+    return True, f"【无尽劫境·定途】已定途：{nodes[i - 1]['name']}（{NODE_LABEL.get(nodes[i - 1]['type'])}）", st2
 
 
 # ---------------------------------------------------------------- 战斗与推进
@@ -562,7 +562,7 @@ def resolve_node(st: Mapping, base: Mapping, content: Mapping, now: float,
             boon = rng.choice(pool)
             st2["boons"] = list(st2.get("boons") or []) + [boon["id"]]
             result["boon"] = boon.get("name")
-            result["msg"] = f"诸天遗珍现世——你获得【{boon.get('name')}】！"
+            result["msg"] = f"诸天遗珍现世——你获得「{boon.get('name')}」！"
         else:
             result["msg"] = "遗珍已被你搜刮一空，只余道痕。"
     elif kind == "treasure":
@@ -690,14 +690,14 @@ def pick_ability(st: Mapping, idx: int, content: Mapping) -> tuple[bool, str, di
     cur = int((st2.get("abilities") or {}).get(aid, 0) or 0)
     max_lv = max(1, int(ab.get("maxLevel", 3) or 3))
     if cur >= max_lv:
-        return False, f"【{ab.get('name')}】已至满级。", st2
+        return False, f"「{ab.get('name')}」已至满级。", st2
     st2.setdefault("abilities", {})[aid] = cur + 1
     st2["choices"] = []
     st2["phase"] = "ready"
     st2["starmap"] = make_starmap(st2, content, random.Random(f"{aid}:{st2['layer']}"))
     st2["pending_node"] = 0
     lv_txt = f"Lv.{cur + 1}" if cur else "Lv.1"
-    return True, (f"你参悟【{ab.get('name')}】{lv_txt}——{ab.get('description', '')}"), st2
+    return True, (f"你参悟「{ab.get('name')}」{lv_txt}——{ab.get('description', '')}"), st2
 
 
 def reroll_choices(st: Mapping, content: Mapping, rng: random.Random) -> tuple[bool, str, dict]:
@@ -737,7 +737,7 @@ def apply_checkpoint(st: Mapping, idx: int, content: Mapping, base: Mapping,
         if pool:
             boon = rng.choice(pool)
             st2["boons"] = list(st2.get("boons") or []) + [boon["id"]]
-            msg = f"【诸天垂青】一件诸天神器自虚空落下——【{boon.get('name')}】！"
+            msg = f"【诸天垂青】一件诸天神器自虚空落下——「{boon.get('name')}」！"
         else:
             msg = "【诸天垂青】遗珍已尽，只得一缕道韵（道痕 +80）。"
             st2["marks"] = int(st2.get("marks", 0)) + 80
@@ -749,7 +749,7 @@ def apply_checkpoint(st: Mapping, idx: int, content: Mapping, base: Mapping,
             max_lv = max(1, int((ab_idx.get(aid) or {}).get("maxLevel", 3) or 3))
             if int(owned[aid]) < max_lv:
                 owned[aid] = int(owned[aid]) + 1
-                msg = f"【道果升华】【{(ab_idx.get(aid) or {}).get('name', aid)}】提升至 Lv.{owned[aid]}。"
+                msg = f"【道果升华】「{(ab_idx.get(aid) or {}).get('name', aid)}」提升至 Lv.{owned[aid]}。"
             else:
                 msg = "【道果升华】诸法皆满，道果化作道痕（+80）。"
                 st2["marks"] = int(st2.get("marks", 0)) + 80
@@ -967,24 +967,24 @@ def upgrade_meta(meta: Mapping, st: Mapping, query: str) -> tuple[bool, str, dic
     nid = node["id"]
     rank = int(meta2["nodes"].get(nid, 0) or 0)
     if rank >= int(node["max"]):
-        return False, f"【{node['name']}】已至满级。", meta2, st2
+        return False, f"「{node['name']}」已至满级。", meta2, st2
     if _clears_count(st2) < int(node.get("gate", 0) or 0):
-        return False, f"【{node['name']}】需通关 {node['gate']} 档劫境。", meta2, st2
+        return False, f"「{node['name']}」需通关 {node['gate']} 档劫境。", meta2, st2
     branch = node.get("branch")
     if branch:
         if meta2.get("branch") and meta2["branch"] != branch:
-            return False, f"已锁定「{meta2['branch']}」流派，不可改投。", meta2, st2
+            return False, f"【无尽劫境·流派已锁定】已锁定「{meta2['branch']}」流派，不可改投。", meta2, st2
     cost = int(node["costs"][rank])
     if int(st2.get("marks_total", 0) or 0) < cost:
-        return False, (f"道痕不足：【{node['name']}】下一级需 {cost:,}"
+        return False, (f"道痕不足：「{node['name']}」下一级需 {cost:,}"
                        f"（持有 {int(st2.get('marks_total', 0) or 0):,}）。"), meta2, st2
     st2["marks_total"] = int(st2.get("marks_total", 0) or 0) - cost
     meta2["nodes"][nid] = rank + 1
     meta2["spent"] = int(meta2.get("spent", 0) or 0) + cost
     if branch:
         meta2["branch"] = branch
-    return True, (f"参悟【{node['name']}】Lv.{rank + 1}，耗道痕 {cost:,}。\n{node['desc']}"
-                  if node.get("desc") else f"参悟【{node['name']}】Lv.{rank + 1}。"), meta2, st2
+    return True, (f"参悟「{node['name']}」Lv.{rank + 1}，耗道痕 {cost:,}。\n{node['desc']}"
+                  if node.get("desc") else f"参悟「{node['name']}」Lv.{rank + 1}。"), meta2, st2
 
 
 def reset_meta(meta: Mapping, st: Mapping) -> tuple[bool, str, dict, dict]:
@@ -1145,7 +1145,7 @@ def treasury_text(treasury: Mapping, st: Mapping) -> str:
         lines.append(f"{mark} {data['icon']} {data['name']} Lv.{lv}/{TREASURE_LEVEL_CAP}"
                      f"｜升级 {cost:,} 道痕")
         lines.append(f"    基础：{_effect_txt(data.get('base'))}"
-                     f"｜觉醒【{data['awaken']['name']}】：{_effect_txt(data['awaken'].get('effect'))}")
+                     f"｜觉醒「{data['awaken']['name']}」：{_effect_txt(data['awaken'].get('effect'))}")
     lines.append("指令：#升级无尽至宝 名｜#装备无尽至宝 名｜#卸下无尽至宝 名｜#拓展无尽至宝槽")
     return "\n".join(lines)
 
@@ -1171,15 +1171,15 @@ def upgrade_treasure(treasury: Mapping, st: Mapping, name: str) -> tuple[bool, s
         return False, f"没有「{name}」这件至宝。", t2, st2
     lv = int((t2.get("owned") or {}).get(data["id"], 0) or 0)
     if not lv:
-        return False, f"尚未拥有【{data['name']}】。", t2, st2
+        return False, f"尚未拥有「{data['name']}」。", t2, st2
     if lv >= TREASURE_LEVEL_CAP:
-        return False, f"【{data['name']}】已满级。", t2, st2
+        return False, f"「{data['name']}」已满级。", t2, st2
     cost = 1000 + 750 * (lv - 1)
     if int(st2.get("marks_total", 0) or 0) < cost:
         return False, f"道痕不足：升级需 {cost:,}（持有 {int(st2.get('marks_total', 0) or 0):,}）。", t2, st2
     st2["marks_total"] = int(st2.get("marks_total", 0) or 0) - cost
     t2["owned"][data["id"]] = lv + 1
-    return True, f"【{data['name']}】升至 Lv.{lv + 1}，耗道痕 {cost:,}。", t2, st2
+    return True, f"「{data['name']}」升至 Lv.{lv + 1}，耗道痕 {cost:,}。", t2, st2
 
 
 def equip_treasure(treasury: Mapping, name: str) -> tuple[bool, str, dict]:
@@ -1188,13 +1188,13 @@ def equip_treasure(treasury: Mapping, name: str) -> tuple[bool, str, dict]:
     if not data:
         return False, f"没有「{name}」这件至宝。", t2
     if data["id"] not in (t2.get("owned") or {}):
-        return False, f"尚未拥有【{data['name']}】。", t2
+        return False, f"尚未拥有「{data['name']}」。", t2
     if data["id"] in (t2.get("equipped") or []):
-        return False, f"【{data['name']}】已在槽位中。", t2
+        return False, f"「{data['name']}」已在槽位中。", t2
     if len(t2.get("equipped") or []) >= int(t2.get("slots", 1) or 1):
         return False, f"至宝槽已满（{t2['slots']}/{t2['slots']}），先卸下或拓展槽位。", t2
     t2["equipped"] = list(t2.get("equipped") or []) + [data["id"]]
-    return True, f"已装备【{data['name']}】（下次入境生效）。", t2
+    return True, f"已装备「{data['name']}」（下次入境生效）。", t2
 
 
 def unequip_treasure(treasury: Mapping, name: str) -> tuple[bool, str, dict]:
@@ -1203,9 +1203,9 @@ def unequip_treasure(treasury: Mapping, name: str) -> tuple[bool, str, dict]:
     if not data:
         return False, f"没有「{name}」这件至宝。", t2
     if data["id"] not in (t2.get("equipped") or []):
-        return False, f"【{data['name']}】未装备。", t2
+        return False, f"「{data['name']}」未装备。", t2
     t2["equipped"] = [x for x in t2["equipped"] if x != data["id"]]
-    return True, f"已卸下【{data['name']}】。", t2
+    return True, f"已卸下「{data['name']}」。", t2
 
 
 def expand_slots(treasury: Mapping, st: Mapping) -> tuple[bool, str, dict, dict]:
@@ -1215,7 +1215,7 @@ def expand_slots(treasury: Mapping, st: Mapping) -> tuple[bool, str, dict, dict]
     if slots >= TREASURE_SLOT_MAX:
         return False, "至宝槽已至上限（3 个）。", t2, st2
     if int(st2.get("marks_total", 0) or 0) < TREASURE_SLOT_COST:
-        return False, f"拓展槽位需 {TREASURE_SLOT_COST:,} 道痕（持有 {int(st2.get('marks_total', 0) or 0):,}）。", t2, st2
+        return False, f"【无尽劫境·道痕不足】拓展槽位需 {TREASURE_SLOT_COST:,} 道痕（持有 {int(st2.get('marks_total', 0) or 0):,}）。", t2, st2
     st2["marks_total"] = int(st2.get("marks_total", 0) or 0) - TREASURE_SLOT_COST
     t2["slots"] = slots + 1
     return True, f"至宝槽拓展至 {slots + 1} 个，耗道痕 {TREASURE_SLOT_COST:,}。", t2, st2
@@ -1294,9 +1294,9 @@ def equip_title(st: Mapping, name: str) -> tuple[bool, str, dict]:
     if not title:
         return False, f"没有「{name}」这个称号。可发「#称号」查看。", st2
     if not title_owned(st2, title):
-        return False, f"尚未获得称号【{title['name']}】。", st2
+        return False, f"尚未获得称号「{title['name']}」。", st2
     st2["title"] = title["name"]
-    return True, (f"已佩戴称号【{title['name']}】：{title['desc']}\n"
+    return True, (f"已佩戴称号「{title['name']}」：{title['desc']}\n"
                   f"加成：攻/防/血 +{title['atk']:.0%}，道痕 +{title['marks']:.0%}"), st2
 
 
@@ -1412,7 +1412,7 @@ def buy_shop(st: Mapping, product_id: str, qty: int, now: float,
     if not product:
         return False, f"商店里没有「{product_id}」。", st2, {}
     if str(product.get("action") or "item") != "item":
-        return False, f"【{product['name']}】对应系统尚未开放，暂不可购买。", st2, {}
+        return False, f"「{product['name']}」对应系统尚未开放，暂不可购买。", st2, {}
     today = time_key(now)
     counts = shop_today(st2, now)
     st2["shop_day"] = today
@@ -1420,16 +1420,16 @@ def buy_shop(st: Mapping, product_id: str, qty: int, now: float,
     limit = shop_limit(product, celestial)
     used = int(counts.get(pid, 0) or 0)
     if limit > 0 and used + qty > limit:
-        return False, f"【{product['name']}】今日限购 {limit} 件（已购 {used}）。", st2, {}
+        return False, f"「{product['name']}」今日限购 {limit} 件（已购 {used}）。", st2, {}
     price = shop_price(product, celestial) * qty
     if int(st2.get("marks_total", 0) or 0) < price:
-        return False, (f"道痕不足：【{product['name']}】需 {price:,}"
+        return False, (f"道痕不足：「{product['name']}」需 {price:,}"
                        f"（持有 {int(st2.get('marks_total', 0) or 0):,}）。"), st2, {}
     st2["marks_total"] = int(st2.get("marks_total", 0) or 0) - price
     counts[pid] = used + qty
     st2["shop_counts"] = counts
     grant = int(product.get("quantity", 1) or 1) * qty
-    return True, (f"购入【{product['name']}】×{grant}，耗道痕 {price:,}"
+    return True, (f"购入「{product['name']}」×{grant}，耗道痕 {price:,}"
                   f"（余 {st2['marks_total']:,}）。"), st2, {str(product["name"]): grant}
 
 
@@ -1491,7 +1491,7 @@ def buy_merchant(st: Mapping, idx: int, celestial: Mapping) -> tuple[bool, str, 
     offers.pop(i - 1)
     st2["merchant"] = offers
     grant = int(offer.get("qty", 1) or 1)
-    return True, (f"购入【{offer['name']}】×{grant}，耗道痕 {price:,}"
+    return True, (f"购入「{offer['name']}」×{grant}，耗道痕 {price:,}"
                   f"（余 {st2['marks']:,}）。"), st2, {str(offer["name"]): grant}
 
 

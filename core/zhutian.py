@@ -194,7 +194,7 @@ def refine(doc: Mapping) -> tuple[bool, str, dict]:
             lack[k] = v - have
     if lack:
         detail = "、".join(f"{k}（缺{v}）" for k, v in lack.items())
-        return False, f"淬炼材料不足：{detail}。探索诸天世界可获取。", zt
+        return False, f"【诸天淬炼·材料不足】淬炼材料不足：{detail}。探索诸天世界可获取。", zt
     for k, v in req.items():
         if k == "世界印记":
             del imprints[:v]
@@ -306,8 +306,8 @@ def begin_projection(
         return False, f"{world} 当前没有可继续的探索剧情。", zt, None
     zt["energy"] = int(zt["energy"]) - 1
     proj = {"world": world, "ts": now, "event_id": story["id"], "title": story["title"], "scene": story["scene"], "options": [o["text"] for o in story["options"]], "max_choice": len(story["options"])}
-    text = (f"神魂没入镜光，投影【{world}】！\n"
-            f"【{story['title']}】\n{story['scene']}\n"
+    text = (f"神魂没入镜光，投影「{world}」！\n"
+            f"「{story['title']}」\n{story['scene']}\n"
             + "\n".join(f"{i + 1}. {o['text']}" for i, o in enumerate(story["options"]))
             + "\n15 分钟内「#选择 序号」作出抉择。")
     return True, text, zt, proj
@@ -372,10 +372,10 @@ def resolve_projection(
         base = {"魔卡少女樱": "木之本樱", "魔法少女小圆": "鹿目圆", "假面骑士帝骑": "门矢士"}.get(world)
         if base and base not in zt["avatars"]:
             zt["avatars"][base] = {"root": dict(AVATAR_ROOTS[base]), "stage": 1}
-            avatar_line = f"\n✦ 化身【{base}】收入化身谱！（#装载化身 {base}）"
+            avatar_line = f"\n✦ 化身「{base}」收入化身谱！（#装载化身 {base}）"
         elif base:
             avatar_line = f"\n（{base} 的化身之力共鸣了……尚无新收获）"
-    tail = f"投影【{world}】归返：{'，'.join(parts)}。{avatar_line}"
+    tail = f"投影「{world}」归返：{'，'.join(parts)}。{avatar_line}"
     return tail, zt
 
 
@@ -406,7 +406,7 @@ def load_avatar(doc: Mapping, name: str, now: float) -> tuple[bool, str, dict, d
     zt["current"] = target
     root = dict(av["root"])
     buff = {"atk": float(root.get("atk", 0)), "def": float(root.get("def", 0)), "hp": float(root.get("hp", 0))}
-    return True, (f"化身【{target}】降临！修炼效率 +{root.get('eff', 0):g}，"
+    return True, (f"化身「{target}」降临！修炼效率 +{root.get('eff', 0):g}，"
                   f"三维 +{buff['atk']:.0%}（15 分钟后可切换回本源）。"), zt, buff
 
 

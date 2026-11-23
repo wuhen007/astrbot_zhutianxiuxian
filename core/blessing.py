@@ -50,13 +50,13 @@ def tiandao_gift(doc: PlayerDoc, now: float, mult: float = 1.0,
         for name in ("秘境之匙", "打工券", "九阶玄元丹", "九阶淬体丹"):
             got[name] = got.get(name, 0) + count
 
-    lines = ["天道赐福：", f"秘境之匙 ×{count}｜打工券 ×{count}"]
+    lines = ["--- 天道赐福 ---", f"秘境之匙 ×{count}｜打工券 ×{count}"]
     if level_id > 41:
         lines.append(f"仙舟 ×{count}（仙人加持）")
     if level_id > 54:
         lines.append(f"神域令牌 ×{count}（万界之上）")
     if job in ("侠客", "唤魔者"):
-        lines.append(f"职业【{job}】额外 {'侠客令' if job == '侠客' else '唤魔令'} ×3")
+        lines.append(f"职业「{job}」额外 {'侠客令' if job == '侠客' else '唤魔令'} ×3")
     if daofa:
         lines.append("【道法仙术】额外 秘境之匙/打工券/九阶玄元丹/九阶淬体丹 各 ×" + str(count))
     if float(mult or 1.0) != 1.0:

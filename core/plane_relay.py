@@ -49,7 +49,7 @@ def wuxi_activate(doc: PlayerDoc, st: dict[str, Any], now: float,
         return False, "五色祭坛早已激活——遮天坐标在册（#位面 直接前往）。"
     err = pay_exp_xq(doc, WUXI_COST)
     if err:
-        return False, f"激活需修为与血气各 {WUXI_COST:,}。{err}"
+        return False, f"【位面中继·条件不足】激活需修为与血气各 {WUXI_COST:,}。{err}"
     st.setdefault("known", []).append(WUXI_PLANE)
     st.setdefault("coords", {})[WUXI_PLANE] = _center()
     return True, ("【五色祭坛】五彩灵光冲天而起——遮天位面坐标已刻入识海！\n"
@@ -126,7 +126,7 @@ def portal_use(doc: PlayerDoc, st: dict[str, Any], plane: str, inv: Mapping[str,
     if plane not in (st.get("known") or []):
         return False, f"传送阵上未刻画「{plane}」坐标——先 #记坐标 {plane}。", {}
     if int((inv or {}).get(PORTAL_ITEM, 0) or 0) < 1:
-        return False, f"你并没有【{PORTAL_ITEM}】。", {}
+        return False, f"你并没有「{PORTAL_ITEM}」。", {}
     st["current"] = plane
     if not isinstance((st.get("coords") or {}).get(plane), dict):
         st.setdefault("coords", {})[plane] = _center()

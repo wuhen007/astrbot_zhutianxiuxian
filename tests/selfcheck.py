@@ -4792,7 +4792,7 @@ async def main():
     fl37.set_state(d37c, st37)
     ok37, msg37, _ = fl37.extreme(d37c)
     assert ok37 and "本源觉醒" in msg37 and len(fl37.state_of(d37c)["extremes"]) == 1
-    assert fl37.panel(d37c, t37).startswith("【花粉进化路】")
+    assert fl37.panel(d37c, t37).startswith("--- 花粉进化路 ---")
     assert len(fl37.levels_text().split("\n")) == 26
     auth37.reset_tracks()
     auth37.register_track(fl37.equivalent_level)
@@ -6679,7 +6679,7 @@ async def main():
     call50("工作 绿植维护 3 确认")
     work50 = call50("结算", 1000)
     assert e50["station"]["contribution"] >= 3 and "不自动续工" in work50
-    assert "已领【医疗补给】" in call50("委托 医疗补给")
+    assert "已领「医疗补给」" in call50("委托 医疗补给")
     assert "交付" in call50("交付委托")
     call50("研读")
     call50("结算", 400)
@@ -6740,7 +6740,7 @@ async def main():
     # ⑥ 化神分路 + 离界：二次确认、四门槛、只升不降、封存只读
     assert "可选分路" in call50("化神 化魔"), "化魔原版明确拒绝"
     e50["body"]["realm"] = 4
-    assert "已选【化凡】" in call50("化神 化凡")
+    assert "已选「化凡」" in call50("化神 化凡")
     e50["body"]["mortal_steps"] = 3
     assert "愿文须 8~80 字" in call50("立愿 短")
     call50("立愿 愿以此身记住所有没有回音的名字")
@@ -6827,19 +6827,19 @@ async def main():
     assert "熟练度" in text51("训练")
     assert "已开始【训练 剑术】" in text51("训练 剑术")
     assert "进行中" in text51("帮工"), "行动期间必须拒绝新动作"
-    assert "训练【剑术】完成" in text51("结算", 10)
+    assert "训练「剑术」完成" in text51("结算", 10)
     assert "帮工完成" in step51("帮工")
     assert "当前没有到期行动" in text51("结算")
 
     # ③ 背包：购买 / 容量 / 不可买 / 存取出 / 使用 / 休养
     assert "不可购买" in text51("购买 古代晶片")
-    assert "购买【野营口粮】×2" in text51("购买 野营口粮 2")
-    assert "存入【野营口粮】×1" in text51("存入 野营口粮 1")
-    assert "取出【野营口粮】×1" in text51("取出 野营口粮 1")
+    assert "购买「野营口粮」×2" in text51("购买 野营口粮 2")
+    assert "存入「野营口粮」×1" in text51("存入 野营口粮 1")
+    assert "取出「野营口粮」×1" in text51("取出 野营口粮 1")
     s51["bag"] = {"野营口粮": 12}
     assert "背包不足" in text51("购买 疗伤药 1")
     s51["bag"] = {"野营口粮": 6, "疗伤药": 2, "魔力药": 1}
-    assert "使用【疗伤药】完成" in step51("使用 疗伤药")
+    assert "使用「疗伤药」完成" in step51("使用 疗伤药")
     s51["hp"] = 1
     s51["wounded"] = True
     assert "重伤解除" in step51("休养")

@@ -137,7 +137,7 @@ def destroy(s: dict) -> tuple[bool, str]:
     s["puppet"] = None
     s["puppet_until"] = 0.0
     s["puppet_day"] = ""
-    return True, f"人傀【{name}】已被彻底毁去，材料不返还。"
+    return True, f"人傀「{name}」已被彻底毁去，材料不返还。"
 
 
 def summon(s: dict, now: float) -> tuple[bool, str]:
@@ -154,7 +154,7 @@ def summon(s: dict, now: float) -> tuple[bool, str]:
     p["durability"] = max(0, int(p["durability"]) - SUMMON_DURABILITY_COST)
     s["puppet_day"] = key
     s["puppet_until"] = float(now) + SUMMON_SECONDS
-    return True, (f"【{p['name']}·人傀】收入战阵：6 小时内三维 +{PUPPET_BONUS:.0%}，"
+    return True, (f"「{p['name']}·人傀」收入战阵：6 小时内三维 +{PUPPET_BONUS:.0%}，"
                   f"耐久 -{SUMMON_DURABILITY_COST} → {p['durability']}。")
 
 
@@ -174,7 +174,7 @@ def refine(s: dict, now: float) -> tuple[bool, str]:
     }
     s["guo"] = None
     s["impurity"] = int(s.get("impurity", 0)) + IMPURITY_PER_REFINE
-    return True, (f"【{s['foreign_fruit']['name']}】已炼入外来道果槽：全属性 +{FRUIT_BONUS:.0%}，"
+    return True, (f"「{s['foreign_fruit']['name']}」已炼入外来道果槽：全属性 +{FRUIT_BONUS:.0%}，"
                   f"道果杂质 {s['impurity']}/{IMPURITY_CAP}。")
 
 
@@ -193,7 +193,7 @@ def retreat(s: dict, now: float) -> tuple[bool, str]:
         left = int((float(s["retreat_until"]) - now) / 60) + 1
         return False, f"你已经在闭关化杂（约 {left} 分钟后完成）。"
     s["retreat_until"] = float(now) + RETREAT_SECONDS
-    return True, f"已闭关化解外来道果杂质：6 小时后杂质 -{RETREAT_REDUCE}。"
+    return True, f"【道果·闭关】已闭关化解外来道果杂质：6 小时后杂质 -{RETREAT_REDUCE}。"
 
 
 def battle_bonus(s: Mapping, now: float) -> float:

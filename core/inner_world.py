@@ -100,7 +100,7 @@ def upgrade(doc: Any) -> tuple[bool, str]:
         return False, f"内景地已至 {LEVEL_CAP} 级上限。"
     cost = upgrade_cost(st)
     if int(doc.stones) < cost:
-        return False, f"升级需 {cost:,} 灵石（当前 {int(doc.stones):,}）。"
+        return False, f"【内景地·灵石不足】升级需 {cost:,} 灵石（当前 {int(doc.stones):,}）。"
     doc.stones -= cost
     st["level"] = int(st["level"]) + 1
     set_state(doc, st)
@@ -117,7 +117,7 @@ def deposit(doc: Any, inv: Mapping[str, int], name: str, qty: int,
     name = (name or "").strip()
     have = int(inv.get(name, 0) or 0)
     if have <= 0:
-        return False, f"纳戒里没有【{name}】。", 0
+        return False, f"纳戒里没有「{name}」。", 0
     qty = max(1, min(have, int(qty)))
     w = weight_of(cls_of(name))
     free = capacity(st) - used(st, cls_of)
@@ -128,7 +128,7 @@ def deposit(doc: Any, inv: Mapping[str, int], name: str, qty: int,
     st["items"][name] = int(st["items"].get(name, 0)) + qty
     set_state(doc, st)
     tail = "" if qty == min(have, int(qty)) else "（余下容量不足，未全存）"
-    return True, (f"存入【{name}】×{qty}，占 {w * qty:g} 格；"
+    return True, (f"存入「{name}」×{qty}，占 {w * qty:g} 格；"
                   f"当前 {used(st, cls_of):g}/{capacity(st)} 格{tail}。"), qty
 
 
@@ -139,7 +139,7 @@ def withdraw(doc: Any, name: str, qty: int, cls_of) -> tuple[bool, str, int]:
     name = (name or "").strip()
     have = int(st["items"].get(name, 0) or 0)
     if have <= 0:
-        return False, f"内景地中没有【{name}】。", 0
+        return False, f"内景地中没有「{name}」。", 0
     qty = max(1, min(have, int(qty)))
     left = have - qty
     if left > 0:
@@ -147,7 +147,7 @@ def withdraw(doc: Any, name: str, qty: int, cls_of) -> tuple[bool, str, int]:
     else:
         st["items"].pop(name, None)
     set_state(doc, st)
-    return True, (f"取出【{name}】×{qty}，当前 {used(st, cls_of):g}/{capacity(st)} 格。"), qty
+    return True, (f"取出「{name}」×{qty}，当前 {used(st, cls_of):g}/{capacity(st)} 格。"), qty
 
 
 def deposit_all(doc: Any, inv: Mapping[str, int], cls_of) -> tuple[bool, str, dict[str, int]]:

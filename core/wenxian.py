@@ -192,7 +192,7 @@ def explore_clue(w: dict) -> tuple[bool, str, dict]:
         suffix = ""
         if trial_result and trial_result["ready"]:
             suffix = "全部问仙试炼已完成，可发送 #激活问仙令。"
-        return True, (f"循迹第 {step + 1}/{CLUE_STEPS} 处：你抵达【{places[step]}】，"
+        return True, (f"循迹第 {step + 1}/{CLUE_STEPS} 处：你抵达「{places[step]}」，"
                       + ("线索指向更深处的迷雾……" if step + 1 < CLUE_STEPS
                          else "残图拼合完整。" + suffix)), w
     return False, "线索已探索完毕（#激活问仙令）。", w
@@ -209,7 +209,7 @@ def activate(w: dict, realm_index: int) -> tuple[bool, str, dict]:
         return False, f"线索尚未探索完整（{w.get('step', 0)}/{CLUE_STEPS}，#探索问仙线索）。", w
     if not trial_complete(w):
         t = w["trial"]
-        lines = ["问仙试炼未完成：",
+        lines = ["--- 问仙试炼 ---", "问仙试炼未完成：",
                  f"· 每日任务 {t['dailyTasks']}/{TRIAL_DAILY_TASK_TARGET}",
                  f"· 开辟内景地：{'已完成' if t['innerWorldOpened'] else '未完成'}",
                  f"· 击败位面天骄：{'已完成' if t['tianjiaoDefeated'] else '未完成'}",
@@ -261,7 +261,7 @@ def claim_level(w: dict, level: int) -> tuple[bool, str, dict, dict]:
     r = level_reward(level)
     bonus = BONUS_REWARDS.get(level)
     tail = f"，额外「{bonus['name']}」仙道潜力 +{bonus['potential']}" if bonus else ""
-    return True, (f"领取 {level} 级问仙令奖励：修为 +{r['exp_gain']:,}、血气 +{r['xueqi']:,}、"
+    return True, (f"【问仙令·领取】领取 {level} 级问仙令奖励：修为 +{r['exp_gain']:,}、血气 +{r['xueqi']:,}、"
                   f"灵石 +{r['stones']:,}{tail}"), w, r
 
 
