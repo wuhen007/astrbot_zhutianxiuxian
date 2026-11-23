@@ -633,6 +633,9 @@ CMD_OSF_CLAIM = "#大道出炉"
 CMD_OSF_MY = "#大道至宝"
 CMD_SHENPO = "#炼神魄"
 CMD_SHENPO_ALL = "#一键炼神魄"
+SHENPO_MAX_STAGE = 50_000
+SHENPO_BATCH_LIMIT = 20
+SHENPO_TURN_LIMIT = 1_000
 CMD_ERA_STATUS = "#纪元"
 CMD_ERA_NEXT = "#下一千年"
 CMD_ERA_LOSSES = "#查看损失"
@@ -1341,7 +1344,7 @@ ITEM_TABLES = (
     PLUGIN_NAME,
     "wuhen",
     "诸天万界修仙（Python 重构版）",
-    "0.1.4",
+    "0.1.5",
     "",
 )
 class ZhutianPlugin(Star):
@@ -2435,7 +2438,7 @@ class ZhutianPlugin(Star):
                 (CMD_DARK_FIGHT, "平定黑暗动乱（12 境+，5 分钟 CD，败则气血归零）"),
                 (CMD_DARK_RANK, "帝战贡献榜"),
                 (CMD_SHENPO, "炼神魄（锻神池，2 分钟 CD，胜则神魄+5 血气+）"),
-                (CMD_SHENPO_ALL, "一键炼神魄（连破到败）"),
+                (CMD_SHENPO_ALL, f"一键炼神魄（遇败即止，每次最多连破 {SHENPO_BATCH_LIMIT} 段）"),
                 (CMD_TOWER_RANK, "镇妖塔层数榜（前十，附神魄段数）"),
             ]},
             {"title": "神界邪道", "lines": [
@@ -5490,8 +5493,8 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         seg = int(doc.ext.get("shenpo", 0) or 0)
-        if seg >= 50000:
-            yield event.plain_result("神魄已臻圆满（50000 段上限）。")
+        if seg >= SHENPO_MAX_STAGE:
+            yield event.plain_result(f"神魄已臻圆满（{SHENPO_MAX_STAGE} 段上限）。")
             return
         now = time.time()
         if now - float(doc.ext.get("shenpo_ts") or 0) < 120:
@@ -5499,50 +5502,60 @@ class ZhutianPlugin(Star):
             yield event.plain_result(f"锻神池灵力未复，{left} 秒后再来。")
             return
         st = self._stats(doc)
-        name = doc.name or doc.uid[:8] + "…"
         import random as _random
         rng = _random.Random(f"{doc.uid}:shenpo:{now}")
         rounds_won = 0
-        seg_gain = 0
+        seg_cur = seg
         xueqi_gain = 0
         exp_lost = 0
         log: list[str] = []
-        while True:
-            seg_cur = seg + seg_gain
-            health, atk_b, def_b, reward = boss.shenpo_specs(max(1, seg_cur))
-            boss_hp = health
+        end_note = ""
+        player_def = max(1, int(st.defense * 0.1))
+        for _ in range(1 if one_shot else SHENPO_BATCH_LIMIT):
+            boss_hp, atk_b, def_b, reward = boss.shenpo_specs(max(1, seg_cur))
             alive = True
-            # 逐回合：玩家每回合回满血（原版语义），看能否在倒下前炼化此段
-            while boss_hp > 0:
-                dmg_p = battle.harm(st.atk, def_b, rng)[0]
-                boss_hp -= dmg_p
-                dmg_b = battle.harm(atk_b, max(1, int(st.defense * 0.1)), rng)[0]
-                if dmg_b >= st.hp:
+            # 保留每回合回满血的判定，但无进展或输出太低时也要结算退出。
+            for _turn in range(SHENPO_TURN_LIMIT):
+                boss_hp -= battle.harm(st.atk, def_b, rng)[0]
+                if battle.harm(atk_b, player_def, rng)[0] >= st.hp:
                     alive = False
                     break
-            doc.ext["shenpo_ts"] = now
-            if alive:
-                rounds_won += 1
-                seg_gain += 5
-                xueqi_gain += reward
-                log.append(f"第 {rounds_won} 段（{seg_cur}）：炼化成功，血气 +{reward}")
-                if one_shot:
+                if boss_hp <= 0:
                     break
             else:
+                end_note = f"本段在 {SHENPO_TURN_LIMIT} 回合内未能炼化，未扣修为。可提升攻击后再试。"
+                break
+            if not alive:
                 exp_lost = reward * 2
                 log.append(f"第 {rounds_won + 1} 段（{seg_cur}）：锻神池中神魂受创，修为 -{exp_lost}")
                 break
+            rounds_won += 1
+            xueqi_gain += reward
+            log.append(f"第 {rounds_won} 段（{seg_cur}）：炼化成功，血气 +{reward}")
+            seg_cur = min(SHENPO_MAX_STAGE, seg_cur + 5)
+            if seg_cur == SHENPO_MAX_STAGE:
+                end_note = f"神魄已臻圆满（{SHENPO_MAX_STAGE} 段上限）。"
+                break
+        else:
+            if not one_shot:
+                end_note = "本次连破已达上限，锻神池灵力恢复后可继续。"
         d = doc.model_copy(deep=True)
-        d.ext["shenpo"] = min(50000, seg + seg_gain)
+        d.ext["shenpo_ts"] = now
+        d.ext["shenpo"] = seg_cur
         d.ext["xueqi"] = int(d.ext.get("xueqi", 0) or 0) + xueqi_gain
         d.exp = max(0, d.exp - exp_lost)
         await self.db.save_player(d.model_dump())
-        head = (
-            f"锻神池修行归来：神魄 {seg} → {d.ext['shenpo']} 段"
-            + (f"（连破 {rounds_won} 段）" if rounds_won > 1 else "")
-        )
-        tail = f"血气累计 +{xueqi_gain}" if xueqi_gain else f"修为 -{exp_lost}（参悟失败）"
-        yield event.plain_result(head + "\n" + "\n".join(log[-5:]) + f"\n{tail}")
+        head = f"锻神池修行归来：神魄 {seg} → {seg_cur} 段"
+        if rounds_won > 1:
+            head += f"（连破 {rounds_won} 段）"
+        lines = [head, *log[-5:]]
+        if xueqi_gain:
+            lines.append(f"血气累计 +{xueqi_gain}")
+        elif exp_lost:
+            lines.append(f"修为 -{exp_lost}（参悟失败）")
+        if end_note:
+            lines.append(end_note)
+        yield event.plain_result("\n".join(lines))
 
     # ---- 神界（对齐原版 shenren.js） ----
 
@@ -17157,18 +17170,17 @@ class ZhutianPlugin(Star):
         if not self._allowed(event):
             return
         state = await self._osw_ensure()
-        coord = self._osw_explicit_coord(event.message_str, CMD_OSW_GOTO)
-        if coord is None:
-            coord = self._osw_center()
-            star = other_shore_world.require_star(state, coord)
-            if other_shore_world.visit_other_shore_star(state, coord):
-                new_state = state
-            else:
-                yield event.plain_result(f"{star.get('name')} 需先观测才能踏足。")
-                return
-        else:
-            star = other_shore_world.require_star(state, coord)
+        explicit_coord = self._osw_explicit_coord(event.message_str, CMD_OSW_GOTO)
+        coord = explicit_coord or self._osw_center()
+        star, star_error = other_shore_world.find_star(state, coord)
+        if star is None:
+            yield event.plain_result(star_error or "沧澜界坐标无法识别，请使用 q,r 格式。")
+            return
+        try:
             new_state = other_shore_world.visit_other_shore_star(state, coord)
+        except ValueError as exc:
+            yield event.plain_result(str(exc))
+            return
         await self._osw_save(new_state)
         lines = [f"【沧澜界·前往】已前往「{star.get('name')}」，坐标 {coord['q']},{coord['r']}。"]
         async for r in self._smart(event, "\\n".join(lines), "彼岸世界"):
@@ -17195,8 +17207,15 @@ class ZhutianPlugin(Star):
             yield event.plain_result("探索贡献必须大于 0。")
             return
         coord = self._osw_explicit_coord(event.message_str, CMD_OSW_EXPLORE) or self._osw_nearest(state)
-        star = other_shore_world.require_star(state, coord)
-        new_state = other_shore_world.contribute_other_shore_exploration(state, coord, doc.uid, amount)
+        star, star_error = other_shore_world.find_star(state, coord)
+        if star is None:
+            yield event.plain_result(star_error or "沧澜界坐标无法识别，请使用 q,r 格式。")
+            return
+        try:
+            new_state = other_shore_world.contribute_other_shore_exploration(state, coord, doc.uid, amount)
+        except ValueError as exc:
+            yield event.plain_result(str(exc))
+            return
         await self._osw_save(new_state)
         lines = [
             f"【沧澜界·贡献】已贡献探索度 {amount} 至「{star.get('name')}」，当前贡献 {new_state['states'][star['id']].get('contribution')}。",
@@ -17215,8 +17234,15 @@ class ZhutianPlugin(Star):
             return
         state = await self._osw_ensure()
         coord = self._osw_explicit_coord(event.message_str, CMD_OSW_ANCHOR) or self._osw_nearest(state, prefer_visited=True)
-        star = other_shore_world.require_star(state, coord)
-        new_state = other_shore_world.anchor_other_shore_star(state, coord)
+        star, star_error = other_shore_world.find_star(state, coord)
+        if star is None:
+            yield event.plain_result(star_error or "沧澜界坐标无法识别，请使用 q,r 格式。")
+            return
+        try:
+            new_state = other_shore_world.anchor_other_shore_star(state, coord)
+        except ValueError as exc:
+            yield event.plain_result(str(exc))
+            return
         await self._osw_save(new_state)
         lines = [f"【沧澜界·道标】已为「{star.get('name')}」建立道标（需贡献达阈值 {star.get('anchorRequirement')}）。"]
         async for r in self._smart(event, "\\n".join(lines), "彼岸世界"):
@@ -17232,9 +17258,16 @@ class ZhutianPlugin(Star):
             return
         state = await self._osw_ensure()
         coord = self._osw_explicit_coord(event.message_str, CMD_OSW_CLEAR) or self._osw_nearest(state, prefer_visited=False)
-        star = other_shore_world.require_star(state, coord)
+        star, star_error = other_shore_world.find_star(state, coord)
+        if star is None:
+            yield event.plain_result(star_error or "沧澜界坐标无法识别，请使用 q,r 格式。")
+            return
         before_phase = str((state.get("states", {}).get(star["id"], {}) or {}).get("phase") or "")
-        new_state = other_shore_world.clear_other_shore_campaign_star(state, coord)
+        try:
+            new_state = other_shore_world.clear_other_shore_campaign_star(state, coord)
+        except ValueError as exc:
+            yield event.plain_result(str(exc))
+            return
         await self._osw_save(new_state)
         lines = [f"【沧澜界·完成】「{star.get('name')}」已完成（{new_state['states'][star['id']].get('phase')}）。"]
         if before_phase != "cleared":

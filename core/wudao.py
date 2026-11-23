@@ -207,7 +207,7 @@ def attempt(doc: PlayerDoc, inv: Mapping[str, int], now: float | None = None,
         return False, f"悟道需灵石 {c['stones']:,}（现有 {int(getattr(doc, 'stones', 0) or 0):,}）。", {}
     if shouyuan <= c["shouyuan"]:
         return False, (f"参悟一次需燃烧 {c['shouyuan']:,} 年寿元（现有 {shouyuan:,}）——"
-                       "寿元将尽，先服寿命丹。")
+                       "寿元将尽，先服寿命丹。"), {}
 
     # 古茶 buff：本次结算消耗
     use_tea = bool(st.get("tea"))

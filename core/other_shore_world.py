@@ -328,6 +328,14 @@ def require_star(world: dict[str, Any], coordinate) -> dict[str, Any]:
     return next(item for item in stars if item.get("id") == id_str)
 
 
+def find_star(world: dict[str, Any], coordinate) -> tuple[dict[str, Any] | None, str | None]:
+    """Resolve a player-supplied coordinate without leaking a handler exception."""
+    try:
+        return require_star(world, coordinate), None
+    except (KeyError, TypeError, ValueError) as exc:
+        return None, str(exc)
+
+
 def state_for(world: dict[str, Any], coordinate) -> tuple[dict[str, Any], dict[str, Any]]:
     star = require_star(world, coordinate)
     state = world.get("states", {}).get(star["id"])
