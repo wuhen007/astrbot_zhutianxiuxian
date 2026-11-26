@@ -14,12 +14,14 @@
   25/10/0/-10/-30 与 qi 完全一致），属笔误；炼体应当是「太古 +25 / 末法 +15」的非对称设计。
 
 shortcut（与原版差异）：
-- 绝灵物品损失、寿元压制、位面自修复、仙帝权限、全服事件 RealmEvents(1912 行) 未做
-- 天心印记重置未做（本移植无大帝天心系统）
+- 绝灵物品侵蚀在 1000 年节点惰性结算；日历跳过多个节点时按世界年序补账，跨启动通过时代表与玩家事件标记恢复。
+- 位面自修复、高阶仙帝时代权限和 RealmEvents(1912 行) 的专属分支不属于此模块，本地仅由其他系统部分承担。
+- 天心印记重置未做（本移植无大帝天心系统）。
 """
 
 from __future__ import annotations
 
+import random
 import time
 from collections.abc import Mapping
 from typing import Any
@@ -359,3 +361,193 @@ def progress_text(row: Mapping, advanced_years: int) -> str:
         f"年份: {years}/{ERA_YEARS} 年",
         f"进度: {bar} {progress}%",
     ])
+
+# ---------------------------------------------------------------- 绝灵时代生命周期
+
+JUELING_ERA_INDEX = 4
+JUELING_LIFESPAN_LIMIT = 9_999
+JUELING_LIFESPAN_KEY = "jueling_suppressed_lifespan"
+JUELING_LOSS_EVENT_KEY = "jueling_loss_event"
+JUELING_LOSS_IMMUNITY_KEY = "jueling_loss_immune"
+JUELING_LOSS_CATEGORIES = (
+    "丹药", "道具", "功法", "草药", "材料", "食材", "仙宠", "仙宠口粮", "盒子",
+)
+
+
+def _jueling_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def _jueling_immune(doc: Any, authority: int) -> bool:
+    """原版寿元门槛为 18、物品损失门槛为 19；岁云任一阶段绝灵免疫。"""
+    from .extra_cultivation import realm_authority_level
+    from .suiyun import effects as suiyun_effects
+
+    return (realm_authority_level(doc) >= authority
+            or bool(suiyun_effects(doc).get("spirit_immune")))
+
+
+def has_jueling_lifespan(doc: Any) -> bool:
+    return JUELING_LIFESPAN_KEY in doc.ext
+
+
+def restore_jueling_lifespan(doc: Any) -> bool:
+    """恢复进入绝灵时代前保存的寿元；重复调用不再改动角色。"""
+    if not has_jueling_lifespan(doc):
+        return False
+    saved = doc.ext.pop(JUELING_LIFESPAN_KEY)
+    try:
+        doc.ext["shouyuan"] = int(float(saved))
+    except (TypeError, ValueError, OverflowError):
+        pass
+    return True
+
+
+def sync_jueling_lifespan(doc: Any, era_index: int) -> bool:
+    """按当前时代同步寿元压制，供进入、在线结算及重启恢复时调用。"""
+    try:
+        active = int(era_index) == JUELING_ERA_INDEX
+    except (TypeError, ValueError, OverflowError):
+        active = False
+    if not active or _jueling_immune(doc, 18):
+        return restore_jueling_lifespan(doc)
+
+    from .lifespan import shouyuan_of
+
+    current = shouyuan_of(doc)
+    was_suppressed = has_jueling_lifespan(doc)
+    if not was_suppressed:
+        doc.ext[JUELING_LIFESPAN_KEY] = current
+    else:
+        doc.ext[JUELING_LIFESPAN_KEY] = _jueling_int(
+            doc.ext[JUELING_LIFESPAN_KEY], current)
+    suppressed = min(current, JUELING_LIFESPAN_LIMIT)
+    doc.ext["shouyuan"] = suppressed
+    return not was_suppressed or suppressed != current
+
+
+def add_jueling_aware_lifespan(doc: Any, amount: int, era_index: int) -> dict[str, Any]:
+    """增寿时同步真实值与受压显示值，避免绝灵期间的增益在离开时丢失。"""
+    added = max(0, _jueling_int(amount))
+    try:
+        active = int(era_index) == JUELING_ERA_INDEX
+    except (TypeError, ValueError, OverflowError):
+        active = False
+    if not active or _jueling_immune(doc, 18):
+        sync_jueling_lifespan(doc, era_index)
+        from .lifespan import shouyuan_of
+
+        visible_before = shouyuan_of(doc)
+        doc.ext["shouyuan"] = visible_before + added
+        return {"added": added, "visible_added": added, "suppressed": False}
+
+    sync_jueling_lifespan(doc, era_index)
+    visible_before = _jueling_int(doc.ext.get("shouyuan"))
+    true_before = _jueling_int(doc.ext.get(JUELING_LIFESPAN_KEY), visible_before)
+    doc.ext[JUELING_LIFESPAN_KEY] = true_before + added
+    doc.ext["shouyuan"] = min(JUELING_LIFESPAN_LIMIT, visible_before + added)
+    return {
+        "added": added,
+        "visible_added": doc.ext["shouyuan"] - visible_before,
+        "suppressed": True,
+    }
+
+
+def grant_jueling_loss_immunity(doc: Any, layers: int = 1) -> int:
+    """记录可抵挡的绝灵损失次数；扣除护符由调用方与此变更同事务完成。"""
+    amount = max(0, _jueling_int(layers))
+    current = max(0, _jueling_int(doc.ext.get(JUELING_LOSS_IMMUNITY_KEY)))
+    doc.ext[JUELING_LOSS_IMMUNITY_KEY] = current + amount
+    return current + amount
+
+
+def apply_jueling_item_loss(
+    doc: Any,
+    inventory: Mapping[str, int],
+    item_categories: Mapping[str, str],
+    state: Mapping,
+    rng: Any = None,
+) -> dict[str, Any]:
+    """计算本个绝灵时代年节点的纳戒损失；持久化及事务由调用方负责。
+
+    `inventory` 是扁平的物品数量表，`item_categories` 将物品名映射到原版纳戒类别。
+    角色状态中的事件键使同一纪元/时代/年份的重放幂等；调用方须把角色状态和物品扣减
+    放在同一事务，并按世界年份串行处理时代节点。
+    """
+    current = state_of(_jueling_int(state.get("years_total")))
+    result: dict[str, Any] = {
+        "items": [], "inventory_delta": {}, "groups": 0,
+        "immune": False, "sealed": False, "shielded": False, "replayed": False,
+    }
+    if current["index"] != JUELING_ERA_INDEX:
+        return result
+
+    event_id = f"{current['epoch']}:{current['index']}:{current['years']}"
+    last_year = _jueling_int(doc.ext.get(JUELING_LOSS_EVENT_KEY), -1)
+    event_year = _jueling_int(state.get("years_total"), 0)
+    if event_year <= last_year:
+        result["replayed"] = True
+        return result
+    doc.ext[JUELING_LOSS_EVENT_KEY] = event_year
+
+    if is_sealed(doc, state):
+        result["sealed"] = True
+        return result
+    if _jueling_immune(doc, 19):
+        result["immune"] = True
+        return result
+    immune_layers = max(0, _jueling_int(doc.ext.get(JUELING_LOSS_IMMUNITY_KEY)))
+    if immune_layers:
+        doc.ext[JUELING_LOSS_IMMUNITY_KEY] = immune_layers - 1
+        result["shielded"] = True
+        return result
+
+    randomizer = rng or random
+    categories = {
+        category: [
+            str(name) for name, owned in inventory.items()
+            if str(item_categories.get(str(name)) or "") == category
+            and _jueling_int(owned) > 0
+        ]
+        for category in JUELING_LOSS_CATEGORIES
+    }
+    loss_categories = [category for category, names in categories.items() if names]
+    extra_groups = max(0, int(current["years"]) // 1_000) * 2
+    groups = 3 + randomizer.randrange(3) + extra_groups
+    result["groups"] = groups
+    if not loss_categories:
+        return result
+
+    from .items import locked_of
+
+    locked = locked_of(doc)
+    remaining = {str(name): max(0, _jueling_int(qty)) for name, qty in inventory.items()}
+    deltas: dict[str, int] = {}
+    for _ in range(groups):
+        if not loss_categories:
+            break
+        category = randomizer.choice(loss_categories)
+        candidates = [
+            name for name in categories[category]
+            if remaining.get(name, 0) > 0
+        ]
+        if not candidates:
+            loss_categories.remove(category)
+            continue
+        name = randomizer.choice(candidates)
+        if name in locked:
+            continue
+
+        owned = remaining[name]
+        amount = max(1, min(owned // 10, owned))
+        remaining[name] = owned - amount
+        deltas[name] = deltas.get(name, 0) + amount
+        result["items"].append({"name": name, "category": category, "amount": amount})
+        if not any(remaining.get(item, 0) > 0 for item in categories[category]):
+            loss_categories.remove(category)
+
+    result["inventory_delta"] = deltas
+    return result

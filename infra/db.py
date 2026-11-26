@@ -12,7 +12,7 @@ from typing import Any, AsyncIterator, Optional
 
 import aiosqlite
 
-LATEST_DB_VERSION = 18
+LATEST_DB_VERSION = 19
 
 
 def _shanghai_date_key(ts: float) -> str:
@@ -72,6 +72,111 @@ class DataBase:
             await self.conn.close()
             self.conn = None
 
+    @_serialized
+    async def get_combat_session(self, session_id: str) -> dict[str, Any] | None:
+        assert self.conn is not None
+        async with self.conn.execute(
+            "SELECT payload FROM combat_sessions WHERE session_id = ?", (str(session_id),)
+        ) as cur:
+            row = await cur.fetchone()
+        return json.loads(row[0]) if row else None
+
+    @_serialized
+    async def find_active_combat_session(self, uid: str, now: float | None = None) -> dict[str, Any] | None:
+        assert self.conn is not None
+        now = time.time() if now is None else float(now)
+        async with self.conn.execute(
+            "SELECT payload FROM combat_sessions WHERE status = 'active' AND expires_at > ? "
+            "AND (player_a = ? OR player_b = ?) ORDER BY updated_at DESC LIMIT 1",
+            (now, str(uid), str(uid)),
+        ) as cur:
+            row = await cur.fetchone()
+        return json.loads(row[0]) if row else None
+
+    @_serialized
+    async def create_combat_session(self, doc: dict[str, Any]) -> tuple[bool, str | None]:
+        """原子创建玩家切磋会话；任一参战者已有未过期会话时拒绝。"""
+        assert self.conn is not None
+        now = time.time()
+        try:
+            await self.conn.execute("BEGIN IMMEDIATE")
+            async with self.conn.execute(
+                "SELECT player_a, player_b FROM combat_sessions "
+                "WHERE status='active' AND expires_at > ? AND "
+                "(player_a IN (?, ?) OR player_b IN (?, ?)) LIMIT 1",
+                (now, str(doc["player_a"]), str(doc["player_b"]),
+                 str(doc["player_a"]), str(doc["player_b"]))
+            ) as cur:
+                active = await cur.fetchone()
+            if active:
+                await self.conn.rollback()
+                occupied = next((uid for uid in (str(doc["player_a"]), str(doc["player_b"]))
+                                 if uid in (str(active[0]), str(active[1]))), str(active[0]))
+                return False, occupied
+            await self.conn.execute(
+                "INSERT INTO combat_sessions(session_id, platform_id, group_id, player_a, player_b, "
+                "status, expires_at, updated_at, payload) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)",
+                (str(doc["session_id"]), str(doc["platform_id"]), str(doc["group_id"]),
+                 str(doc["player_a"]), str(doc["player_b"]), float(doc["expires_at"]), now,
+                 json.dumps(doc, ensure_ascii=False)),
+            )
+            await self.conn.commit()
+            return True, None
+        except Exception:
+            await self.conn.rollback()
+            raise
+
+    @_serialized
+    async def save_combat_session(self, doc: dict[str, Any]) -> None:
+        assert self.conn is not None
+        now = time.time()
+        await self.conn.execute(
+            "INSERT INTO combat_sessions(session_id, platform_id, group_id, player_a, player_b, "
+            "status, expires_at, updated_at, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(session_id) DO UPDATE SET platform_id=excluded.platform_id, "
+            "group_id=excluded.group_id, player_a=excluded.player_a, player_b=excluded.player_b, "
+            "status=excluded.status, expires_at=excluded.expires_at, updated_at=excluded.updated_at, "
+            "payload=excluded.payload",
+            (str(doc["session_id"]), str(doc["platform_id"]), str(doc["group_id"]),
+             str(doc["player_a"]), str(doc["player_b"]), str(doc.get("status", "active")),
+             float(doc["expires_at"]), now, json.dumps(doc, ensure_ascii=False)),
+        )
+        await self.conn.commit()
+
+    @_serialized
+    async def due_combat_sessions(self, now: float | None = None) -> list[dict[str, Any]]:
+        assert self.conn is not None
+        now = time.time() if now is None else float(now)
+        async with self.conn.execute(
+            "SELECT payload FROM combat_sessions WHERE status='active' AND expires_at <= ?",
+            (now,),
+        ) as cur:
+            return [json.loads(row[0]) for row in await cur.fetchall()]
+
+    @_serialized
+    async def expire_combat_sessions(self, now: float | None = None) -> list[dict[str, Any]]:
+        assert self.conn is not None
+        now = time.time() if now is None else float(now)
+        async with self.conn.execute(
+            "SELECT session_id, payload FROM combat_sessions WHERE status='active' AND expires_at <= ?",
+            (now,),
+        ) as cur:
+            rows = await cur.fetchall()
+        sessions = [json.loads(row[1]) for row in rows]
+        if rows:
+            await self.conn.executemany(
+                "UPDATE combat_sessions SET status='expired', updated_at=? WHERE session_id=?",
+                [(now, str(row[0])) for row in rows],
+            )
+            await self.conn.commit()
+        return sessions
+
+    @_serialized
+    async def delete_combat_session(self, session_id: str) -> None:
+        assert self.conn is not None
+        await self.conn.execute("DELETE FROM combat_sessions WHERE session_id=?", (str(session_id),))
+        await self.conn.commit()
+
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[aiosqlite.Connection]:
         """多语句事务；异常自动回滚。持写锁执行，期间其它写命令排队。"""
@@ -120,11 +225,12 @@ class DataBase:
                 await _v16_era(self.conn)
                 await _v17_tianjiao_faction(self.conn)
                 await _v18_qq_operations(self.conn)
+                await _v19_combat_sessions(self.conn)
                 await self.conn.execute("INSERT INTO db_info (version) VALUES (?)", (LATEST_DB_VERSION,))
             return
 
         # 后续版本在此登记：MIGRATIONS[n] = upgrade_fn
-        MIGRATIONS = {2: _v2_inventory, 3: _v3_world_boss, 4: _v4_sects, 5: _v5_auction, 6: _v6_sect_score, 7: _v7_daily_tasks, 8: _v8_dark_boss, 9: _v9_raid, 10: _v10_rift, 11: _v11_calamity, 12: _v12_lingjie, 13: _v13_ancient, 14: _v14_other_shore, 15: _v15_market, 16: _v16_era, 17: _v17_tianjiao_faction, 18: _v18_qq_operations}
+        MIGRATIONS = {2: _v2_inventory, 3: _v3_world_boss, 4: _v4_sects, 5: _v5_auction, 6: _v6_sect_score, 7: _v7_daily_tasks, 8: _v8_dark_boss, 9: _v9_raid, 10: _v10_rift, 11: _v11_calamity, 12: _v12_lingjie, 13: _v13_ancient, 14: _v14_other_shore, 15: _v15_market, 16: _v16_era, 17: _v17_tianjiao_faction, 18: _v18_qq_operations, 19: _v19_combat_sessions}
         for version in sorted(v for v in MIGRATIONS if v > current):
             async with self.transaction():
                 await MIGRATIONS[version](self.conn)
@@ -1448,3 +1554,17 @@ async def _v18_qq_operations(conn: aiosqlite.Connection) -> None:
         " claim_uid TEXT, confirmed_at REAL, created_at REAL NOT NULL, claimed_at REAL)"
     )
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_item_grants_target ON item_grants(target_uid, claimed_at)")
+
+
+async def _v19_combat_sessions(conn: aiosqlite.Connection) -> None:
+    """持久化玩家交互切磋的选技与逐回合状态，支持重载恢复。"""
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS combat_sessions ("
+        " session_id TEXT PRIMARY KEY, platform_id TEXT NOT NULL, group_id TEXT NOT NULL,"
+        " player_a TEXT NOT NULL, player_b TEXT NOT NULL, status TEXT NOT NULL,"
+        " expires_at REAL NOT NULL, updated_at REAL NOT NULL, payload TEXT NOT NULL)"
+    )
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_combat_sessions_active_player "
+        "ON combat_sessions(status, player_a, player_b, expires_at)"
+    )

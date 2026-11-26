@@ -157,7 +157,13 @@ def bind(doc: Mapping) -> tuple[bool, str, dict]:
     """使用诸天镜：绑定镜系统（1 阶 + 今日镜能）。"""
     zt = system_of(doc)
     if zt.get("bound"):
-        return False, "道友的诸天镜早已认主（镜阶 %s）。" % MIRROR_TIERS[int(zt["tier"])]["name"], zt
+        tier = min(7, max(1, int(zt.get("tier") or 1)))
+        zt["energy_date"] = _date_key(_now())
+        zt["energy"] = int(MIRROR_TIERS[tier]["energy"])
+        materials = zt.setdefault("materials", {})
+        materials["镜尘"] = int(materials.get("镜尘", 0) or 0) + 25
+        return True, (f"诸天镜再次映照本源，当前镜阶 {MIRROR_TIERS[tier]['name']}，"
+                      "今日镜能已复满，镜尘 +25。"), zt
     zt["bound"] = True
     zt["tier"] = 1
     zt["energy_date"] = ""

@@ -7,7 +7,7 @@
 - 指令 14 条：踏上 / 面板 / 境界表 / 花粉位面 / 感应异变 / 进化 / 服用异果 /
   净化隐患 / 重塑进化根基 / 花粉悟道 / 祖种悟道 / 孕育超级异果 / 服用超级异果 /
   花粉渡劫 / 极尽蜕变（面板含别名，渡劫状态并入面板）。
-- 不做：花粉专属神术树、场域九重天、六呼吸法卡、圣墟副本 12 处、七妙宝术。
+- 花粉战斗神术与圣墟九重场域由 `core/shengxu.py` 管理；本模块仍未实现六呼吸法卡与七妙宝术。
 
 shortcut（与原版的差异，均已在数值上折算而非省略）：
 1. 原版踏上需 `level_id≥42 且 Physique_id≥42`；本移植境界下标为 0-63，折算为双轨各 ≥15。
@@ -161,6 +161,8 @@ def state_of(doc: Any) -> dict[str, Any] | None:
 
 def set_state(doc: Any, st: Mapping[str, Any]) -> None:
     doc.ext["flower"] = dict(st)
+    from . import extra_cultivation
+    extra_cultivation.set_level(doc, "huafen", int(st.get("level", 1) or 1))
 
 
 def _date_key(now: float) -> str:
@@ -249,7 +251,10 @@ def activate(doc: Any, inv: Mapping[str, int]) -> tuple[bool, str, dict[str, int
     if doc.realm_index < ACTIVATE_GATE or doc.physique_index < ACTIVATE_GATE:
         return False, (f"踏上花粉路需练气/炼体双轨各达第 {ACTIVATE_GATE + 1} 境"
                        f"（当前 {doc.realm_index + 1} / {doc.physique_index + 1}）。"), {}
-    set_state(doc, _defaults())
+    initial = _defaults()
+    from . import extra_cultivation
+    initial["level"] = extra_cultivation.level_of(doc, "huafen")
+    set_state(doc, initial)
     return True, ("【花粉路开启】自今日起以花粉为舟、以异果为薪，另证一条进化之路。\n"
                   "赠【普通进化花粉】×3。\n"
                   "下一步：#感应异变 取媒介 → #进化 提升花粉境。"), {"普通进化花粉": 3}
@@ -299,6 +304,33 @@ def sense(doc: Any, inv: Mapping[str, int], now: float,
     return True, "\n".join(lines), delta
 
 
+def _high_progression_gate(doc: Any, current_level: int) -> str | None:
+    """Keep the four source-specialized high flower ascensions behind their own state."""
+    if current_level < 21 or current_level > 24:
+        return None
+    from . import ownway, sacrifice, selfdao
+    ow = ownway.state_of(doc)
+    if current_level == 21:
+        sd = selfdao.state_of(doc)
+        ready = (int(ow.get("seg", 0) or 0) >= 300
+                 and int(sd.get("layers", 0) or 0) >= selfdao.LAYERS
+                 and bool(sd.get("system_name"))
+                 and len(sd.get("realms") or []) == 6)
+        if not ready:
+            return ("【道祖绝巅·专用晋升】此境必须完成自身之道与己道推演前置，"
+                    "普通进化不能替代；请按 #推演己道 / #合道 的门槛继续。")
+    elif current_level == 22 and not ow.get("jidao"):
+        return "【路尽仙帝·专用晋升】须先完成自身之道祭道（#祭道），普通进化不能替代。"
+    elif current_level == 23:
+        bubble = sacrifice.state_of(doc).get("bubble")
+        if not isinstance(bubble, Mapping) or bubble.get("status") != "transcended":
+            return ("【祭道绝巅·专用晋升】须经历始祖永祭并挣脱空间泡影"
+                    "（#空间泡影状态 / #挣脱空间泡影），普通进化不能替代。")
+    elif current_level == 24 and not ow.get("unique"):
+        return "【祭道之上·专用晋升】须先完成唯一道之上证道（#唯一道之上），普通进化不能替代。"
+    return None
+
+
 def _chance(st: Mapping[str, Any], medium: Mapping, now: float,
             wound_penalty: float = 0.0) -> float:
     level = int(st["level"])
@@ -342,6 +374,9 @@ def evolve(doc: Any, inv: Mapping[str, int], asked: str, now: float,
         return False, "已至「唯一道之上」，花粉路再无进阶。", {}
     if int(st["root"]) >= ROOT_MAX:
         return False, f"进化根基损伤已满 {ROOT_MAX}，先用 #重塑进化根基 修复。", {}
+    high_gate = _high_progression_gate(doc, level)
+    if high_gate:
+        return False, high_gate, {}
     target = level + 1
     cap = PLANES.get(str(st["plane"]), 11)
     if target <= 17 and target > cap:

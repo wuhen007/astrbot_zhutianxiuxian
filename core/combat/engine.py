@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import random
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -24,6 +25,7 @@ from .. import battle
 from . import skills
 
 DEFAULT_MAX_ROUNDS = battle.MAX_ROUNDS
+TEAM_ACTION_LIMIT = 1000  # 保护机器人运行；阵营战到达上限时按平局保留气血
 
 
 @dataclass
@@ -39,11 +41,17 @@ class Fighter:
     effects: dict[str, Any] = field(default_factory=dict)
     skills: tuple[str, ...] = ()
     tags: dict[str, Any] = field(default_factory=dict)   # 帝骑/宿云/黑皇等旗标（W1-4）
+    speed: int = 100
+    speed_boost: float = 1.0
+    action_bar: int = 0
+    crit_damage: float | None = None
 
     @classmethod
     def from_unit(cls, u: battle.Unit) -> "Fighter":
         return cls(name=u.name, atk=int(u.atk), defense=int(u.defense),
-                   hp=int(u.hp), hp_max=int(u.hp), bao=float(u.bao or 0.0))
+                   hp=int(u.hp), hp_max=int(u.hp), bao=float(u.bao or 0.0),
+                   speed=max(1, int(u.speed or 100)), action_bar=max(0, int(u.action_bar or 0)),
+                   crit_damage=u.crit_damage)
 
     def eff(self, key: str, default: Any = 0) -> Any:
         return self.effects.get(key, default)
@@ -62,8 +70,17 @@ class BattleResult:
 
 def _try_revive(f: Fighter, hp: list[int], idx: int, log: list[str], rng: random.Random) -> bool:
     """致死一击的复活判定（原版 performRevival：掷 pr，恢复 上限×比例，一场一次）。"""
+    if f.tags.get("time_river_dark_triad") and not f.effects.get("triad_revived"):
+        f.effects["triad_revived"] = True
+        hp[idx] = f.hp_max
+        f.effects["shield"] = f.hp_max // 4
+        f.effects["time_river_damage_reduction"] = 0.3
+        f.effects["time_river_damage_reduction_turns"] = max(
+            3, int(f.eff("time_river_damage_reduction_turns")))
+        log.append(f"【黑暗帝血】{f.name}满血复生，并重新凝聚护盾。")
+        return True
     rev = f.eff("revive")
-    if not isinstance(rev, dict) or rev.get("used"):
+    if f.eff("revive_disabled") or not isinstance(rev, dict) or rev.get("used"):
         return False
     raw_pr = rev.get("pr")
     pr = 1.0 if raw_pr is None else min(1.0, max(0.0, float(raw_pr)))   # pr=0 合法：永不触发
@@ -164,28 +181,77 @@ def try_heal_skills(f: Fighter, hp: list[int], idx: int, rng: random.Random, log
 
 def roll_attack_skills(
     atk_u: Fighter, def_u: Fighter, dmg: int, rng: random.Random,
+    *, triggered: list[Mapping] | None = None, action_index: int | None = None,
 ) -> tuple[int, list[str]]:
     """出手攻击技能：池内逐条独立掷 pr（对齐原版遍历判定）。
 
     命中 → 伤害 ×beilv（钳 ≤50，法球不吃倍率）、控制=1 → 定身对手 1 回合、cnt 限次。
     """
     extra: list[str] = []
-    for sk in atk_u.tags.get("atk_skills") or []:
-        if _left(atk_u, sk) == 0:
+    pool = atk_u.tags.get("atk_skills") or []
+    shared_roll = rng.random() if pool and action_index is not None else None
+    counter_shown = False
+    for sk in pool:
+        if action_index is None:
+            if _left(atk_u, sk) == 0:
+                continue
+        elif int(sk.get("cnt", -1) or 0) not in (-1, action_index):
             continue
         pr = float(sk.get("pr", 0) or 0)
-        if pr <= 0 or rng.random() >= pr:
+        if pr <= 0 or (shared_roll if shared_roll is not None else rng.random()) >= pr:
+            continue
+        from .time_river import countered_skill
+        if countered_skill(atk_u, sk):
+            if not counter_shown:
+                extra.append(f"【时间长河反制】{atk_u.name}的{sk['name']}被截断。")
+                counter_shown = True
             continue
         raw_b = sk.get("beilv")
         beilv = 1.0 if raw_b is None else float(raw_b)
         beilv = min(SKILL_BEILV_CAP, max(0.1, beilv))
-        dmg = max(1, int(dmg * beilv))
-        _spend(atk_u, sk)
+        dmg = max(1, int(dmg * beilv + float(sk.get("other", 0) or 0)))
+        if action_index is None:
+            _spend(atk_u, sk)
         extra.append(f"【{sk.get('name')}】{sk.get('msg1', '')}（伤害 ×{beilv:g}）")
         if int(sk.get("控制", 0) or 0) > 0:
             extra.append(_apply_control(def_u, str(sk.get("name") or "控制技能"),
                                         str(sk.get("msg2") or "")))
+        if triggered is not None:
+            triggered.append(sk)
+            if action_index is not None and len(triggered) >= 3:
+                break
     return dmg, extra
+
+
+def _apply_hit_effects(attacker, defender, hp, index, triggered, log):
+    for skill in triggered:
+        if int(skill.get("不可复活", 0) or 0) == 1:
+            defender.effects["revive_disabled"] = True
+        if skill.get("时间长河效果") == "剥落无敌气魄":
+            defender.atk = max(1, defender.atk // 2)
+            defender.defense = max(1, defender.defense // 2)
+            defender.hp_max = max(1, defender.hp_max // 2)
+            hp[index] = max(1, hp[index] // 2)
+            defender.hp = hp[index]
+            log.append(f"【{skill['name']}】{defender.name}的攻、防、生命上限与当前气血减半。")
+        teaching = skill.get("真意传授")
+        if teaching:
+            used = defender.tags.setdefault("river_teaching_seen", set())
+            used.add(str(skill["name"]))
+
+
+def _tick_action_effects(unit, hp, index, log):
+    from .time_river import tick_cang_suppression
+    unit.hp = hp[index]
+    note = tick_cang_suppression(unit)
+    if note:
+        hp[index] = unit.hp
+        log.append(note)
+    duration = int(unit.eff("time_river_damage_reduction_turns"))
+    if duration:
+        unit.effects["time_river_damage_reduction_turns"] = duration - 1
+        if duration == 1:
+            unit.effects["time_river_damage_reduction"] = 0.0
 
 
 def roll_defense_skills(
@@ -217,21 +283,61 @@ def roll_defense_skills(
     return dealt, extra
 
 
+def _next_action(sides: list[Fighter], bars: list[int], advance_limit: int) -> tuple[int | None, list[int]]:
+    """推进原版 5000 点行动条，返回行动方和本次有效速度。"""
+    for _ in range(max(1, int(advance_limit))):
+        for idx, fighter in enumerate(sides):
+            if fighter.effects.get("immediate_action"):
+                fighter.effects["immediate_action"] = False
+                speeds = [max(0, int(unit.speed * unit.speed_boost)) for unit in sides]
+                return idx, speeds
+        speeds = [
+            int(unit.speed * unit.speed_boost *
+                (1 - max(0.0, float(unit.eff("speed_down_pct", 0) or 0))))
+            for unit in sides
+        ]
+        bars[0] += speeds[0]
+        bars[1] += speeds[1]
+        ready = [idx for idx, bar in enumerate(bars) if bar >= battle.ACTION_BAR_MAX]
+        if len(ready) == 2:
+            abs_a = bool(sides[0].tags.get("absolute_first"))
+            abs_b = bool(sides[1].tags.get("absolute_first"))
+            if abs_a != abs_b:
+                return (0 if abs_a else 1), speeds
+            return (0 if speeds[0] >= speeds[1] else 1), speeds
+        if ready:
+            return ready[0], speeds
+    return None, [0, 0]
+
+
 def run_1v1(
     a: Fighter, b: Fighter, rng: random.Random,
     max_rounds: int = DEFAULT_MAX_ROUNDS, skip_first: tuple[int, ...] = (),
+    *, opening_log: Sequence[str] = (),
 ) -> BattleResult:
-    """A 先手轮流出手；先清空对方血者胜，打满按剩余血量比例判定。"""
+    """按原版速度行动条驱动；满 100 次行动时按双方剩余绝对气血裁决。"""
     sides = [a, b]
-    hp = [a.hp, b.hp]
+    hp = [max(0, a.hp), max(0, b.hp)]
+    if not all(hp):
+        winner = 0 if hp[0] else 1 if hp[1] else None
+        return BattleResult(winner, list(opening_log), hp[0], hp[1])
+    bars = [max(0, int(a.action_bar)), max(0, int(b.action_bar))]
     winner: int | None = None
     skipped: set[int] = set()
-    log: list[str] = []
+    log = list(opening_log)
     rage_stacks = [0, 0]
+    action_limit = max(1, int(max_rounds))
+    timed_out = False
 
-    for rnd in range(1, max_rounds + 1):
-        i, j = (0, 1) if rnd % 2 else (1, 0)
+    for rnd in range(1, action_limit + 1):
+        i, speeds = _next_action(sides, bars, battle.ACTION_BAR_ADVANCE_LIMIT)
+        if i is None:
+            log.append("天地元气紊乱，强制结束战斗！")
+            break
+        j = 1 - i
         atk_u, def_u = sides[i], sides[j]
+        bars[i] = 0
+        _tick_action_effects(atk_u, hp, i, log)
         if i in skip_first and i not in skipped:
             skipped.add(i)
             log.append(f"第{rnd}回合：{atk_u.name}被大阵困住，无法出手")
@@ -242,52 +348,67 @@ def run_1v1(
             log.append(f"第{rnd}回合：{atk_u.name}被定身，无法出手")
             continue
 
-        # 技能钩子（W1-2 起有注册项；现在为空注册表的扩展点）
+        if atk_u.eff("cang_emperor_suppression", False):
+            from .time_river import tick_cang_suppression
+            suppression_note = tick_cang_suppression(atk_u)
+            if suppression_note:
+                hp[i] = max(0, min(atk_u.hp_max, int(atk_u.hp)))
+                log.append(suppression_note)
         for sid in atk_u.skills:
             spec = skills.get(sid)
             if spec and spec.on_turn:
-                # ctx 额外给出当前血量表与出手方下标，供治疗类技能改写真实血量
                 spec.on_turn(atk_u, def_u,
                              {"rng": rng, "round": rnd, "log": log, "hp": hp, "side": i})
 
-        # 治疗技能（W1-5）：出手前掷 pr 回血
         try_heal_skills(atk_u, hp, i, rng, log)
-
-        # 无尽劫境独立战斗效果；无效果时不额外消耗随机数，维持既有战斗序列。
-        if _dodges_next_attack(def_u, rng):
+        can_bypass = any(sk.get("不可防御") for sk in atk_u.tags.get("atk_skills") or ())
+        if not can_bypass and _dodges_next_attack(def_u, rng):
             log.append(f"第{rnd}回合：{def_u.name}看穿攻势，避开一击")
             continue
+        pet_bonus = max(0.0, float(atk_u.eff("pet_combat_bonus", 0) or 0))
+        if pet_bonus and not atk_u.tags.get("_pet_combat_bonus_used") and rng.random() < 0.35:
+            atk_u.tags["_pet_combat_bonus_used"] = True
+            atk_u.atk = max(1, int(atk_u.atk * (1 + pet_bonus)))
+            atk_u.defense = max(1, int(atk_u.defense * (1 + pet_bonus)))
+            hp[i] = min(atk_u.hp_max, int(hp[i] * (1 + pet_bonus)))
+            log.append(f"仙宠【{atk_u.name}】辅佐出战，攻防与当前气血提升 {pet_bonus:.0%}。")
         take_damage_pct = max(0.0, float(atk_u.eff("take_damage_attack_pct", 0) or 0))
         combo_pct = max(0.0, float(atk_u.eff("combo_attack_pct", 0) or 0))
         rage_mult = 1 + take_damage_pct * rage_stacks[i]
         combo_mult = 1 + combo_pct * min(10, max(0, rnd - 1))
         attack = max(1, int(atk_u.atk * rage_mult * combo_mult + 0.5))
-        dmg, crit = battle.harm(
-            max(1, int(attack * float(atk_u.eff("dmg_dealt_mult", 1.0)))),
-            max(1, int(def_u.defense * float(def_u.eff("dmg_taken_mult", 1.0)))),
-            rng, atk_u.bao,
+        dmg, crit = battle.attack_harm(
+            max(1, attack * 0.85), max(1, def_u.defense),
+            rng, atk_u.bao, atk_u.crit_damage,
         )
         execute = max(0.0, float(atk_u.eff("execute_pct", 0) or 0))
         if execute and hp[j] / max(1, def_u.hp_max) <= 0.15:
             dmg = int(dmg * (1 + execute))
         summon = max(0.0, float(atk_u.eff("summon_pct", 0) or 0))
-        summon_dmg = int(attack * summon)
-        dmg += summon_dmg
-        # 攻击技能（W1-5）：逐条掷 pr → beilv 乘区（法球不吃倍率）+ 控制定身
-        dmg, atk_extra = roll_attack_skills(atk_u, def_u, dmg, rng)
+        dmg += int(attack * summon)
+        triggered: list[Mapping] = []
+        dmg, atk_extra = roll_attack_skills(atk_u, def_u, dmg, rng, triggered=triggered)
         log.extend(atk_extra)
-        # 灵根法球：每击额外 trunc(攻 × 倍率)，不参与暴击放大（原版 伤害 = 暴击伤害 + 法球伤害）
+        _apply_hit_effects(atk_u, def_u, hp, j, triggered, log)
+        unblockable = any(sk.get("不可防御") == 1 for sk in triggered)
+        if can_bypass and not unblockable and _dodges_next_attack(def_u, rng):
+            log.append(f"第{rnd}回合：{def_u.name}看穿攻势，避开一击")
+            continue
         orb = float(atk_u.eff("orb", 0.0) or 0.0)
         orb_dmg = (int(atk_u.atk * orb) if orb > 0 else 0)
         orb_dmg += max(0, int(atk_u.eff("orb_damage_flat", 0) or 0))
         dealt = dmg + orb_dmg
-        # 防御技能（W1-5）：逐条掷 pr → 减免/格挡；护盾/反弹写效果槽（下次结算生效）
-        dealt, def_extra = roll_defense_skills(def_u, dealt, rng)
-        log.extend(def_extra)
-        reduction = min(0.65, max(0.0, float(def_u.eff("damage_reduction", 0) or 0)))
+        if not unblockable:
+            dealt, def_extra = roll_defense_skills(def_u, dealt, rng)
+            log.extend(def_extra)
+        damage_mult = max(0.0, float(atk_u.eff("dmg_dealt_mult", 1.0) or 0))
+        damage_mult *= max(0.0, float(def_u.eff("dmg_taken_mult", 1.0) or 0))
+        if damage_mult != 1.0:
+            dealt = max(0, int(dealt * damage_mult))
+        reduction = min(0.65, max(0.0, float(def_u.eff("damage_reduction", 0) or 0),
+                      float(def_u.eff("time_river_damage_reduction", 0) or 0)))
         if reduction:
             dealt = max(0, int(round(dealt * (1 - reduction))))
-        # 护盾先吸收（法球并入总伤后一击结算）
         shield = int(def_u.eff("shield", 0) or 0)
         suffix = ""
         if shield > 0:
@@ -305,7 +426,6 @@ def run_1v1(
         line = (f"第{rnd}回合：{atk_u.name}出手，对{def_u.name}造成 {dealt} 点伤害"
                 + ("（暴击！）" if crit else "") + suffix
                 + f"，{def_u.name}剩余 {hp[j]}")
-        # 反噬 / 汲取（按实际造成的伤害；护盾吸收部分不触发）
         reflect = float(def_u.eff("reflect", 0.0) or 0.0)
         reflect_chance = min(0.45, max(0.0, float(def_u.eff("reflect_chance", 0) or 0)))
         if reflect_chance and rng.random() < reflect_chance:
@@ -326,8 +446,7 @@ def run_1v1(
         if extra_chance and hp[j] > 0 and rng.random() < extra_chance:
             extra_damage = max(1, int(dmg * 0.55))
             extra_damage = max(0, int(round(extra_damage * (1 - reduction))))
-            hp[j], extra_damage, extra_shield_note = _low_hp_shield(
-                def_u, hp[j], extra_damage)
+            hp[j], extra_damage, extra_shield_note = _low_hp_shield(def_u, hp[j], extra_damage)
             dealt += extra_damage
             line += f"，额外行动追击 {extra_damage}{extra_shield_note}"
         log.append(line)
@@ -336,21 +455,218 @@ def run_1v1(
                 continue
             winner = i
             break
-        if hp[i] <= 0:      # 反噬致死
+        if hp[i] <= 0:
             if _try_revive(atk_u, hp, i, log, rng):
                 continue
             winner = j
             break
+    else:
+        timed_out = True
 
-    if winner is None:
-        ratio_a = hp[0] / a.hp if a.hp > 0 else 0.0
-        ratio_b = hp[1] / b.hp if b.hp > 0 else 0.0
-        if abs(ratio_a - ratio_b) >= 1e-9:
-            winner = 0 if ratio_a > ratio_b else 1
+    if winner is None and timed_out:
+        if action_limit < DEFAULT_MAX_ROUNDS:
+            ratio_a = hp[0] / a.hp if a.hp > 0 else 0.0
+            ratio_b = hp[1] / b.hp if b.hp > 0 else 0.0
+            if abs(ratio_a - ratio_b) >= 1e-9:
+                winner = 0 if ratio_a > ratio_b else 1
+        else:
+            log.append(f"战局陷入僵持，已达{action_limit}回合上限，天道降下裁决！")
+            if hp[0] > hp[1]:
+                winner = 0
+                hp[1] = 0
+                log.append(f"{a.name}略占上风，险胜！")
+            elif hp[1] > hp[0]:
+                winner = 1
+                hp[0] = 0
+                log.append(f"{b.name}略占上风，险胜！")
+            else:
+                hp[0] = hp[1] = 0
+                log.append("双方战至力竭，平局收场！")
+    a.hp, b.hp = hp
     return BattleResult(winner, log, hp[0], hp[1])
 
 
+@dataclass
+class TeamBattleResult:
+    winner: int | None
+    log: list[str]
+    a_hp: int
+    b_hp: int
+    a_survivors: list[str]
+    b_survivors: list[str]
+    damage_by_side: tuple[int, int] = (0, 0)
+    damage_by_unit: dict[int, int] = field(default_factory=dict)
+    timed_out: bool = False
+
+
+def _team_strike(atk_u: Fighter, def_u: Fighter, rng: random.Random,
+                 round_no: int, log: list[str], hp_table: list[int],
+                 indexes: dict[int, int], rage_stacks: dict[int, int], action_index: int) -> int:
+    """zd_battle_team 命中主链：0.85 Harm、独立暴击、法球、技能和防御结算。"""
+    atk_idx, def_idx = indexes[id(atk_u)], indexes[id(def_u)]
+    stun = int(atk_u.eff("stun_turns", 0) or 0)
+    if stun > 0:
+        atk_u.effects["stun_turns"] = stun - 1
+        log.append(f"第{round_no}回合：{atk_u.name}被定身，无法出手")
+        return 0
+    for sid in atk_u.skills:
+        spec = skills.get(sid)
+        if spec and spec.on_turn:
+            spec.on_turn(atk_u, def_u,
+                         {"rng": rng, "round": round_no, "log": log, "hp": hp_table, "side": atk_idx})
+    try_heal_skills(atk_u, hp_table, atk_idx, rng, log)
+    atk_u.hp = hp_table[atk_idx]
+    take_damage_pct = max(0.0, float(atk_u.eff("take_damage_attack_pct", 0) or 0))
+    combo_pct = max(0.0, float(atk_u.eff("combo_attack_pct", 0) or 0))
+    attack = max(1, int(atk_u.atk * (1 + take_damage_pct * rage_stacks[id(atk_u)])
+                        * (1 + combo_pct * min(10, max(0, round_no - 1))) + 0.5))
+    crit_mult = battle.baojishanghai(
+        atk_u.bao, rng, atk_u.crit_damage if atk_u.crit_damage is not None
+        else min(max(0.0, atk_u.bao) + battle.CRIT_BASE, battle.CRIT_CAP))
+    damage = battle.harm(max(1, attack * 0.85), max(1, def_u.defense), rng)[0]
+    damage = int(damage * crit_mult)
+    if hp_table[def_idx] / max(1, def_u.hp_max) <= 0.15:
+        damage = int(damage * (1 + max(0.0, float(atk_u.eff("execute_pct", 0) or 0))))
+    damage += max(0, int(attack * float(atk_u.eff("summon_pct", 0) or 0)))
+    orb = max(0.0, float(atk_u.eff("orb", 0) or 0))
+    damage += int(atk_u.atk * orb) + max(0, int(atk_u.eff("orb_damage_flat", 0) or 0))
+    triggered: list[Mapping] = []
+    damage, attack_log = roll_attack_skills(atk_u, def_u, damage, rng,
+                                             triggered=triggered, action_index=action_index)
+    log.extend(attack_log)
+    _apply_hit_effects(atk_u, def_u, hp_table, def_idx, triggered, log)
+    if not any(sk.get("不可防御") == 1 for sk in triggered):
+        if _dodges_next_attack(def_u, rng):
+            log.append(f"第{round_no}回合：{def_u.name}看穿攻势，避开一击")
+            return 0
+        damage, defense_log = roll_defense_skills(def_u, damage, rng)
+        log.extend(defense_log)
+    damage_mult = max(0.0, float(atk_u.eff("dmg_dealt_mult", 1.0) or 0))
+    damage_mult *= max(0.0, float(def_u.eff("dmg_taken_mult", 1.0) or 0))
+    damage = max(0, int(damage * damage_mult))
+    reduction = min(0.65, max(0.0, float(def_u.eff("damage_reduction", 0) or 0),
+                      float(def_u.eff("time_river_damage_reduction", 0) or 0)))
+    if reduction:
+        damage = max(0, int(round(damage * (1 - reduction))))
+    shield = max(0, int(def_u.eff("shield", 0) or 0))
+    absorbed = min(shield, damage)
+    if absorbed:
+        def_u.effects["shield"] = shield - absorbed
+    damage -= absorbed
+    hp_table[def_idx], damage, shield_note = _low_hp_shield(def_u, hp_table[def_idx], damage)
+    def_u.hp = hp_table[def_idx]
+    if absorbed:
+        log.append(f"【护盾】{def_u.name}吸收 {absorbed} 点伤害。")
+    if shield_note:
+        log.append(shield_note)
+    if damage > 0:
+        rage_stacks[id(def_u)] = min(10, rage_stacks[id(def_u)] + 1)
+    log.append(f"第{round_no}回合：{atk_u.name}出手，对{def_u.name}造成 {damage} 点伤害"
+               f"{'（暴击）' if crit_mult > 1 else ''}，余 {def_u.hp}")
+    reflect = max(0.0, float(def_u.eff("reflect", 0) or 0))
+    if reflect and damage:
+        reflected = min(hp_table[atk_idx], int(damage * reflect))
+        hp_table[atk_idx] -= reflected
+        atk_u.hp = hp_table[atk_idx]
+        if reflected:
+            rage_stacks[id(atk_u)] = min(10, rage_stacks[id(atk_u)] + 1)
+            log.append(f"{def_u.name}反噬 {reflected} 点伤害。")
+    lifesteal = max(0.0, float(atk_u.eff("lifesteal", 0) or 0))
+    if lifesteal and damage and hp_table[atk_idx] > 0:
+        healed = min(int(damage * lifesteal), atk_u.hp_max - hp_table[atk_idx])
+        hp_table[atk_idx] += healed
+        atk_u.hp = hp_table[atk_idx]
+    extra = min(0.55, max(0.0, float(atk_u.eff("extra_action_chance", 0) or 0)))
+    if extra and atk_u.hp > 0 and def_u.hp > 0 and rng.random() < extra:
+        follow = max(1, int(damage * 0.55))
+        follow = max(0, int(round(follow * (1 - reduction))))
+        hp_table[def_idx], follow, _ = _low_hp_shield(def_u, hp_table[def_idx], follow)
+        def_u.hp = hp_table[def_idx]
+        damage += follow
+        log.append(f"{atk_u.name}额外追击 {follow}，{def_u.name}余 {def_u.hp}")
+    return damage
+
+
+def run_team_battle(a_team: Sequence[Fighter], b_team: Sequence[Fighter],
+                    rng: random.Random, *, opening_log: Sequence[str] = ()) -> TeamBattleResult:
+    """每轮仅一名就绪者行动，余下行动条累计到下一轮。"""
+    a, b = list(a_team), list(b_team)
+    units = a + b
+    indexes = {id(unit): i for i, unit in enumerate(units)}
+    bars = [max(0, int(unit.action_bar)) for unit in units]
+    hp = [max(0, int(unit.hp)) for unit in units]
+    rage = {id(unit): 0 for unit in units}
+    damage = dict.fromkeys(indexes, 0)
+    actions = [0] * len(units)
+    log = list(opening_log)
+    timed_out = False
+    for round_no in range(1, TEAM_ACTION_LIMIT + 1):
+        if not any(hp[:len(a)]) or not any(hp[len(a):]):
+            break
+        living = [i for i, value in enumerate(hp) if value > 0]
+        ready = []
+        for _ in range(battle.ACTION_BAR_ADVANCE_LIMIT):
+            for i in living:
+                unit = units[i]
+                speed_down = min(0.95, max(0.0, float(unit.eff("speed_down_pct"))))
+                bars[i] += int(unit.speed * unit.speed_boost * (1 - speed_down))
+            ready = [i for i in living if bars[i] >= battle.ACTION_BAR_MAX]
+            if ready:
+                break
+        if not ready:
+            log.append("行动条无法继续推进，双方保留气血。")
+            break
+        i = max(ready, key=lambda index: (bool(units[index].tags.get("absolute_first")),
+                                          units[index].speed, bars[index]))
+        bars[i] -= battle.ACTION_BAR_MAX
+        attacker = units[i]
+        _tick_action_effects(attacker, hp, i, log)
+        foes = [j for j in living if (j < len(a)) != (i < len(a))]
+        j = foes[int(rng.random() * len(foes))]
+        defender = units[j]
+        log.append(f"【第{round_no}回合】{attacker.name}抢占先机！")
+        damage[id(attacker)] += _team_strike(attacker, defender, rng, round_no, log,
+                                             hp, indexes, rage, actions[i])
+        actions[i] += 1
+        for index in (j, i):
+            unit = units[index]
+            if hp[index] == 0:
+                _try_revive(unit, hp, index, log, rng)
+            unit.hp = hp[index]
+    else:
+        if any(hp[:len(a)]) and any(hp[len(a):]):
+            timed_out = True
+            log.append(f"战斗达到 {TEAM_ACTION_LIMIT} 次行动上限，双方保留气血。")
+    a_alive = [unit for unit in a if unit.hp > 0]
+    b_alive = [unit for unit in b if unit.hp > 0]
+    winner = 0 if a_alive and not b_alive else 1 if b_alive and not a_alive else None
+    return TeamBattleResult(winner, log, sum(hp[:len(a)]), sum(hp[len(a):]),
+                            [unit.name for unit in a_alive], [unit.name for unit in b_alive],
+                            (sum(damage[id(unit)] for unit in a), sum(damage[id(unit)] for unit in b)),
+                            damage, timed_out)
+
+
 # ------------------------------------------------------- 多人团本（W8-D4）
+
+def _advance_raid_bars(units: Sequence[Fighter], bars: dict[str, int]) -> list[Fighter]:
+    """原版团本每大回合推进一次行动条，返回本拍可行动单位。"""
+    for unit in units:
+        key = _raid_key(unit, str(id(unit)))
+        if unit.hp <= 0:
+            continue
+        base_speed = int(unit.tags.get("speed", unit.speed) or unit.speed or 100)
+        speed_down = max(0.0, float(unit.eff("speed_down_pct", 0) or 0))
+        bars[key] = bars.get(key, int(unit.action_bar or 0)) + int(
+            base_speed * unit.speed_boost * (1 - speed_down))
+    ready = [unit for unit in units
+             if unit.hp > 0 and bars.get(_raid_key(unit, str(id(unit))), 0) >= battle.ACTION_BAR_MAX]
+    ready.sort(key=lambda unit: (
+        -int(bool(unit.tags.get("absolute_first"))),
+        -int(unit.tags.get("speed", unit.speed) or unit.speed),
+        -bars.get(_raid_key(unit, str(id(unit))), 0),
+    ))
+    return ready
+
 
 @dataclass
 class RaidResult:
@@ -394,20 +710,29 @@ def _raid_strike(
     if _dodges_next_attack(def_u, rng):
         log.append(f"第{rnd}回合：{def_u.name}看穿攻势，避开一击")
         return 0
-    dmg, crit = battle.harm(
-        max(1, int(atk_u.atk * float(atk_u.eff("dmg_dealt_mult", 1.0)))),
+    crit_mult = battle.baojishanghai(atk_u.bao, rng,
+                                    atk_u.crit_damage if atk_u.crit_damage is not None
+                                    else min(max(0.0, atk_u.bao) + battle.CRIT_BASE, battle.CRIT_CAP))
+    base = battle.calculate_harm(
+        atk_u.atk * 0.85,
         max(1, int(def_u.defense * float(def_u.eff("dmg_taken_mult", 1.0)))),
-        rng, atk_u.bao,
+        rng,
     )
+    dmg = base
+    # 原版 tuanben 计算暴击标记但不把倍率乘入伤害。
+    # 伤害采用 Harm(攻×0.85)、法球、攻击方防御10%附加，最后进入圣体增伤乘区。
+    orb = float(atk_u.eff("orb", 0.0) or 0.0)
+    orb_dmg = int(atk_u.atk * orb) if orb > 0 else 0
+    orb_dmg += max(0, int(atk_u.eff("orb_damage_flat", 0) or 0))
+    dmg = int((dmg + orb_dmg + int(atk_u.defense * 0.1))
+              * float(atk_u.eff("dmg_dealt_mult", 1.0)))
     dmg, atk_extra = roll_attack_skills(atk_u, def_u, dmg, rng)
     log.extend(atk_extra)
-    orb = float(atk_u.eff("orb", 0.0) or 0.0)
-    orb_dmg = (int(atk_u.atk * orb) if orb > 0 else 0)
-    orb_dmg += max(0, int(atk_u.eff("orb_damage_flat", 0) or 0))
-    dealt = dmg + orb_dmg
+    dealt = dmg
     dealt, def_extra = roll_defense_skills(def_u, dealt, rng)
     log.extend(def_extra)
-    reduction = min(0.65, max(0.0, float(def_u.eff("damage_reduction", 0) or 0)))
+    reduction = min(0.65, max(0.0, float(def_u.eff("damage_reduction", 0) or 0),
+                      float(def_u.eff("time_river_damage_reduction", 0) or 0)))
     if reduction:
         dealt = max(0, int(round(dealt * (1 - reduction))))
     suffix = ""
@@ -423,7 +748,7 @@ def _raid_strike(
     if orb_dmg > 0:
         suffix += f"，法球 {orb_dmg}"
     line = (f"第{rnd}回合：{atk_u.name}出手，对{def_u.name}造成 {dealt} 点伤害"
-            + ("（暴击！）" if crit else "") + suffix
+            + ("（暴击！）" if crit_mult > 1.0 else "") + suffix
             + f"，{def_u.name}剩余 {hp[kd]}")
     reflect = float(def_u.eff("reflect", 0.0) or 0.0)
     if reflect > 0 and dealt > 0:
@@ -438,30 +763,31 @@ def _raid_strike(
             hp[ka] += heal
             line += f"，汲取 {heal}"
     log.append(line)
+    atk_u.hp = hp[ka]
+    def_u.hp = hp[kd]
     return max(0, dealt)
 
 
 def run_raid(
     players: Sequence[Fighter], boss: Fighter, rng: random.Random,
-    max_rounds: int = 30,
+    max_rounds: int = 100,
 ) -> RaidResult:
     """多人对单 Boss 的回合战（W8-D4，对齐原版 tuanben.tb_battle 的语义骨架）。
 
-    简化点（已写入《缺失玩法规划-W8》）：原版是速度累积的行动条，本移植按
-    `tags['speed']` 降序固定出手序；原版 100 回合 / 5 分钟，本移植 30 回合。
+    每个大回合按原版推进5000点行动条，并让全部就绪角色按超维先手、速度与行动条溢出排序出手。
     Boss 按仇恨（累计伤害）最高的存活玩家单体攻击；`boss.tags['aoe']=True`
-    时每 5 回合追加一次全体攻击（对齐九秘合一 / 冥狱火）。
+    时每5个大回合执行全体攻击。战斗最多100个大回合并受5分钟保护。
 
     阶段与复活：
     - `boss.tags['phase_revive']`：Boss 首次被打空时满血复活、三维 ×mult（帝尊者字秘·极尽）
     - `player.tags['revives']` + `tags['revive_ratio']`：者字秘致死复活（一场 N 次）
     """
-    units: list[Fighter] = [*players, boss]
+    units: list[Fighter] = [boss, *players]
     for i, p in enumerate(players):
         p.tags.setdefault("key", f"p{i}")
-        p.tags.setdefault("speed", 100)
+        p.tags.setdefault("speed", int(p.speed or 100))
     boss.tags.setdefault("key", "boss")
-    boss.tags.setdefault("speed", 1500)
+    boss.tags.setdefault("speed", int(boss.speed or 100))
 
     keys = {_raid_key(u, f"u{i}"): u for i, u in enumerate(units)}
     hp: dict[str, int] = {k: int(u.hp) for k, u in keys.items()}
@@ -486,16 +812,24 @@ def run_raid(
     phase_mult = max(1.0, float(boss.tags.get("phase_mult", 1.3) or 1.3))
     phase_name = str(boss.tags.get("phase_name") or "者字秘·极尽")
     bkey = _raid_key(boss, "boss")
-    order = sorted(units, key=lambda u: -int(u.tags.get("speed", 100) or 100))
+    raid_bars = { _raid_key(u, f"u{i}"): max(0, int(u.action_bar or 0))
+                  for i, u in enumerate(units) }
 
     log: list[str] = []
     phases: list[str] = []
     win = False
     rounds = 0
-    for rnd in range(1, max(1, int(max_rounds)) + 1):
+    round_limit = max(1, min(int(max_rounds), 100))
+    started_at = time.monotonic()
+    for rnd in range(1, round_limit + 1):
+        if time.monotonic() - started_at >= 300:
+            break
         rounds = rnd
-        for u in order:
+        ready_units = _advance_raid_bars(units, raid_bars)
+        for u in ready_units:
             uk = _raid_key(u, "unit")
+            raid_bars[uk] = max(0, raid_bars[uk] - battle.ACTION_BAR_MAX)
+            u.action_bar = raid_bars[uk]
             if hp[uk] <= 0 or win:
                 continue
             alive = [p for p in players if hp[_raid_key(p, "p")] > 0]
@@ -509,10 +843,13 @@ def run_raid(
                 for t in targets:
                     if hp[_raid_key(t, "p")] <= 0:
                         continue
+                    tkey = _raid_key(t, "p")
                     _raid_strike(boss, t, hp, rng, log, rnd)
+                    t.hp = hp[tkey]
             else:
                 before = hp[bkey]
                 dealt = _raid_strike(u, boss, hp, rng, log, rnd)
+                boss.hp = hp[bkey]
                 got = min(dealt, before)
                 damage[uk] += got
                 hatred[uk] += got
@@ -522,6 +859,7 @@ def run_raid(
                     boss.defense = max(1, int(boss.defense * phase_mult))
                     boss.hp_max = max(1, int(boss.hp_max * phase_mult))
                     hp[bkey] = boss.hp_max
+                    boss.hp = boss.hp_max
                     phases.append(phase_name)
                     log.append(
                         f"【{phase_name}】{boss.name} 气血尽而复生，三维 ×{phase_mult:g}，"
@@ -537,8 +875,11 @@ def run_raid(
                     revive = p.eff("revive")
                     legacy_times = max(0, int(p.tags.get("revives", 0) or 0))
                     if legacy_times:
+                        remaining = revives[pk]
                         revives[pk] -= 1
-                        hp[pk] = max(1, int(p.hp_max * ratio[pk]))
+                        revive_ratio = ratio[pk] if remaining <= 1 else 1.0
+                        hp[pk] = max(1, int(p.hp_max * revive_ratio))
+                        p.hp = hp[pk]
                         log.append(f"【者字秘】{p.name} 生机重燃，回复至 {hp[pk]:,}"
                                    f"（余 {revives[pk]} 次）")
                     elif isinstance(revive, dict) and not revive.get("used"):
@@ -551,6 +892,7 @@ def run_raid(
                             if revive["times"] <= 0:
                                 revive["used"] = True
                             hp[pk] = max(1, int(p.hp_max * ratio[pk]))
+                            p.hp = hp[pk]
                             log.append(f"【{revive.get('name') or '命格复生'}】{p.name} "
                                        f"生机重燃，回复至 {hp[pk]:,}（余 {revives[pk]} 次）")
                         else:
@@ -558,6 +900,10 @@ def run_raid(
                             revives[pk] = 0
         if win or all(hp[_raid_key(p, "p")] <= 0 for p in players):
             break
+    if rounds >= round_limit:
+        log.append(f"战斗超过{round_limit}回合，强制结束！")
+    if time.monotonic() - started_at >= 300:
+        log.append("战斗超时（5分钟），强制结束！")
 
     survivors = [_raid_key(p, "p") for p in players if hp[_raid_key(p, "p")] > 0]
     log.append("--- 讨伐结束 ---")

@@ -213,13 +213,12 @@ def run(doc: Any, tier_name: str, era: Mapping[str, Any] | None = None,
             revive_note = ""
             try:
                 from . import trib as _tb
-                learned = _tb.revival_skills(doc, ())
-                if learned and _tb.revive_mode(doc) == "自动":
-                    revive_note = "\n" + _tb.apply_revive(doc, exp_before, hp_before) \
-                        + f"（发动【{learned[0]}】）"
-                elif learned:
-                    _tb.arm_revive(doc, exp_before, hp_before, now)
-                    revive_note = "\n60 秒内 #复活发动 可抵损耗（#复活设置 手动时）。"
+                choices = _tb.available_revival_skills(doc)
+                if choices and _tb.revive_mode(doc) == "自动":
+                    revive_note = "\n" + _tb.apply_revive(doc, exp_before, hp_before, choices[0])
+                elif choices:
+                    _tb.arm_revive(doc, exp_before, hp_before, now, choices)
+                    revive_note = "\n60 秒内使用 #复活选择 序号或功法名可抵消本次损耗。"
             except Exception:
                 pass
             log_text = "\n".join(log)

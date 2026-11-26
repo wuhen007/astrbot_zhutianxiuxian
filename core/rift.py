@@ -201,10 +201,14 @@ def explore(g: dict, doc: Any, route_name: str, stats: Mapping, rng: Any,
             f"裂界守卫·{rift['name']}", max(1, int(stats["atk"] * factor)),
             max(1, int(stats["defense"] * factor * 0.9)),
             max(1, int(stats["hp"] * (0.35 + depth * 0.15))), 0.1,
+            speed=100,  # 原版 createRiftGuardian 固定 GUARD_BASE_SPEED=100
         )
         me = battle.Unit(str(getattr(doc, "name", "") or "道友"), int(stats["atk"]),
                          int(stats["defense"]), max(1, int(stats.get("hp_cur", stats["hp"]))),
-                         float(stats.get("bao", 0) or 0))
+                         float(stats.get("bao", 0) or 0),
+                         speed=int(stats.get("speed", battle.speed_of(doc))),
+                         crit_damage=stats.get("crit_damage"),
+                         action_bar=int(stats.get("action_bar", battle.initial_action_bar(doc))))
         winner, log, hp_left, _ = battle.spar_full(me, guard, rng)
         doc.ext["hp"] = max(0, int(hp_left))
         tail = log[-1] if log else ""

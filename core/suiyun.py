@@ -219,7 +219,7 @@ def effects(doc: Any) -> dict[str, Any]:
         "stage": stage, "wudao": s["wudao"], "trib": s["trib"],
         "loot_mult": int(s["loot"]), "luck": 1.0,
         "free_entry": stage >= 3,          # model/suiyun.js:87-99 秘境免费
-        "spirit_immune": True,             # 绝灵免疫（本移植无绝灵链，仅面板展示）
+        "spirit_immune": True,             # 绝灵链：豁免寿元压制与纳戒物品侵蚀
         "madoka": stage == 5,
         "revives": 3 if stage >= 3 else 0,  # 白云苍狗
     }

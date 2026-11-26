@@ -8,15 +8,21 @@ from __future__ import annotations
 
 import hashlib
 import json
+from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any, Mapping
 
+from . import custom_items
 from .wenxian import EXP_PER_LEVEL, MAX_LEVEL
 
 
 PLAYER_DIR_NAMES = ("xiuxian_player", "players")
 NAJIE_DIR_NAMES = ("xiuxian_najie", "najie", "inventory")
 EQUIPMENT_DIR_NAMES = ("xiuxian_equipment", "equipment")
+CUSTOM_JSON_CANDIDATES = (
+    "resources/data/custom/custom.json", "data/custom/custom.json",
+    "custom/custom.json", "custom.json",
+)
 
 
 def _json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
@@ -189,7 +195,7 @@ def normalize_equipment(raw: Mapping[str, Any]) -> tuple[dict[str, str], list[st
         if item in (None, "", False):
             continue
         if isinstance(item, Mapping):
-            name = str(item.get("name", item.get("名称", "")) or "").strip()
+            name = str(item.get("先天至宝本体") or item.get("name", item.get("名称", "")) or "").strip()
         else:
             name = str(item).strip()
         if not name:
@@ -203,6 +209,36 @@ def normalize_equipment(raw: Mapping[str, Any]) -> tuple[dict[str, str], list[st
         out[target] = name
     return out, warnings
 
+
+def normalize_equipment_instances(raw: Mapping[str, Any]) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
+    """Preserve original per-item equipment snapshots before name/quantity aggregation."""
+    out: dict[str, list[dict[str, Any]]] = {}
+    warnings: list[str] = []
+    entries = raw.get("装备")
+    if not isinstance(entries, list):
+        return out, warnings
+    for index, item in enumerate(entries):
+        if not isinstance(item, Mapping):
+            warnings.append(f"装备[{index}]: 忽略非对象条目")
+            continue
+        name = str(item.get("name", item.get("名称", item.get("物品", ""))) or "").strip()
+        qty = _number(item.get("num", item.get("数量", item.get("amount", 1))), 0)
+        if not name or qty <= 0:
+            continue
+        card = dict(item)
+        card["name"] = name
+        card["class"] = "装备"
+        card["数量"] = qty
+        out.setdefault(name, []).append(card)
+    return out, warnings
+
+
+def _find_custom_json(root: Path) -> Path | None:
+    for relative in CUSTOM_JSON_CANDIDATES:
+        path = root / relative
+        if path.is_file():
+            return path
+    return None
 
 def _find_dir(root: Path, names: tuple[str, ...]) -> Path | None:
     for name in names:
@@ -220,11 +256,25 @@ def preflight(root: str | Path) -> dict[str, Any]:
     equipment_dir = _find_dir(base, EQUIPMENT_DIR_NAMES)
     report: dict[str, Any] = {
         "source": str(base), "players": [], "errors": [], "warnings": [],
-        "source_sha256": {}, "ready": False,
+        "source_sha256": {}, "custom_equipment": None, "ready": False,
     }
     if not player_dir:
         report["errors"].append("找不到 xiuxian_player/players 目录")
         return report
+    custom_path = _find_custom_json(base)
+    if custom_path is not None:
+        try:
+            custom_raw = json.loads(custom_path.read_text(encoding="utf-8"))
+            custom_rows, custom_warnings = custom_items.normalize_registry(custom_raw)
+            report["custom_equipment"] = custom_rows
+            report["warnings"].extend(custom_warnings)
+            report["source_sha256"][str(custom_path)] = hashlib.sha256(custom_path.read_bytes()).hexdigest()
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            report["warnings"].append(f"{custom_path}: {exc}; 保留现有动态装备目录，未导入 custom.json")
+    else:
+        report["warnings"].append(
+            "未找到原版 resources/data/custom/custom.json；玩家和纳戒仍可导入，"
+            "但旧动态赋名装备不会迁入。")
     files = sorted(player_dir.glob("*.json"))
     for path in files:
         raw, error = _json(path)
@@ -246,6 +296,18 @@ def preflight(root: str | Path) -> dict[str, Any]:
                 else:
                     equipment, eq_warnings = normalize_equipment(raw_e)
                     item["doc"]["ext"]["equipment"] = equipment
+                    projection = {}
+                    for slot in ("帝兵", "至宝", "饰品", "帝具"):
+                        legacy_item = raw_e.get(slot)
+                        if not isinstance(legacy_item, Mapping):
+                            continue
+                        treasure = str(legacy_item.get("先天至宝本体") or "").strip()
+                        deadline = legacy_item.get("先天投影截止")
+                        if treasure and deadline is not None:
+                            deadline = float(deadline or 0)
+                            projection[treasure] = deadline / 1000 if deadline > 100_000_000_000 else deadline
+                    if projection:
+                        item["doc"]["ext"]["xtzb"] = {"owned": list(projection), "projection": projection}
                     item["warnings"].extend(eq_warnings)
             else:
                 item["warnings"].append(f"{uid}: 找不到对应装备文件")
@@ -258,7 +320,11 @@ def preflight(root: str | Path) -> dict[str, Any]:
                     item["warnings"].append(error_n or f"{path_n}: 无法读取")
                 else:
                     item["inventory"], inv_warnings = normalize_inventory(raw_n)
+                    instances, instance_warnings = normalize_equipment_instances(raw_n)
+                    if instances:
+                        item["doc"]["ext"]["legacy_equipment_instances"] = instances
                     item["warnings"].extend(inv_warnings)
+                    item["warnings"].extend(instance_warnings)
             else:
                 item["warnings"].append(f"{uid}: 找不到对应纳戒文件")
         else:
@@ -277,7 +343,11 @@ async def import_report(db: Any, report: Mapping[str, Any], *, overwrite: bool =
     if not report.get("ready"):
         raise ValueError("预检未通过，不能导入")
     imported = skipped = 0
-    async with db.transaction() as conn:
+    async with AsyncExitStack() as stack:
+        calamity_lock = getattr(db, "calamity_lock", None)
+        if isinstance(report.get("custom_equipment"), list) and calamity_lock is not None:
+            await stack.enter_async_context(calamity_lock)
+        conn = await stack.enter_async_context(db.transaction())
         for entry in report["players"]:
             uid = str(entry["uid"])
             async with conn.execute("SELECT 1 FROM players WHERE uid = ?", (uid,)) as cur:
@@ -295,4 +365,14 @@ async def import_report(db: Any, report: Mapping[str, Any], *, overwrite: bool =
                 if int(qty) > 0:
                     await conn.execute("INSERT INTO inventory (uid, item, qty) VALUES (?, ?, ?)", (uid, name, int(qty)))
             imported += 1
-    return {"imported": imported, "skipped": skipped}
+        imported_custom = 0
+        if isinstance(report.get("custom_equipment"), list):
+            calamity = await db.get_calamity()
+            forge = calamity.get("forge")
+            if not isinstance(forge, dict):
+                forge = {}
+                calamity["forge"] = forge
+            imported_custom = custom_items.merge_legacy_registry(forge, report["custom_equipment"])
+            if imported_custom:
+                await db.save_calamity(calamity)
+    return {"imported": imported, "skipped": skipped, "custom_equipment": imported_custom}

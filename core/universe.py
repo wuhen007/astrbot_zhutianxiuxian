@@ -189,15 +189,18 @@ def quick_duel(stats: Mapping, enemy: Mapping, rng: random.Random) -> tuple[bool
     me_hp, en_hp = int(stats.get("hp", 1)), int(enemy["hp"])
     log: list[str] = []
     for rnd in range(1, 31):
-        dmg, crit = battle_mod.harm(int(stats.get("atk", 1)), int(enemy["defense"]), rng,
+        dmg, crit = battle_mod.attack_harm(int(stats.get("atk", 1)), int(enemy["defense"]), rng,
                                     float(stats.get("bao", 0)))
         en_hp -= dmg
         log.append(f"第{rnd}合：你打出 {dmg}{'（暴击）' if crit else ''}，守关者余 {max(0, en_hp)}")
         if en_hp <= 0:
             return True, log
-        back, _ = battle_mod.harm(int(enemy["atk"]), int(stats.get("defense", 1)), rng)
+        back, crit = battle_mod.attack_harm(
+            int(enemy["atk"]), int(stats.get("defense", 1)), rng,
+            float(enemy.get("bao", 0)),
+        )
         me_hp -= back
-        log.append(f"        守关者反击 {back}，你余 {max(0, me_hp)}")
+        log.append(f"        守关者反击 {back}{'（暴击）' if crit else ''}，你余 {max(0, me_hp)}")
         if me_hp <= 0:
             return False, log
     return me_hp * 3 >= en_hp * 2, log  # 30 合未分胜负按剩余战力判

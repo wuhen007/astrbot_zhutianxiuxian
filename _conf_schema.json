@@ -1,4 +1,10 @@
 {
+  "LEGACY_SPAR_SKILLS": {
+    "description": "旧式切磋技能数值覆盖（可选）",
+    "type": "list",
+    "default": [],
+    "hint": "可选填写旧式切磋技能的 name/cd/pr/last/msg，以覆盖内置移植设计值；pr 需在 0~1，cd/last 需为非负整数。"
+  },
   "ACCESS_CONTROL": {
     "description": "访问控制",
     "type": "object",

@@ -2,6 +2,7 @@ import unittest
 from types import SimpleNamespace
 
 from core import river
+from core.combat.engine import Fighter
 
 
 class FakeDoc:
@@ -16,7 +17,7 @@ class FakeDoc:
         self.ext = {}
 
 
-class FixedRng:
+class FixedRng(__import__("random").Random):
     def random(self):
         return 0.1
 
@@ -34,18 +35,19 @@ class RiverFinalReportTests(unittest.TestCase):
     def test連战只返回终局汇总(self):
         doc = FakeDoc()
 
-        def build(name, _mult):
-            return SimpleNamespace(hp=100)
+        def build(name, mult):
+            if name == "__me__":
+                return Fighter(name="道友", atk=100_000, defense=1_000,
+                               hp=10_000, hp_max=10_000, bao=0.0)
+            return Fighter(name=name, atk=1, defense=1,
+                           hp=max(1, int(100 * mult)), hp_max=max(1, int(100 * mult)), bao=0.0)
 
-        def win(_me, _enemy, _rng):
-            return SimpleNamespace(winner=0)
-
-        text, gains = river.roam(doc, None, build, win, FixedRng(), now=1000)
+        text, gains = river.roam(doc, None, build, FixedRng(), now=1000)
         self.assertIn("时间长河·终局战报", text)
-        self.assertIn("连战", text)
-        self.assertIn("胜苍帝法身、胜鸿帝法身、胜羽帝法身", text)
+        self.assertIn("同时交战", text)
+        self.assertIn("未能击败苍、鸿、羽三帝", text)
         self.assertNotIn("第 1 战", text)
-        self.assertEqual(gains["crystal"], river.CRYSTAL_TRIAD[0])
+        self.assertEqual(gains["crystal"], river.CRYSTAL_LOSE)
 
 
 if __name__ == "__main__":

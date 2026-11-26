@@ -8,12 +8,12 @@
 - 比武 `比武 @目标`：友好切磋——胜者 1000×败者境界 / 败者 500×胜者境界 血气，
   双方各得 10×胜者境界 灵石；胜者魔道值 +1。
 - 双方门槛：血量 > 上限/1.2（比武不可趁人之危）、6 小时比武 CD（双向）；
-  打劫门槛：B 灵石 ≥ 3 万、B 血量 ≥ 2 万（按缩放表 ÷1000 → 3 万/2 万）。
+  打劫门槛：B 灵石 ≥ 30002、B 当前血量 ≥ 20000。
 - 隐身水：B 忙碌（闭关/秘境中）时 A 可消耗一瓶强行开战（物品存在，保留）。
 
 数值标注：血气/灵石固定奖励为原版公式 1:1（原版即小额鼓励，未入缩放表）；
 劫掠/反劫为比例制自动适配经济量级。
-shortcut：仙帝威严·永寂、禁闭 action、同宗门检查（本移植宗门名可改）未复刻。
+shortcut：仙帝威严·永寂、同宗门检查（本移植宗门名可改）未复刻。打劫败者资金不足时禁闭用 `rob_jail_until` 落玩家文档。
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from typing import Any
 
 ROB_CD = 30 * 60            # 打劫 CD（原版 cf.CD.rob=30 分钟）
 BIWU_CD = 6 * 3600          # 比武 CD（原版 cf.CD.biwu/couple=6 小时，双向）
-ROB_MIN_LOOT = 30_000       # B 灵石低于此不可打（原版 30002）
+ROB_MIN_LOOT = 30_002       # 原版打劫门槛与战败后是否关禁闭
 ROB_MIN_HP = 20_000         # B 血量低于此不可打（原版 20000）
 BIWU_HP_RATIO = 1.2         # 双方血量需 > 上限/1.2
 ROB_STEAL = 5               # 抢 B 灵石的 1/5
@@ -35,6 +35,18 @@ DAEMON_PER_STONE = 10_000   # 魔道值：抢获灵石 /10000 向下取整
 def _realm1(doc: Any) -> int:
     v = doc.get("realm_index", 0) if isinstance(doc, Mapping) else getattr(doc, "realm_index", 0)
     return int(v or 0) + 1
+
+def _has_suiyun_no_demonic_value(doc: Any) -> bool:
+    if isinstance(doc, Mapping):
+        ext = _ext(doc)
+        state = ext.get("suiyun")
+        try:
+            return bool(isinstance(state, Mapping) and state.get("awake")
+                        and int(state.get("stage", 1) or 1) > 0)
+        except (TypeError, ValueError):
+            return False
+    from . import suiyun
+    return suiyun.stage_of(doc) > 0
 
 
 def _xueqi(doc: Any) -> float:
@@ -65,7 +77,8 @@ def sync_health(doc: Any, hp_cur: int, hp_max: int) -> None:
 
 def rob_check(a: Any, b: Any, now: float, b_busy: bool = False) -> str | None:
     """打劫前置检查：通过返回 None，否则返回拒绝文案。"""
-    if _xueqi(a) < 0:
+    exp = int(a.get("exp", 0) or 0) if isinstance(a, Mapping) else int(getattr(a, "exp", 0) or 0)
+    if exp < 0:
         return "修为亏损，还是先闭会关再打劫吧。"
     b_stones = _stones(b)
     b_name = _name(b)
@@ -83,19 +96,19 @@ def rob_check(a: Any, b: Any, now: float, b_busy: bool = False) -> str | None:
 
 
 def biwu_check(a: Any, b: Any, now: float) -> str | None:
-    """比武前置检查（血量与双向 CD）。"""
-    for who, doc in ((a, a), (b, b)):
-        ext = _ext(doc)
-        name = _name(doc)
-        hp_cur = float(ext.get("hp", 0) or 0)
-        hp_max = float(ext.get("hp_max", 0) or 0)
-        if hp_cur <= hp_max / BIWU_HP_RATIO:
-            return ("你" if doc is a else f"{name}") + "血量未满，不能趁人之危哦。"
-        last = float(ext.get("biwu_ts", 0) or 0)
+    """比武前置检查（先查双方冷却，再按原版顺序查 B、A 血量）。"""
+    for doc, prefix in ((a, "比武冷却: "), (b, "对方比武冷却: ")):
+        last = float(_ext(doc).get("biwu_ts", 0) or 0)
         if now - last < BIWU_CD:
             left = BIWU_CD - (now - last)
-            return ("比武冷却: " if doc is a else "对方比武冷却: ") \
-                + f"{int(left // 60)} 分 {int(left % 60)} 秒。"
+            return prefix + f"{int(left // 60)} 分 {int(left % 60)} 秒。"
+    for doc in (b, a):
+        hp_cur = float(_ext(doc).get("hp", 0) or 0)
+        hp_max = float(_ext(doc).get("hp_max", 0) or 0)
+        if hp_cur <= hp_max / BIWU_HP_RATIO:
+            if doc is b:
+                return f"{_name(doc)} 血量未满，不能趁人之危哦。"
+            return "你血量未满，对方不想趁人之危。"
     return None
 
 
@@ -117,8 +130,12 @@ def rob_settle(a: Any, b: Any, winner: int, b_has_dummy: bool = False) -> tuple[
             return f"{b_name}使用了道具【替身人偶】，躲过了此次打劫。", da, db
         stolen = b_stones // ROB_STEAL
         qixue = 100 * _realm1(a)
+        ext_a = _ext(a)
+        motou = ext_a.get("motou") if isinstance(ext_a.get("motou"), Mapping) else {}
+        prior_modao = int(ext_a.get("modao", motou.get("modao", 0)) or 0)
         modao = stolen // DAEMON_PER_STONE
-        da.update(stones=stolen, xueqi=qixue, modao=modao)
+        # 原版 mdzJL=发动者现有魔道值：结算时同样转作灵石加入胜者。
+        da.update(stones=stolen + prior_modao, xueqi=qixue, modao=modao)
         db.update(stones=-stolen)
         return (f"经过一番大战，{a_name}击败了{b_name}，"
                 f"成功抢走 {stolen:,} 灵石，获得 {qixue:,} 血气"
@@ -147,13 +164,11 @@ def biwu_settle(a: Any, b: Any, winner: int) -> tuple[str, dict, dict]:
     lose_realm = _realm1(lose_doc)
     q_win = 1000 * lose_realm       # 胜者血气：1000×败者境界
     q_lose = 500 * win_realm        # 败者血气：500×胜者境界
-    stones = 10 * win_realm         # 双方各得
+    stones = 10 * _realm1(a)        # 原版固定按发起者境界给双方奖励
     da = {"xueqi": q_win if winner == 0 else q_lose, "stones": stones}
     db = {"xueqi": q_lose if winner == 0 else q_win, "stones": stones}
-    if winner == 0:
-        da["modao"] = 1
-    else:
-        db["modao"] = 1
+    if not _has_suiyun_no_demonic_value(win_doc):
+        (da if winner == 0 else db)["modao"] = 1
     return (f"经过一番大战，{win_name}击败了{lose_name}获得胜利，"
             f"{win_name} 获得 {q_win:,} 血气，{lose_name} 获得 {q_lose:,} 血气，"
             f"双方各得 {stones:,} 灵石（以武会友）。"), da, db

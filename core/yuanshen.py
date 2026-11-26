@@ -240,11 +240,7 @@ def heart_max(doc: Any, st: Mapping | None = None) -> int:
     lv = st.get("level")
     base = HEART_BASE_MAX + (0 if lv is None else int(lv) * HEART_LEVEL_BONUS)
     base += max(0, int(st.get("extra_max", 0) or 0))
-    try:
-        from .mingge import bonus
-        fate_extra = int(bonus(doc, "心神额外上限"))
-    except (TypeError, ValueError):
-        fate_extra = 0
+    fate_extra = int((getattr(doc, "ext", {}) or {}).get("mingge_heart_extra", 0) or 0)
     return max(HEART_BASE_MAX, min(HEART_HARD_CAP + fate_extra, base + fate_extra))
 
 

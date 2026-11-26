@@ -78,6 +78,59 @@ def set_state(doc: Any, st: Mapping[str, Any]) -> None:
     doc.ext["memory"] = dict(st)
 
 
+def memory_factor_tier(doc: Any, factor: str) -> int:
+    """Return the active 0-3 tier of a memory-path factor."""
+    if not stage_of(doc):
+        return 0
+    try:
+        return min(3, max(0, int(state_of(doc)["factors"].get(factor, 0) or 0)))
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+def create_tribulation_state() -> dict[str, int]:
+    """Per-attempt memory-time revival state, matching model/memoryCombat.js."""
+    return {"rounds": 0, "cooldown": 0, "used": 0}
+
+
+def tick_tribulation_round(state: dict[str, int]) -> None:
+    state["rounds"] = max(0, int(state.get("rounds", 0) or 0)) + 1
+    state["cooldown"] = max(0, int(state.get("cooldown", 0) or 0) - 1)
+
+
+def try_time_tribulation_revival(doc: Any, state: dict[str, int], *, lethal: bool,
+                                 hp_max: int | None = None,
+                                 unrevivable: bool = False) -> dict[str, Any]:
+    """Resolve original Memory Time lethal-wave revival; caller ticks each wave.
+
+    Returns a stable result mapping so the wave handler can skip lethal damage
+    when revived. Cost is 500/400/300 life-origin by factor tier; each attempt
+    can trigger once and sets the original 12-wave cooldown.
+    """
+    tier = memory_factor_tier(doc, "时间")
+    cost = (0, 500, 400, 300)[tier]
+    if (not lethal or not cost or not isinstance(state, dict)
+            or state.get("used") or int(state.get("cooldown", 0) or 0) > 0
+            or unrevivable):
+        return {"revived": False, "cost": 0, "message": ""}
+    ext = getattr(doc, "ext", None)
+    if not isinstance(ext, dict):
+        return {"revived": False, "cost": 0, "message": ""}
+    maximum = max(1, int(hp_max or ext.get("hp_max", 0) or 0))
+    if not ext.get("hp_max") and not hp_max:
+        return {"revived": False, "cost": 0, "message": ""}
+    from . import life_source
+    paid, remaining = life_source.consume(doc, cost)
+    if not paid:
+        return {"revived": False, "cost": 0, "message": ""}
+    ext["hp"] = maximum
+    state["used"] = 1
+    state["cooldown"] = 12
+    message = (f"【时间·逆转劫数】消耗 {cost} 点生命本源（剩余 {remaining:g}），"
+               "满血复苏并避过本道劫；本次渡劫仅触发一次，冷却 12 道雷劫。")
+    return {"revived": True, "cost": cost, "message": message}
+
+
 def stage_of(doc: Any) -> int:
     """1-4；未开启返回 0（按灵根名判定，与原版一致）。"""
     snap = doc.ext.get("linggen")
@@ -156,6 +209,8 @@ def effects(doc: Any) -> dict[str, float]:
         "wudao": 0.03 * n,
         "trib": 0.03 * n + (0.30 if stage >= 2 else 0.0),
         "item_mult": float(item_mult(st, stage)),
+        "learn_cost_multiplier": (1.0, 0.5, 0.0, 0.0)[min(3, max(0, int((st.get("factors") or {}).get("理性", 0) or 0)))],
+        "teach_cooldown_multiplier": 0.5 if int((st.get("factors") or {}).get("理性", 0) or 0) == 3 else 1.0,
         "gate": gate,
         "factors": float(n),
     }

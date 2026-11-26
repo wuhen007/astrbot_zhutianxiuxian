@@ -139,7 +139,7 @@ def explore_duration(doc) -> tuple[int, list[str]]:
 
 # ---- 探索结算材料 ----
 
-def make_monster(base: tuple[int, int, int], rng: random.Random) -> Unit:
+def make_monster(base: tuple[int, int, int], rng: random.Random, speed: int = 100) -> Unit:
     """裂缝生灵：玩家三维 × 0.85，±15% 浮动。"""
     patk, pdef, php = base
     f = MONSTER_FACTOR
@@ -148,11 +148,12 @@ def make_monster(base: tuple[int, int, int], rng: random.Random) -> Unit:
         max(1, int(patk * f * (0.85 + 0.3 * rng.random()))),
         max(1, int(pdef * f * (0.85 + 0.3 * rng.random()))),
         max(1, int(php * f * (0.9 + 0.2 * rng.random()))),
-        bao=0.12,
+        bao=0.12, speed=max(1, int(speed)),
     )
 
 
-def make_ambusher(base: tuple[int, int, int], rng: random.Random, name: str) -> Unit:
+def make_ambusher(base: tuple[int, int, int], rng: random.Random, name: str,
+                  speed: int = 100) -> Unit:
     """伏杀者：原版 30 级 NPC（三维 +150 万），改为玩家三维 ×0.9。"""
     patk, pdef, php = base
     return Unit(
@@ -160,7 +161,7 @@ def make_ambusher(base: tuple[int, int, int], rng: random.Random, name: str) -> 
         max(1, int(patk * 0.9)),
         max(1, int(pdef * 0.9)),
         max(1, int(php * 0.9)),
-        bao=0.16,
+        bao=0.16, speed=max(1, int(speed)),
     )
 
 

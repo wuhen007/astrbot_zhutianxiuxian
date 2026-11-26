@@ -60,7 +60,7 @@ def ensure(s: dict) -> dict:
     s.setdefault("array_hp", ARRAY_HP_INIT)
     s.setdefault("upkeep_at", 0.0)        # 上次宗门维护时间
     s.setdefault("gate", 0)               # 最低加入境界（realm_index，0=不限）
-    s.setdefault("beast", "")             # 宗门神兽（保留位，F7 不开放召唤）
+    s.setdefault("beast", "")             # 宗门神兽
     s.setdefault("disciples", [])         # 宗门弟子
     s.setdefault("disciple_seq", 0)
     s.setdefault("store", {"药材": 0, "丹药": 0, "法器": 0})
@@ -487,4 +487,4 @@ def rules_text() -> str:
             "运营每日维护 (1000×等级+任职×500)，最多补 7 日。"
             "【折算】原版仙宗 power 分野（倍率 2 / 池 ×10 / 门槛钳 41）本移植无底座，已去除；"
             "宗门灵石池复用 sects.fund，db 恒 v17；"
-            "原版 cron 每日结算改惰性 tick；藏宝阁神兽 3 条未搬。")
+            "原版 cron 每日结算改惰性 tick；藏宝阁神兽奖励池已接入。")

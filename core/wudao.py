@@ -39,7 +39,8 @@ EXT_KEY = "wudao"
 
 DAILY_LIMIT = 3
 DAILY_EXTEND_ITEM = "大衍悟道丹"
-TEA_ITEM = "悟道古茶"
+TEA_ITEM = "悟道古茶叶"
+TEA_ITEMS = (TEA_ITEM, "悟道茶叶", "悟道古茶树", "悟道古茶")
 BASE_CHANCE = 0.70
 CHANCE_CAP = 0.95
 INSIGHT_BASE = 0.02
@@ -57,6 +58,27 @@ DAO_NODES: tuple[dict[str, Any], ...] = (
     {"name": "红尘仙道", "exp": 19200, "shouyuan": 300_000, "yuan_min": 8, "gain": 640},
     {"name": "仙王道则", "exp": 38400, "shouyuan": 600_000, "yuan_min": 9, "gain": 1280},
     {"name": "诸天道则", "exp": 76800, "shouyuan": 1_200_000, "yuan_min": 10, "gain": 2560},
+)
+
+# Fixed 04af6a9a7ec11e700a0aedb85a5981e48826035c: apps/User/wudaoRules.js.
+# IDs, thresholds, and gains are source values; resource magnitudes use the existing port scale.
+XIANGU_DAO_NODES: tuple[dict[str, Any], ...] = (
+    {"realm_id": 9, "key": "trueGodLaw", "name": "真神法则", "exp": 600,
+     "shouyuan": 200_000, "yuan_min": 2, "gain": 20},
+    {"realm_id": 10, "key": "godKingPrinciple", "name": "神王道则", "exp": 1_200,
+     "shouyuan": 200_000, "yuan_min": 2, "gain": 40},
+    {"realm_id": 11, "key": "heavenlyRule", "name": "天规", "exp": 2_400,
+     "shouyuan": 200_000, "yuan_min": 3, "gain": 80},
+    {"realm_id": 12, "key": "mysteriousVoid", "name": "玄虚", "exp": 4_800,
+     "shouyuan": 200_000, "yuan_min": 4, "gain": 160},
+    {"realm_id": 13, "key": "onlySelf", "name": "唯我", "exp": 9_600,
+     "shouyuan": 200_000, "yuan_min": 5, "gain": 320},
+    {"realm_id": 14, "key": "originReturn", "name": "归元", "exp": 19_200,
+     "shouyuan": 200_000, "yuan_min": 6, "gain": 640},
+    {"realm_id": 15, "key": "supreme", "name": "无上", "exp": 38_400,
+     "shouyuan": 200_000, "yuan_min": 7, "gain": 1_280},
+    {"realm_id": 20, "key": "emperorLightPrototype", "name": "诸天古则", "exp": 76_800,
+     "shouyuan": 1_200_000_000, "yuan_min": 10, "gain": 2_560},
 )
 
 # 体质悟道加成（wudaoRules 体质表）
@@ -91,6 +113,47 @@ def state_of(doc: Any) -> dict[str, Any]:
         st["completed"] = []
     st["count"] = int(st.get("count", 0) or 0)
     return st
+
+
+def xiangu_state_of(doc: Any) -> dict[str, Any]:
+    """Load independent仙古道途 progress, migrating its preserved original shape once."""
+    ext = getattr(doc, "ext", None)
+    if not isinstance(ext, dict):
+        return {"exp": {}, "day": "", "count": 0, "last_at": 0.0}
+    raw = ext.get("xiangu_dao")
+    if not isinstance(raw, dict):
+        legacy = ext.get("legacy_source")
+        old = legacy.get("仙古道途") if isinstance(legacy, Mapping) else None
+        old = old if isinstance(old, Mapping) else {}
+        daily = old.get("daily") if isinstance(old.get("daily"), Mapping) else {}
+        raw = {"exp": dict(old.get("stages") or {}), "day": str(daily.get("date") or ""),
+               "count": daily.get("count", 0), "last_at": 0.0}
+    st = dict(raw)
+    if not isinstance(st.get("exp"), dict):
+        st["exp"] = {}
+    st["count"] = max(0, int(st.get("count", 0) or 0))
+    st["completed"] = [node["key"] for node in XIANGU_DAO_NODES
+                       if int(st["exp"].get(node["key"], 0) or 0) >= node["exp"]]
+    ext["xiangu_dao"] = st
+    return st
+
+
+def selected_route(doc: Any) -> str:
+    """Mirror fixed-source getRealmAuthorityPath ordering."""
+    ext = getattr(doc, "ext", {}) or {}
+    legacy = ext.get("legacy_source") if isinstance(ext, Mapping) else None
+    chosen = str((ext.get("extra_track") or ext.get("cultivation_path")
+                  or (legacy.get("额外体系") if isinstance(legacy, Mapping) else "")) or "")
+    if chosen in ("mijing", "xiangu", "huafen"):
+        return chosen
+    from . import extra_cultivation
+    levels = extra_cultivation.levels_of(doc)
+    mijing = levels["mijing"]
+    xiangu = extra_cultivation.authority_level(doc, "xiangu") + 1
+    huafen = extra_cultivation.authority_level(doc, "huafen") + 1
+    if levels["huafen"] > 1 and huafen >= max(mijing, xiangu):
+        return "huafen"
+    return "xiangu" if xiangu > mijing else "mijing"
 
 
 def _day_key(now: float) -> str:
@@ -158,11 +221,169 @@ def costs_of(doc: Any, node_idx: int) -> dict[str, int]:
     }
 
 
+def xiangu_costs_of(doc: Any) -> dict[str, int]:
+    """Fixed-source XIANGU costs with this port's established ÷1000 unit scale."""
+    from . import extra_cultivation
+    levels = extra_cultivation.levels_of(doc)
+    level_sum = int(levels["mijing"]) + int(levels["xiangu"])
+    try:
+        from .mingge import effects_of
+        effects = effects_of(doc)
+        life_mult = min(2.0, max(0.5,
+            1.0 - float(effects.get("悟道寿元消耗减少", 0) or 0)
+            + float(effects.get("悟道寿元消耗增加", 0) or 0)))
+    except (TypeError, ValueError):
+        life_mult = 1.0
+    return {
+        "potential": 100 * level_sum,
+        "exp": 2_000 * level_sum * level_sum,
+        "xueqi": 2_000 * level_sum * level_sum,
+        "shouyuan": int(math.ceil(200 * level_sum * life_mult)),
+        "spirit": 10_000 * level_sum,
+    }
+
+
+def attempt_xiangu(doc: PlayerDoc, inv: Mapping[str, int], now: float,
+                   rng: random.Random) -> tuple[bool, str, dict[str, int]]:
+    """Resolve only the source XIANGU node at its current independent track level."""
+    from . import extra_cultivation, lifespan, yuanshen
+    level = extra_cultivation.level_of(doc, "xiangu")
+    node = next((row for row in XIANGU_DAO_NODES if row["realm_id"] == level), None)
+    if node is None:
+        if 16 <= level < 20:
+            return False, "仙道已成：当前仙古境界无悟道阶段。", {}
+        return False, f"仙古境界第 {level} 境尚未开放悟道阶段。", {}
+
+    path = xiangu_state_of(doc)
+    progress = min(int(node["exp"]), max(0, int(path["exp"].get(node["key"], 0) or 0)))
+    if progress >= int(node["exp"]):
+        return False, (f"【{node['name']}·圆满】已臻圆满，可冲击{node['next']}；"
+                       "当前法则不会在渡劫时消耗。"), {}
+
+    ys_level = yuanshen.level_of(doc)
+    current_yuanshen = int(ys_level) if ys_level is not None else -1
+    if current_yuanshen < int(node["yuan_min"]):
+        from .yuanshen import LEVEL_NAMES
+        required = LEVEL_NAMES[int(node["yuan_min"])]
+        current = "尚未凝练元神" if ys_level is None else LEVEL_NAMES[int(ys_level)]
+        return False, (f"【元神境界不足·{node['name']}难悟】\n当前元神：{current}\n"
+                       f"悟道要求：{required}\n请先使用 #凝练元神 提升元神境界。"), {}
+
+    wound = 0.0
+    try:
+        from . import zhengdao as dz_mod
+        wound = dz_mod.peek(doc)
+        if wound >= 3.0:
+            return False, f"身负道伤 {wound:.1f} ≥3，神识浑浊无法参悟——先祛伤。", {}
+    except (AttributeError, TypeError, ValueError):
+        pass
+
+    day = _day_key(now)
+    if path.get("day") != day:
+        path["day"], path["count"] = day, 0
+    delta: dict[str, int] = {}
+    if path["count"] >= DAILY_LIMIT:
+        if int((inv or {}).get(DAILY_EXTEND_ITEM, 0) or 0) < 1:
+            return False, (f"今日悟道 {DAILY_LIMIT} 次已尽，神识疲惫。"
+                           f"可服用【{DAILY_EXTEND_ITEM}】续 1 次。"), {}
+        delta[DAILY_EXTEND_ITEM] = -1
+
+    costs = xiangu_costs_of(doc)
+    ext = getattr(doc, "ext", {})
+    potential = int(float(ext.get("potential", 0) or 0))
+    blood = int(float(ext.get("xueqi", 0) or 0))
+    life_now = lifespan.shouyuan_of(doc)
+    spirit = yuanshen.ensure(doc)
+    spirit_cur = int(spirit.get("cur", 0) or 0)
+    if potential < costs["potential"]:
+        return False, f"仙道潜力不足：需 {costs['potential']:,} 点（现有 {potential:,}）。", {}
+    if int(doc.exp) < costs["exp"] or blood < costs["xueqi"]:
+        return False, (f"悟道需修为与血气各 {costs['exp']:,}（当前 "
+                       f"{int(doc.exp):,} / {blood:,}）。"), {}
+    if life_now <= costs["shouyuan"]:
+        return False, (f"参悟一次需燃烧 {costs['shouyuan']:,} 年寿元（现有 {life_now:,}）——"
+                       "寿元将尽，先服寿命丹。"), {}
+    if spirit_cur < costs["spirit"]:
+        return False, f"悟道需元神 {costs['spirit']:,}（当前 {spirit_cur:,}）。", {}
+
+    main_state = state_of(doc)  # 古茶准备状态共用，路线进度各自独立。
+    use_tea = bool(main_state.get("tea"))
+    tea_item = next((name for name in TEA_ITEMS
+                     if int((inv or {}).get(name, 0) or 0) > 0), "")
+    if not use_tea and tea_item:
+        delta[tea_item] = delta.get(tea_item, 0) - 1
+        use_tea = True
+    main_state["tea"] = False
+    save(doc, main_state)
+
+    chance = min(CHANCE_CAP, BASE_CHANCE + max(0, current_yuanshen - int(node["yuan_min"])) * 0.05)
+    try:
+        from . import zhengdao as dz_mod
+        effects = dz_mod.effects(doc, now)
+        chance = max(0.05, chance - effects["chance_penalty"])
+        dao_mult = effects["dao_multiplier"]
+    except (AttributeError, KeyError, TypeError, ValueError):
+        dao_mult = 1.0
+    won = rng.random() < chance
+    loss_rate = 1.0 if won else int(rng.random() * 101) / 100 * (0.5 if use_tea else 1.0)
+    spent = {key: int(value * loss_rate) for key, value in costs.items()}
+    ext["potential"] = potential - spent["potential"]
+    doc.exp = int(doc.exp) - spent["exp"]
+    ext["xueqi"] = blood - spent["xueqi"]
+    lifespan.spend(doc, spent["shouyuan"])
+    spirit["cur"] = spirit_cur - spent["spirit"]
+    yuanshen.save(doc, spirit)
+    path["count"] = int(path["count"]) + 1
+    path["last_at"] = now
+    state_of(doc)
+
+    if not won:
+        ext["xiangu_dao"] = path
+        loss_pct = loss_rate * 100
+        return True, (f"【悟道·{node['name']}·失败】识海震荡，道则方聚又散。\n"
+                     f"成功率：{chance:.0%}｜资源损失：{loss_pct:.1f}%"
+                     f"{'（古茶护道，损失减半）' if use_tea else ''}\n"
+                     f"潜力 -{spent['potential']:,}｜修为 -{spent['exp']:,}｜血气 -{spent['xueqi']:,}\n"
+                     f"寿元 -{spent['shouyuan']:,} 年｜元神 -{spent['spirit']:,}（道途进度不变）"), delta
+
+    try:
+        from .mingge import signed_bonus
+        fate_gain = signed_bonus(doc, "悟道收益")
+        insight_bonus = signed_bonus(doc, "顿悟概率")
+    except (TypeError, ValueError):
+        fate_gain = insight_bonus = 0.0
+    try:
+        from . import trib
+        technique_mult = float(trib.best_stage(doc)[3])
+    except (AttributeError, IndexError, TypeError, ValueError):
+        technique_mult = 1.0
+    mult = max(GAIN_CLAMP[0], min(GAIN_CLAMP[1],
+               _physique_mult(doc) * technique_mult * dao_mult * max(0.0, 1.0 + fate_gain)))
+    mult *= rng.uniform(0.9, 1.1)
+    epiphany = rng.random() < min(INSIGHT_CAP, INSIGHT_BASE + INSIGHT_TEA * use_tea + insight_bonus)
+    if epiphany:
+        mult *= 2.0
+    gain = max(1, int(node["gain"] * mult))
+    path["exp"][node["key"]] = min(int(node["exp"]), progress + gain)
+    if path["exp"][node["key"]] >= int(node["exp"]):
+        path["completed"] = list(path.get("completed") or []) + [node["key"]]
+    ext["xiangu_dao"] = path
+    done = (f"\n≡ 【{node['name']}】圆满！可冲击{node['next']}。"
+            if node["key"] in path["completed"] else "")
+    return True, (f"【悟道 · {node['name']}】{'顿悟！道则如江河灌顶' if epiphany else '静参道则，有所精进'}"
+                  f"（成功率 {chance:.0%}）\n道则进度 {path['exp'][node['key']]}/{node['exp']}"
+                  f"｜收益 +{gain}{'（双倍）' if epiphany else ''}{done}\n"
+                  f"潜力 -{spent['potential']:,}｜修为血气各 -{spent['exp']:,}｜"
+                  f"寿元 -{spent['shouyuan']:,} 年｜元神 -{spent['spirit']:,}"), delta
+
+
 def attempt(doc: PlayerDoc, inv: Mapping[str, int], now: float | None = None,
-            rng: random.Random | None = None) -> tuple[bool, str, dict[str, int]]:
-    """#悟道：参悟当前己道节点，成功累积道则进度，失败按比例损失。"""
+            rng: random.Random | None = None, route: str = "mijing") -> tuple[bool, str, dict[str, int]]:
+    """#悟道：按选中路线参悟当前道则；Mijing behavior remains the existing port path."""
     now = time.time() if now is None else float(now)
     rng = rng or random.Random()
+    if route == "xiangu":
+        return attempt_xiangu(doc, inv, now, rng)
     st = state_of(doc)
     node = current_node(st)
     if node is None:
@@ -211,15 +432,19 @@ def attempt(doc: PlayerDoc, inv: Mapping[str, int], now: float | None = None,
 
     # 古茶 buff：本次结算消耗
     use_tea = bool(st.get("tea"))
-    if not use_tea and int((inv or {}).get(TEA_ITEM, 0) or 0) > 0:
-        delta[TEA_ITEM] = delta.get(TEA_ITEM, 0) - 1
-        use_tea = True
+    if not use_tea:
+        tea_item = next((name for name in TEA_ITEMS
+                         if int((inv or {}).get(name, 0) or 0) > 0), "")
+        if tea_item:
+            delta[tea_item] = delta.get(tea_item, 0) - 1
+            use_tea = True
     st["tea"] = False
 
     # 扣资源
     ext = getattr(doc, "ext", {})
     ext["potential"] = pot - c["potential"]
-    ext["shouyuan"] = shouyuan - c["shouyuan"]
+    from .lifespan import spend as spend_lifespan
+    spend_lifespan(doc, c["shouyuan"])
     doc.exp = int(getattr(doc, "exp", 0) or 0) - c["exp"]
     ext["xueqi"] = xueqi - c["xueqi"]
     doc.stones = int(getattr(doc, "stones", 0) or 0) - c["stones"]
@@ -300,20 +525,21 @@ def attempt(doc: PlayerDoc, inv: Mapping[str, int], now: float | None = None,
 
 
 def tea(doc: Any, inv: Mapping[str, int]) -> tuple[bool, str, dict[str, int]]:
-    """#悟道古茶：消耗 1 枚，下次悟道损失减半、顿悟 +10pp。"""
+    """#悟道古茶：消耗原版认可的古茶物品，置下次悟道状态。"""
     st = state_of(doc)
     if st.get("tea"):
         return False, "悟道古茶之力已在体内酝酿，下次 #悟道 自动生效。", {}
-    have = int((inv or {}).get(TEA_ITEM, 0) or 0)
-    if have < 1:
-        return False, f"你并没有【{TEA_ITEM}】——悟道古茶可于 #刻舟求剑 高级档获取。", {}
+    item = next((name for name in TEA_ITEMS if int((inv or {}).get(name, 0) or 0) > 0), "")
+    if not item:
+        return False, f"纳戒中没有悟道古茶（{ ' / '.join(TEA_ITEMS[:-1]) }）。", {}
     st["tea"] = True
     save(doc, st)
-    return True, "【悟道古茶】茶汤入喉，神台清明——下次 #悟道 损失减半、顿悟 +10%。", {TEA_ITEM: -1}
+    return True, "【悟道古茶】茶汤入喉，神台清明——下次 #悟道 损失减半、顿悟 +10%。", {item: -1}
 
 
 def _stage_label(st: Mapping[str, Any], node: Mapping[str, Any]) -> str:
     return stage_of(_node_exp(st, node["name"]), node["exp"])
+
 
 
 def panel(doc: Any) -> str:

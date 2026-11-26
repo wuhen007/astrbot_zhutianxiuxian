@@ -1,7 +1,7 @@
 import random
 import unittest
 
-from core import cultivate
+from core import cultivate, plane
 from core.player import PlayerDoc
 
 
@@ -20,6 +20,34 @@ class BreakthroughParityTests(unittest.TestCase):
             {"level": "筑基", "exp": 200},
             {"level": "金丹", "exp": 300},
         ]
+
+    def test_original_plane_level_growth_caps(self):
+        self.assertEqual(plane.world_level_caps(5),
+                         {"mijing": 16, "qi": 59, "body": 58, "xiangu": 14})
+        self.assertEqual(plane.world_level_caps(10),
+                         {"mijing": 21, "qi": 64, "body": 63, "xiangu": 19})
+        self.assertEqual(plane.world_level_caps(0), plane.world_level_caps(10))
+
+    def test_qi_breakthrough_obeys_world_level_cap_without_spending(self):
+        table = [{"level": f"境界{i}", "level_id": i, "exp": 0} for i in range(1, 62)]
+        doc = PlayerDoc(uid="qi-world-cap", realm_index=58, exp=10**9,
+                        ext={"potential": 100})
+        ok, message, result = cultivate.breakthrough(
+            doc, table, 1.0, 0.3, SequenceRandom(), plane_level=5)
+        self.assertFalse(ok)
+        self.assertIn("当前位面等级 5", message)
+        self.assertIs(result, doc)
+        self.assertEqual((doc.realm_index, doc.exp), (58, 10**9))
+
+    def test_body_one_key_stops_at_world_level_cap(self):
+        table = [{"level": f"炼体{i}", "level_id": i, "exp": 0} for i in range(1, 65)]
+        doc = PlayerDoc(uid="body-world-cap", physique_index=57,
+                        ext={"xueqi": 10**9, "potential": 100})
+        message, result, used = cultivate.one_key_body(
+            doc, table, SequenceRandom(), plane_level=5)
+        self.assertIn("当前位面等级 5", message)
+        self.assertEqual(result.physique_index, 57)
+        self.assertEqual(used, 0)
 
     def test_potential_cost_tiers_and_mingge_modifiers(self):
         self.assertEqual([cultivate.breakthrough_potential_cost(i) for i in (1, 26, 27, 41, 42)],

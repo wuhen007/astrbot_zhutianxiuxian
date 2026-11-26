@@ -43,7 +43,17 @@ class BlessHandlerRegression(unittest.IsolatedAsyncioTestCase):
         state['beast'] = '青龙'
         sec_mod.commit(cal, 'test', state)
         await self.db.save_calamity(cal)
-        self.host = types.SimpleNamespace(db=self.db, _allowed=lambda event: True)
+        pools = {
+            'item/丹药列表': [],
+            'item/功法列表': [],
+            'item/装备列表': [],
+            'Timelimit/麒麟': [],
+            'Timelimit/青龙': [{'name': '限定青龙功法', 'class': '功法', '稀有度': 4}],
+            'Timelimit/玄武朱雀白虎': [],
+        }
+        self.host = types.SimpleNamespace(
+            db=self.db, _allowed=lambda event: True,
+            content=types.SimpleNamespace(table=lambda name: pools.get(name, [])))
         async def require(event):
             return PlayerDoc(**await self.db.get_player(event.uid)), None
         self.host._require_player = require
@@ -56,9 +66,9 @@ class BlessHandlerRegression(unittest.IsolatedAsyncioTestCase):
 
     async def test_concurrent_members_persist_only_one_reward_each(self):
         await asyncio.gather(self.invoke('A'), self.invoke('A'), self.invoke('B'))
-        self.assertEqual((await self.db.get_sect('test'))['fund'], 80000)
+        self.assertEqual((await self.db.get_sect('test'))['fund'], 100000)
         for uid in ('A', 'B'):
-            self.assertEqual(await self.db.get_inventory(uid), {'幸运草': 2})
+            self.assertEqual(await self.db.get_inventory(uid), {'限定青龙功法': 1})
             self.assertIn('beast_bless_day', (await self.db.get_player(uid))['ext'])
 
     async def test_item_failure_rolls_back_mark_fund_and_reward(self):

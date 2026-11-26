@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from types import SimpleNamespace
 from typing import Any
 
 from .. import trib
@@ -57,6 +58,8 @@ def equip_skill_pool(f: Fighter, doc: Any, tables: Mapping[str, Any] | None) -> 
     if not lg_name and not learned:
         return
     want = ({lg_name} if lg_name else set()) | learned
+    if bool(getattr(doc, "ext", {}).get("武道天眼")):
+        want.add("大帝之姿")
     try:                                  # W8-B1b：重瞳 / 仙骨 / 瞳骨共鸣附加灵根类技能
         from .. import supreme as _sp
         want |= set(_sp.skill_names(doc))
@@ -123,6 +126,7 @@ def build_fighter(
     item_lookup: Mapping[str, Any],
     base_rows: tuple[dict, dict] | None = None,
     skill_tables: Mapping[str, Any] | None = None,
+    crit_damage: float | None = None,
 ) -> Fighter:
     """从玩家文档构建带功法与灵根法球的战斗单位。
 
@@ -132,10 +136,21 @@ def build_fighter(
     """
     from .. import linggen
     from .. import authority as authority_mod
+    from .. import battle as battle_mod
 
     f = Fighter(name=name, atk=int(atk), defense=int(defense), hp=int(hp),
-                hp_max=int(hp), bao=float(bao or 0.0))
+                hp_max=int(hp), bao=float(bao or 0.0), speed=battle_mod.speed_of(doc),
+                action_bar=battle_mod.initial_action_bar(doc),
+                crit_damage=(min(float(bao or 0.0) + battle_mod.CRIT_BASE, battle_mod.CRIT_CAP)
+                             if crit_damage is None else float(crit_damage)))
     lg = getattr(doc, "ext", {}).get("linggen")
+    try:
+        from ..pet import ability_bonus
+        pet_combat_bonus = ability_bonus(getattr(doc, "ext", {}).get("pet"), "战斗")
+        if pet_combat_bonus > 0:
+            f.effects["pet_combat_bonus"] = pet_combat_bonus
+    except (AttributeError, TypeError, ValueError):
+        pass
     orb = linggen.orb_of(lg)
     if orb > 0:
         f.effects["orb"] = orb
@@ -190,7 +205,7 @@ def build_fighter(
         f.tags["battle_skills"] = [str(s.get("name")) for s in battle_skills]
     try:
         from ..mingge import signed_bonus as _mingge_bonus
-        f.tags["speed"] = max(1, 100 + int(_mingge_bonus(doc, "速度")))
+        f.tags["speed"] = f.speed
         revive_chance = min(1.0, max(0.0, _mingge_bonus(doc, "复活概率")))
         if revive_chance:
             revive = f.effects.get("revive")
@@ -324,4 +339,56 @@ def build_fighter(
     if (f.tags.get("heal_skills")
             and int(getattr(doc, "realm_index", 0) or 0) >= 20):
         f.skills = (*f.skills, "rejuvenate")      # W7-4 有治疗技时的续航特效
+    return f
+
+
+def build_xijie_npc_fighter(
+    npc: Mapping[str, Any], item_lookup: Any,
+    skill_tables: Mapping[str, Any] | None = None,
+) -> Fighter:
+    """Build a shared-engine fighter from buildXijieNpcCombatant's legacy shape."""
+    techniques = npc.get("学习的功法")
+    techniques = list(techniques) if isinstance(techniques, list) else []
+    linggen = npc.get("灵根")
+    lg_name = str(linggen.get("name") or "") if isinstance(linggen, Mapping) else str(linggen or "")
+    f = Fighter(
+        name=str(npc.get("名号") or "未知守卫"),
+        atk=max(1, int(npc.get("攻击", 1) or 1)),
+        defense=max(1, int(npc.get("防御", 1) or 1)),
+        hp=max(1, int(npc.get("当前血量", npc.get("血量上限", 1)) or 1)),
+        hp_max=max(1, int(npc.get("血量上限", 1) or 1)),
+        bao=float(npc.get("暴击率", 0) or 0),
+        speed=max(1, int(npc.get("速度", 100) or 100)),
+        action_bar=0,
+        crit_damage=float(npc.get("暴击伤害", 1.5) or 1.5),
+    )
+    dodge = max(0.0, float(npc.get("闪避率", 0) or 0))
+    lifesteal = max(0.0, float(npc.get("吸血率", 0) or 0))
+    orb = max(0.0, float(npc.get("法球倍率", 0) or 0))
+    if dodge:
+        f.effects["dodge_chance"] = dodge
+    if lifesteal:
+        f.effects["lifesteal"] = lifesteal
+    if orb:
+        f.effects["orb"] = orb
+    f.tags["linggen_name"] = lg_name
+    npc_doc = SimpleNamespace(ext={
+        "gongfa": techniques,
+        "linggen": {"name": lg_name, "orb": orb},
+        "prof": {},
+    })
+    equip_skill_pool(f, npc_doc, skill_tables)
+    battle_skills = learned_battle_skills(npc_doc, item_lookup)
+    if battle_skills:
+        apply_start_bonuses(f, battle_skills)
+        revive = battle_skills[0]
+        raw_pr = revive.get("pr")
+        f.effects["revive"] = {
+            "name": str(revive.get("name") or "复活技"),
+            "ratio": min(1.0, max(0.05, float(revive.get("恢复比例", 0.7) or 0.7))),
+            "pr": 1.0 if raw_pr is None else min(1.0, max(0.0, float(raw_pr))),
+            "msg": str(revive.get("msg2") or ""),
+            "used": False,
+        }
+        f.tags["battle_skills"] = [str(s.get("name")) for s in battle_skills]
     return f

@@ -68,19 +68,10 @@ def grant_completion_potential(doc: Any, today: str) -> tuple[int, bool]:
         except (TypeError, ValueError):
             return 0, False
 
-    legacy = ext.get("legacy_source") if isinstance(ext.get("legacy_source"), dict) else {}
-    try:
-        secret_level = max(0, int(float(legacy.get("mijinglevel_id", 0) or 0)))
-        ancient_level = max(0, int(float(legacy.get("xiangulevel_id", 0) or 0)))
-    except (TypeError, ValueError):
-        secret_level = ancient_level = 0
-    if not secret_level and not ancient_level:
-        secret_level = max(0, int(getattr(doc, "realm_index", 0) or 0)) + 1
-        try:
-            from .xiangu import xg_level_of
-            ancient_level = max(0, int(xg_level_of(doc)))
-        except Exception:
-            ancient_level = 0
+    from . import extra_cultivation
+    tracks = extra_cultivation.levels_of(doc)
+    secret_level = tracks["mijing"]
+    ancient_level = tracks["xiangu"]
 
     base = max(secret_level, ancient_level) * 10
     try:

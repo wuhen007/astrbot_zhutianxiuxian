@@ -124,7 +124,8 @@ def pay(doc: Any, cost: Mapping[str, int]) -> None:
         elif label == "血气":
             doc.ext["xueqi"] = int(doc.ext.get("xueqi", 0) or 0) - value
         elif label == "寿元":
-            doc.ext["shouyuan"] = int(doc.ext.get("shouyuan", 0) or 0) - value
+            from .lifespan import spend as spend_lifespan
+            spend_lifespan(doc, value)
 
 
 def cost_text(cost: Mapping[str, int]) -> str:

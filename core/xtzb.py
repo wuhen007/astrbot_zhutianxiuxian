@@ -225,11 +225,126 @@ def ensure(doc: Any) -> dict[str, Any]:
         st["flags"] = {}
     if not isinstance(st.get("projection"), dict):
         st["projection"] = {}
+    if not isinstance(st.get("owned"), list):
+        st["owned"] = []
     return st
 
 
 def save(doc: Any, st: Mapping[str, Any]) -> None:
     doc.ext[EXT_KEY] = dict(st)
+
+
+def _equipment_name(value: Any) -> str:
+    if isinstance(value, Mapping):
+        return str(value.get("name") or value.get("先天至宝本体") or "")
+    return str(value or "")
+
+
+def is_innate_item_name(name: Any) -> bool:
+    return str(name or "").strip() in CATALOG
+
+
+def is_innate_item(item: Any) -> bool:
+    return isinstance(item, Mapping) and (
+        is_innate_item_name(item.get("name"))
+        or is_innate_item_name(item.get("先天至宝本体"))
+    )
+
+
+def set_equipped_slot(doc: Any, name: str, st: dict[str, Any] | None = None) -> str:
+    """写独立至宝槽并同步当前执掌；返回被替换的槽位名。"""
+    ext = doc.ext if isinstance(getattr(doc, "ext", None), dict) else {}
+    doc.ext = ext
+    equipment = ext.setdefault("equipment", {})
+    if not isinstance(equipment, dict):
+        equipment = ext["equipment"] = {}
+    old = _equipment_name(equipment.get("至宝"))
+    equipment["至宝"] = name
+    st = st or ensure(doc)
+    st["current"] = name
+    save(doc, st)
+    return old
+
+
+def clear_equipped_slot(doc: Any, name: str = "") -> str:
+    """清空匹配的独立至宝槽及当前执掌，保留已认主记录。"""
+    ext = doc.ext if isinstance(getattr(doc, "ext", None), dict) else {}
+    doc.ext = ext
+    equipment = ext.get("equipment")
+    equipment = equipment if isinstance(equipment, dict) else {}
+    old = _equipment_name(equipment.get("至宝"))
+    if old and (not name or old == name):
+        equipment.pop("至宝", None)
+        st = ensure(doc)
+        if st.get("current") == old:
+            st["current"] = ""
+        save(doc, st)
+    return old
+
+
+def _reconcile_equipment(doc: Any, st: dict[str, Any], now: float,
+                         expired: set[str] | None = None) -> bool:
+    """迁移旧帝兵槽中的至宝，并让独立至宝槽成为当前执掌的唯一来源。"""
+    ext = doc.ext if isinstance(getattr(doc, "ext", None), dict) else {}
+    doc.ext = ext
+    equipment = ext.get("equipment")
+    if not isinstance(equipment, dict):
+        return False
+    changed = False
+    expired = set(expired or ())
+    expired.update(name for name, until in st["projection"].items()
+                   if float(until or 0) <= now)
+
+    legacy = equipment.get("帝兵")
+    legacy_name = _equipment_name(legacy)
+    if is_innate_item_name(legacy_name):
+        equipment.pop("帝兵", None)
+        changed = True
+        legacy_expiry = (legacy.get("先天投影截止")
+                         if isinstance(legacy, Mapping) else None)
+        if legacy_name not in expired and not (
+            legacy_expiry is not None and float(legacy_expiry or 0) <= now
+        ):
+            if legacy_name not in st["owned"]:
+                st["owned"].append(legacy_name)
+                changed = True
+            if not equipment.get("至宝"):
+                equipment["至宝"] = legacy_name
+                st["current"] = legacy_name
+                changed = True
+
+    slot_value = equipment.get("至宝")
+    slot_name = _equipment_name(slot_value)
+    item_expiry = (slot_value.get("先天投影截止")
+                   if isinstance(slot_value, Mapping) else None)
+    if slot_name in expired or (
+        item_expiry is not None and float(item_expiry or 0) <= now
+    ):
+        equipment.pop("至宝", None)
+        slot_name = ""
+        changed = True
+
+    current_name = str(st.get("current") or "")
+    if is_innate_item_name(slot_name):
+        if slot_name not in st["owned"]:
+            st["owned"].append(slot_name)
+            changed = True
+        if current_name != slot_name:
+            st["current"] = slot_name
+            changed = True
+    elif slot_name:
+        if is_innate_item_name(current_name):
+            st["current"] = ""
+            changed = True
+    elif is_innate_item_name(current_name) and current_name not in expired:
+        equipment["至宝"] = current_name
+        if current_name not in st["owned"]:
+            st["owned"].append(current_name)
+        changed = True
+    elif current_name:
+        st["current"] = ""
+        changed = True
+    return changed
 
 
 def world_of(calamity: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -266,15 +381,17 @@ def state_of(doc: Any, now: float | None = None) -> dict[str, Any]:
         if float(exp or 0) <= now:
             del st["flags"][key]
             changed = True
+    expired = set()
     for name, exp in list(st["projection"].items()):
         if float(exp or 0) <= now:
             del st["projection"][name]
+            expired.add(name)
+            changed = True
             if name in st["owned"]:
                 st["owned"].remove(name)
-                changed = True
             if st["current"] == name:
                 st["current"] = ""
-                changed = True
+    changed = _reconcile_equipment(doc, st, now, expired) or changed
     if changed:
         save(doc, st)
     return st
@@ -401,7 +518,7 @@ def rules_text() -> str:
         "【先天至宝规则】",
         f"· 共 {len(CATALOG)} 件；本体三维各 +{FLAT_ALL:,}（原版 1 亿 ÷1000 折算），暴击 +{BAO_FLAT:.0%}。",
         "· 一人同时只执掌 1 件；全服本体唯一（owners 单键），重复择主只能得 7 日投影（属性为 0）。",
-        f"· 获取：秘境偶得「先天道痕」，{CLAIM_COST} 枚 + 第 {CLAIM_REALM + 1} 境以上发 #至宝择主 名。",
+        "· 获取：参与「#观摩灵宝」或「#至宝择主」加入位面坐标上的 24 小时公开争夺；冠军得本体、次席与第三名得七日投影。",
         "· 权柄统一网关：执掌校验 → CD（原版毫秒，本移植秒）→ 落库。",
         "· 蓄势权柄（开天 / 剑阵 / 镇世 / 太初一斩 / 无量护身 / 星辰护界 / 演化诸天 / 阴阳逆转…）"
         f"生效 {GUARD_WINDOW // 3600} 小时，窗口内所有战斗共享增益；原版「待用」无清理也无过期。",
@@ -417,7 +534,7 @@ def help_text() -> str:
     return "\n".join([
         "【先天至宝 · 指令】",
         "图鉴 #至宝图鉴 [名]｜状态 #先天至宝｜帮助 #至宝帮助｜规则 #至宝规则",
-        "获取 #至宝择主 名｜执掌 #执掌先天至宝 名｜移交 #移交至宝归属 @人 名",
+        "参与公开择主 #至宝择主 [名] / #观摩灵宝 [名]｜执掌 #执掌先天至宝 名｜移交 #移交至宝归属 @人 名",
         "【混沌珠】#混沌复制 物品*数｜#混沌演化 材料*数｜#混沌变幻 物品*数",
         "【太极图】#切换太极 阴/阳｜#阴阳逆转",
         "【盘古幡/诛仙四剑/东皇钟】#开天｜#布诛仙剑阵｜#东皇镇世",
@@ -532,10 +649,8 @@ def time_mult(doc: Any, now: float | None = None) -> float:
 
 
 def roll_drop(rng: random.Random) -> dict[str, int] | None:
-    """秘境结算 12% 投放先天道痕（原版 22 件本体只靠全服事件，本移植补通道）。"""
-    if rng.random() >= 0.12:
-        return None
-    return {"先天道痕": int(rng.randint(1, 3))}
+    """择主物资由位面公开赛事结算，不从普通秘境额外掉落。"""
+    return None
 
 
 # ── 获取 / 执掌 / 移交 ─────────────────────────────────────────────────────
@@ -602,13 +717,14 @@ def equip(doc: Any, name: str, world: Mapping[str, Any],
     owner = (world.get("owners") or {}).get(key)
     if owner and owner.get("uid") != doc.uid and key not in st.get("projection", {}):
         return _no(f"【{key}】本体已归属【{owner.get('name') or '他人'}】，无法执掌。")
-    if st.get("current") == key:
+    old = set_equipped_slot(doc, key, st)
+    if old == key:
         return _ok(f"【{key}】已在执掌中。\n{CATALOG[key]['passive']}")
-    st["current"] = key
-    save(doc, st)
+    returned = {old: 1} if old and not is_innate_item_name(old) else {}
+    note = f"\n原至宝位装备「{old}」已回到纳戒。" if returned else ""
     return _ok(f"执掌【{key}·{CATALOG[key]['title']}】。\n"
                f"被动：{CATALOG[key]['passive']}\n"
-               f"权柄：{'、'.join(CATALOG[key].get('auth') or ()) or '无主动权柄'}")
+               f"权柄：{'、'.join(CATALOG[key].get('auth') or ()) or '无主动权柄'}{note}", returned)
 
 
 def transfer(doc: Any, target_uid: str, name: str, world: dict[str, Any],
@@ -637,8 +753,18 @@ def transfer(doc: Any, target_uid: str, name: str, world: dict[str, Any],
     # 目标若只持有同名七日投影，允许「升级为本体」；仅本体重复才拒绝
     if t_st.get("current") == key and key not in t_st.get("projection", {}):
         return _no("对方已在执掌同名至宝。")
-    # 旧至宝退回纳戒（原版把目标原至宝退回 najie）
-    old = t_st.get("current") or ""
+    # 至宝位只能有一件；普通装备由调用方按旧槽名退回目标纳戒。
+    source_equipment = doc.ext.get("equipment") if isinstance(doc.ext, Mapping) else None
+    if isinstance(source_equipment, dict) and _equipment_name(source_equipment.get("至宝")) == key:
+        source_equipment.pop("至宝", None)
+    target_equipment = target_doc.ext.setdefault("equipment", {})
+    if not isinstance(target_equipment, dict):
+        target_equipment = target_doc.ext["equipment"] = {}
+    old = t_st.get("current") or _equipment_name(target_equipment.get("至宝"))
+    old_slot = _equipment_name(target_equipment.get("至宝"))
+    if old_slot and is_innate_item_name(old_slot) and old_slot != key:
+        t_st["current"] = ""
+    target_equipment["至宝"] = key
     st["owned"].remove(key)
     if st.get("current") == key:
         st["current"] = ""
@@ -998,10 +1124,12 @@ def creation_spring(doc: Any, world: Mapping[str, Any],
         _ys.save(doc, y)
     except Exception:
         pass
+    from . import life_source
+    restored = life_source.restore_to_max(doc)
     st["potential"] = int(st.get("potential", 0) or 0) + 500
     _mark_cd(st, "造化回春", now)
     save(doc, st)
-    return _ok(f"【造化回春】生命本源复满、道伤尽祛、元神回满，仙道潜力 +500（现 {st['potential']}）。")
+    return _ok(f"【造化回春】生命本源复满至 {restored:g}、道伤尽祛、元神回满，仙道潜力 +500（现 {st['potential']}）。")
 
 
 def bodhi(doc: Any, world: Mapping[str, Any],

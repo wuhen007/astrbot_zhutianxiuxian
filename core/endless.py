@@ -465,7 +465,9 @@ def enemy_unit(st: Mapping, node: Mapping, stats: Mapping, content: Mapping,
         atk = int(atk * 1.05)
     elif trait in ("禁疗", "封法"):
         hp = int(hp * 1.05)
-    return Unit(str(node.get("name") or "劫境生灵"), max(1, atk), max(0, df), max(1, hp), 0.05)
+    return Unit(str(node.get("name") or "劫境生灵"), max(1, atk), max(0, df), max(1, hp), 0.05,
+                speed=int(node.get("speed", node.get("速度", 100))),
+                crit_damage=node.get("crit_damage", node.get("暴击伤害")))
 
 
 def reward_of(st: Mapping, node: Mapping, celestial: Mapping) -> int:
@@ -502,7 +504,9 @@ def resolve_node(st: Mapping, base: Mapping, content: Mapping, now: float,
     if kind in ("battle", "elite", "boss"):
         me = Fighter(
             "道友·劫境投影", stats["atk"], stats["def"], max(1, int(st2["hp"])),
-            max(1, int(stats["hp"])), stats["bao"], effects={
+            max(1, int(stats["hp"])), stats["bao"],
+            speed=max(1, int(st2.get("speed", stats.get("speed", 100)))),
+            action_bar=int(st2.get("action_bar", 0)), effects={
                 "dodge_chance": stats["dodgeChance"],
                 "damage_reduction": stats["damageReduction"],
                 "reflect_chance": stats["reflectChance"],
@@ -517,7 +521,7 @@ def resolve_node(st: Mapping, base: Mapping, content: Mapping, now: float,
         me.effects["shield"] = int(round(stats["hp"] * stats["teamShieldPct"]))
         foe_unit = enemy_unit(st2, node, stats, content, rng)
         foe = Fighter.from_unit(foe_unit)
-        won, log, hp_left, _ = run_1v1(me, foe, rng, max_rounds=30).as_tuple()
+        won, log, hp_left, _ = run_1v1(me, foe, rng).as_tuple()
         st2["hp"] = max(0, int(hp_left))
         result["battle"] = True
         result["log"] = log
@@ -1390,7 +1394,7 @@ def shop_text(st: Mapping, shop_content: Mapping, celestial: Mapping, now: float
         limit = shop_limit(p, celestial)
         used = int(counts.get(pid, 0) or 0)
         limit_txt = "不限购" if limit <= 0 else f"今日 {used}/{limit}"
-        lock = "" if action == "item" else "（暂未开放）"
+        lock = "" if action == "item" else "（购买后引动先天至宝出世）" if action == "clue" else "（暂未开放）"
         qty = int(p.get("quantity", 1) or 1)
         qty_txt = f"×{qty}" if qty > 1 else ""
         lines.append(f"· [{p.get('id')}] {p.get('name')}{qty_txt}｜{price:,} 道痕｜{limit_txt}{lock}")
@@ -1411,7 +1415,8 @@ def buy_shop(st: Mapping, product_id: str, qty: int, now: float,
             break
     if not product:
         return False, f"商店里没有「{product_id}」。", st2, {}
-    if str(product.get("action") or "item") != "item":
+    action = str(product.get("action") or "item")
+    if action not in ("item", "clue"):
         return False, f"「{product['name']}」对应系统尚未开放，暂不可购买。", st2, {}
     today = time_key(now)
     counts = shop_today(st2, now)
@@ -1429,6 +1434,8 @@ def buy_shop(st: Mapping, product_id: str, qty: int, now: float,
     counts[pid] = used + qty
     st2["shop_counts"] = counts
     grant = int(product.get("quantity", 1) or 1) * qty
+    if action == "clue":
+        return True, f"购入「{product['name']}」，耗道痕 {price:,}（余 {st2['marks_total']:,}）。", st2, {}
     return True, (f"购入「{product['name']}」×{grant}，耗道痕 {price:,}"
                   f"（余 {st2['marks_total']:,}）。"), st2, {str(product["name"]): grant}
 

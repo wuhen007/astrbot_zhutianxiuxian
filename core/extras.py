@@ -312,8 +312,12 @@ def tianjiao_fight(doc: PlayerDoc, name: str, stats: Any, rng: random.Random) ->
     done = set(doc.ext.get("tianjiao_defeated") or [])
     if t["name"] in done:
         return f"【{t['name']}】已讨伐过。", False, {}
-    me = Unit(doc.name or "道友", int(stats.atk), int(stats.defense), int(stats.hp), float(stats.bao))
-    foe = Unit(t["name"], t["atk"], t["defense"], t["hp"], 0.05)
+    me = Unit(doc.name or "道友", int(stats.atk), int(stats.defense), int(stats.hp), float(stats.bao),
+              speed=int(getattr(stats, "speed", 100)), crit_damage=getattr(stats, "crit_damage", None),
+              action_bar=int(getattr(stats, "action_bar", 0)))
+    foe = Unit(t["name"], t["atk"], t["defense"], t["hp"], 0.05,
+               speed=int(t.get("speed", t.get("速度", 100))),
+               crit_damage=t.get("暴击伤害"))
     winner, log = spar(me, foe, rng)
     if winner == 0:
         doc.stones += t["reward"]

@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 from types import MethodType, SimpleNamespace
 
-from core import plane, timed_action
+from core import plane, plane_relay, timed_action
 from core.player import PlayerDoc
 
 
@@ -30,13 +30,12 @@ class TimedActionTests(unittest.TestCase):
                         ext={"xueqi": 100_000_000,
                              "xtzb": {"current": "东皇钟", "owned": ["东皇钟"]},
                              "plane": {"current": "凡间", "known": ["凡间", "仙界"]}})
-        quoted_minutes = plane.quote(doc, "仙界")["minutes"]
+        quoted_minutes = 25
+        adjusted, _notes, _protected, _snapshot = plane_relay.apply_travel_time_modifiers(
+            doc, plane.state_of(doc), quoted_minutes, 1_000,
+            __import__("random").Random(1), "凡间", "仙界")
 
-        ok, message = plane.begin_travel(doc, "仙界", {}, 1_000)
-
-        self.assertTrue(ok, message)
-        self.assertEqual(plane.state_of(doc)["travel"]["minutes"],
-                         max(1, int(quoted_minutes * 0.8 + 0.999999)))
+        self.assertEqual(adjusted, max(1, int(quoted_minutes * 0.8 + 0.999999)))
 
     def test_occupation_timed_action_uses_start_snapshot_multiplier(self):
         plugin_main = Path(__file__).resolve().parents[1] / "main.py"

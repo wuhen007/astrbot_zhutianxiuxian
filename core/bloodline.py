@@ -13,7 +13,7 @@
 
 shortcut：原版霸体/妖体的小成要吃【不灭霸血】/【天妖真血】血脉道具，本移植没有对应产出链，
 统一改为「两大秘境 ≥50%」；至尊骨 / 仙骨 / 重瞳 / 往世乐土（真我觉醒、流萤觉醒）属 B1b，
-本批未做；境界门槛用 realm_index 代理原版 mijinglevel_id（秘境等级）。
+本批未做；境界门槛读取独立的人体秘境等级。
 """
 
 from __future__ import annotations
@@ -142,7 +142,8 @@ def awaken(doc: Any, table: Sequence[Mapping], expect: str = "") -> tuple[bool, 
     if stage >= 2:
         return False, f"{LINE_LABEL.get(line, line)}已至大成，无需再觉醒。"
     row = LINES[line][stage]
-    ok, why = _check(st, row, int(getattr(doc, "realm_index", 0) or 0))
+    from . import extra_cultivation
+    ok, why = _check(st, row, extra_cultivation.level_of(doc, "mijing") - 1)
     if not ok:
         return False, f"【{row['row']}·条件不足】{why}"
     target = next((r for r in table

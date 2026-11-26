@@ -13,7 +13,7 @@
   **公告群名单**维护，不是发消息。
 - `#补登唯一机缘` 属仙古遗迹永久认领，本移植不做仙古遗迹 → 不移植。
 
-状态全部落在 `calamity_state["admin"]` 单例，db 当前版本为 v18。
+状态全部落在 `calamity_state["admin"]` 单例，db 当前版本为 v19。
 """
 
 from __future__ import annotations
@@ -29,11 +29,11 @@ DEFAULT_DIFFICULTY = "困难"
 
 DIFFICULTIES: dict[str, dict[str, Any]] = {
     "简单": {"decay": False, "forced": False,
-             "desc": "寿元不随时间流逝，耗尽也不会被强制踏轮回"},
+             "desc": "寿元不随时间流逝，不触发强制往生"},
     "普通": {"decay": True, "forced": False,
-             "desc": "寿元随时间流逝，耗尽后停在救援窗口，不强制轮回"},
+             "desc": "寿元随时间流逝，耗尽后不自动进入强制往生"},
     "困难": {"decay": True, "forced": True,
-             "desc": "寿元随时间流逝，耗尽后救援窗口一过即强制轮回"},
+             "desc": "寿元随时间流逝；耗尽后有 5 分钟救援期，再由执掌者裁定或自动往生"},
 }
 
 JAIL_DEFAULT_MINUTES = 24 * 60        # 原版 #打入天牢 默认 1 天

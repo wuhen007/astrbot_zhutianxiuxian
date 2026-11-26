@@ -1,14 +1,14 @@
-"""时间长河·单人遨游（W3-1，对齐原版 shijianchanghe.js + timeRiverAdversary.js 轻量适配）。
+"""时间长河单人路径与多人同行服务；异步团队状态见 river_team。
 
 原版语义：
 - 门槛：准仙帝权柄（auth 20）组队；每阶段 15 分钟异步落雷式结算；敌人三维 = 玩家 ×1.5~3
   （TIME_RIVER_ATTRIBUTE_RANGE）；胜利奖励岁月沉淀（eraAccumulation：三帝 3-5 / 荒天帝 15 /
   未来准仙帝 45）；荒天帝传道 +2 熟练度（上限 30 次）。
-- shortcut：组队/法身遨游/救援窗口/苍帝精气神压制/纪元积蓄消费 全部砍——
-  本移植改为**单人同步结算**：每次遨游一段河程（30 分钟 CD），随机事件
+- 单人入口暂保留同步事件兼容；多人队伍按原版 15 分钟阶段状态机运行，含待援、献祭续战、敌人续血与阶段奖励。
+  原版门槛按权柄 20。随机事件
   （遇敌三帝法身 → 走 1v1 引擎；悟道；拾遗；荒天帝传道）。
 - 奖励落点：修为/灵石/感悟值 + **岁月结晶**（ext["river_crystal"]，后续兑换接口预留）。
-- 门槛：双轨取高 ≥45（authority.meets），对齐原版高权柄定位的量级。
+- 已知的时间长河技能数值和奖励沿用原版数据；当前额外体系模型不足处由状态层记载并报告。
 """
 
 from __future__ import annotations
@@ -19,8 +19,8 @@ from typing import Any
 
 from .player import PlayerDoc
 
-ROAM_CD = 30 * 60
-GATE_REALM = 45
+ROAM_CD = 15 * 60
+GATE_AUTHORITY = 20
 ATTR_RANGE = (1.5, 3.0)          # 原版 TIME_RIVER_ATTRIBUTE_RANGE
 CRYSTAL_TRIAD = (3, 5)           # 三帝胜利岁月沉淀
 CRYSTAL_HUANG = 15               # 荒天帝
@@ -46,9 +46,9 @@ def state_of(doc: PlayerDoc) -> dict:
 
 
 def check(doc: PlayerDoc, now: float) -> str | None:
-    if max(int(doc.realm_index), int(doc.physique_index)) < GATE_REALM:
-        return (f"时间长河唯有界海以上的修士方可踏足"
-                f"（需第 {GATE_REALM + 1} 重，当前 练气 {doc.realm_index}／炼体 {doc.physique_index}）。")
+    from .authority import meets
+    if not meets(doc, GATE_AUTHORITY):
+        return f"时间长河是诸天禁忌，需准仙帝权柄（{GATE_AUTHORITY}/21）。"
     st = state_of(doc)
     last = float(st.get("last", 0) or 0)
     if now - last < ROAM_CD:
@@ -61,7 +61,7 @@ def _crystal_gain(rng: random.Random) -> int:
     return rng.randint(*CRYSTAL_TRIAD)
 
 
-def roam(doc: PlayerDoc, stats: Any, build_fighter_fn: Any, run_1v1: Any, rng: random.Random,
+def roam(doc: PlayerDoc, stats: Any, build_fighter_fn: Any, rng: random.Random,
          now: float) -> tuple[str, dict]:
     """一段河程。build_fighter_fn(name, mult) -> Fighter（name=="__me__" 返回我方当前血量单位）。
 
@@ -74,26 +74,43 @@ def roam(doc: PlayerDoc, stats: Any, build_fighter_fn: Any, run_1v1: Any, rng: r
     gains: dict = {"crystal": 0, "exp": 0, "stones": 0, "insight": 0}
 
     if roll < 0.45:
-        # 遇敌：三帝法身（三维 = 玩家 × 系数）——群战折为连战，赢两场算胜
-        mult = rng.uniform(*ATTR_RANGE)
+        # 原版将黑暗三帝作为敌方队伍同时交战，并各自拥有帝辉护盾与复生。
+        from .combat.engine import run_team_battle
+        mult = int((ATTR_RANGE[0] + (ATTR_RANGE[1] - ATTR_RANGE[0]) * rng.random()) * 100 + 0.5) / 100
         lines.append(rng.choice(TAUNTS).format(name=doc.name or "道友"))
         me_f = build_fighter_fn("__me__", 1.0)
-        wins = 0
-        for i, foe_name in enumerate(DARK_TRIAD):
-            res = run_1v1(me_f, build_fighter_fn(f"{foe_name}法身", mult), rng)
-            if res.winner == 0:
-                wins += 1
-                battle_results.append(f"胜{foe_name}法身")
-            else:
-                battle_results.append(f"负{foe_name}法身")
-                break
-        lines.append(f"三帝法身连战（敌方战力 ×{mult:.2f}）：{'、'.join(battle_results)}。")
-        if wins >= 2:
+        enemies = [build_fighter_fn(name, mult) for name in DARK_TRIAD]
+        from .combat import time_river as river_combat
+        for enemy in enemies:
+            river_combat.apply_adversary_rules(enemy)
+        river_combat.mark_party_countered([me_f], enemies)
+        legacy = doc.ext.get("legacy_source") or {}
+        ownway = doc.ext.get("ownway") or doc.ext.get("己道推演") or legacy.get("己道推演") or {}
+        immune = (int(doc.realm_index) >= 21 or int(doc.physique_index) >= 21
+                  or (max(int(doc.realm_index), int(doc.physique_index)) >= 20
+                      and ownway.get("divineEmbryo") == "已结出"))
+        suppression = river_combat.apply_cang_emperor_opening_suppression(me_f, immune=immune)
+        if suppression:
+            lines.append(suppression)
+        battle = run_team_battle([me_f], enemies, rng)
+        for teaching_name in me_f.tags.get("river_teaching_seen", set()):
+            gained, mastered = river_combat.teaching_progress(doc, teaching_name)
+            if gained:
+                lines.append(f"【荒天帝真意】{teaching_name}进度 +{gained}（{doc.ext['river_teachings'][teaching_name]}/{river_combat.TIME_RIVER_TEACHING_MAX}）。")
+            if mastered:
+                lines.append(f"【真意圆满】你已悟得完整功法「{teaching_name}」。")
+        won = battle.winner == 0
+        battle_results.append(
+            f"{doc.name or '道友'}{'击败' if won else '未能击败'}"
+            f"苍、鸿、羽三帝（存活：{'、'.join(battle.b_survivors) or '无'}）"
+        )
+        lines.append(f"与黑暗三帝同时交战（敌方战力 ×{mult:.2f}）：{'；'.join(battle_results)}。")
+        if won:
             c = _crystal_gain(rng)
             exp_g = 800_000 * (int(doc.realm_index) + 1)
             gains["crystal"] = c
             gains["exp"] = exp_g
-            lines.append(f"三帝法身溃散于长河——岁月沉淀 +{c}，修为 +{exp_g:,}。")
+            lines.append(f"苍、鸿、羽三帝败退于长河——岁月沉淀 +{c}，修为 +{exp_g:,}。")
         else:
             gains["crystal"] = CRYSTAL_LOSE
             losses = int(doc.exp * 0.1)
@@ -185,7 +202,29 @@ def text(doc: PlayerDoc) -> str:
         "--- 时间长河 ---",
         f"岁月沉淀：{int(st.get('crystal', 0) or 0):,}",
         f"荒天帝传道：{int(st.get('teachings', 0) or 0)}/{TEACHING_MAX} 次",
-        f"门槛：第 {GATE_REALM + 1} 重（双轨取高）｜冷却：30 分钟",
-        f"遨游：#遨游时间长河",
-        "shortcut：组队/法身遨游/救援窗口/苍帝压制未复刻（重度组队内容）。",
+        f"门槛：权柄 {GATE_AUTHORITY}/21｜同行阶段：15 分钟",
+        "组队：#组队时间长河 → #加入时间长河队伍 队伍编号 → #组队遨游时间长河",
+        "战败待援：#献祭魂与血 @战败玩家（需同灵根、额外体系至少一条成仙）。",
     ])
+
+# 多人同行状态机纯函数；AstrBot handler 负责在数据库事务内读改写世界状态并触发定时结算。
+from .river_team import (  # noqa: E402
+    accept_sacrifice,
+    apply_team_teachings,
+    build_team_battle,
+    capture_enemy_state,
+    complete_stage,
+    create_team,
+    disband_team,
+    expire_rescue,
+    finish_team,
+    join_team,
+    leave_team,
+    phase_due,
+    record_battle,
+    release_expired_rescue,
+    sacrifice_recovery,
+    start_team,
+    stage_roster,
+    view_team,
+)
