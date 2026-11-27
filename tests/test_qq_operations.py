@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from infra.db import DataBase
+from infra.db import LATEST_DB_VERSION, DataBase
 
 
 class QQOperationsDatabaseTests(unittest.IsolatedAsyncioTestCase):
@@ -74,7 +74,7 @@ class QQOperationsDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.db = DataBase(path)
         await self.db.connect()
         async with self.db.conn.execute("SELECT version FROM db_info") as cur:
-            self.assertEqual((await cur.fetchone())[0], 19)
+            self.assertEqual((await cur.fetchone())[0], LATEST_DB_VERSION)
         await self.db.register_qq_group("qq", "group_openid")
         self.assertEqual(await self.db.qq_group_categories("qq", "group_openid"), [])
 

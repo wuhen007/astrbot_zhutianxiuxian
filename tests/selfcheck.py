@@ -204,7 +204,7 @@ async def main():
     # 10. 迁移版本 = 19
     from infra.db import LATEST_DB_VERSION
     async with db.conn.execute("SELECT version FROM db_info") as cur:
-        assert (await cur.fetchone())[0] == LATEST_DB_VERSION == 19
+        assert (await cur.fetchone())[0] == LATEST_DB_VERSION >= 19
 
     # 11. 装备：穿戴/换位/卸下 + 比例与固定加成聚合
     from core import battle as battle_mod   # noqa: E402
@@ -2379,23 +2379,25 @@ async def main():
     fd2.tags["atk_skills"] = [{"name": "九幽魔体", "pr": 1, "cnt": -1, "beilv": 1e17, "msg1": "魔", "控制": 0}]
     dmg3, _ = cengine.roll_attack_skills(fd2, foe_s, 1000, _random.Random(1))
     assert dmg3 == 50000, dmg3   # 1e17 钳到 50 倍
-    # 控制定身 + cnt 限次
+    # 控制定身 + cnt 回合语义（原版：cnt = 第几回合触发，-1 每回合）
     fc = loadout_mod.build_fighter(gd, "技客", 10000, 5000, 100000, 0.0, lookup2, skill_tables=tables)
     fc.tags["atk_skills"] = [{"name": "九重魔功", "pr": 1, "cnt": 1, "beilv": 1.5, "msg1": "m", "控制": 1}]
     fv_c = Fighter("受控", 1, 1, 999999, 999999, bao=0.0)
-    _, ex_c = cengine.roll_attack_skills(fc, fv_c, 1000, _random.Random(2))
+    _, ex_c = cengine.roll_attack_skills(fc, fv_c, 1000, _random.Random(2), action_index=1)
     assert fv_c.effects["stun_turns"] == 1 and any("被定身" in x for x in ex_c)
-    cengine.roll_attack_skills(fc, fv_c, 1000, _random.Random(2))
-    assert fc.tags["skill_uses"]["九重魔功"] == 0   # cnt=1 用尽
-    # 防御：减免与完全格挡
+    _, ex_c2 = cengine.roll_attack_skills(fc, fv_c, 1000, _random.Random(2), action_index=2)
+    assert not any("九重魔功" in x for x in ex_c2), ex_c2   # cnt=1 只在第 1 回合触发
+    # 防御：优先级单条生效（命中一条即停）+ cnt 回合
     fdf = Fighter("守方", 1, 1, 100000, 100000, bao=0.0)
-    fdf.tags["def_skills"] = tables["def"]
-    d1, exd = cengine.roll_defense_skills(fdf, 1000, _random.Random(3))
-    # 逐条独立判定：太阴 ×0.9 后混沌格挡 → 终值 0；cnt=2 的混沌体记账一次
-    assert d1 == 0 and any("受伤 ×0.9" in x for x in exd) and any("完全格挡" in x for x in exd), (d1, exd)
-    d2, exd2 = cengine.roll_defense_skills(fdf, 1000, _random.Random(3))
-    assert d2 == 0 and fdf.tags["skill_uses"]["混沌体"] == 0, (d2, exd2)   # 第二次后用尽
-    assert abs(fdf.effects["reflect"] - 0.5) < 1e-9   # 混沌体反弹写槽
+    fdf.tags["def_skills"] = [
+        {"name": "慢甲", "pr": 1, "beilv": 0.5, "优先级": 2, "msg1": "慢甲"},
+        {"name": "急挡", "pr": 1, "beilv": 0.0, "优先级": 1, "msg1": "急挡"},
+    ]
+    d1, exd = cengine.roll_defense_skills(fdf, 1000, _random.Random(3), action_index=1)
+    assert d1 == 0 and any("急挡" in x for x in exd) and not any("慢甲" in x for x in exd), (d1, exd)
+    fdf.tags["def_skills"] = [{"name": "缓兵", "pr": 1, "cnt": 2, "beilv": 0.5, "优先级": 1, "msg1": "缓兵"}]
+    assert cengine.roll_defense_skills(fdf, 1000, _random.Random(3), action_index=1)[0] == 1000
+    assert cengine.roll_defense_skills(fdf, 1000, _random.Random(3), action_index=2)[0] == 500
     # 治疗：出手前回血
     fh = Fighter("伤者", 1, 1, 100000, 100000, 0.0)
     fh.tags["heal_skills"] = tables["heal"]
@@ -7122,7 +7124,7 @@ async def main():
     assert bak52.exists() and bak52.stat().st_size > 0
     con52 = _sqlite52.connect(bak52)
     try:
-        assert con52.execute("SELECT version FROM db_info").fetchone()[0] == 19
+        assert con52.execute("SELECT version FROM db_info").fetchone()[0] == LATEST_DB_VERSION
     finally:
         con52.close()
     await db.backup_to(bak52)      # 同名不覆盖，自动加序号
@@ -9118,9 +9120,9 @@ async def main():
                 "CMD_XB_VOW", "CMD_XB_BOARD"]
     miss210 = [c for c in names210 if f"@filter.command({c}" not in src210]
     assert miss210 == [], f"漏注册：{miss210}"
-    assert "xb_mod.birth_settle(world" in src210 and "xb_mod.birth_trial(doc, world" in src210
-    assert "xb_mod.birth_open(doc, world" in src210 and "self._xb_grant(ops)" in src210
-    assert "xb_mod.birth_prize(p, op[" in src210
+    # 择主重写后：试炼/道心在 _xb_span 内实现，发放走 contest_grant_op + grant_treasure
+    assert "xb_mod.grant_treasure(" in src210 and "xb_mod.contest_grant_op(" in src210
+    assert "xb_mod.create_guardian(" in src210
     help210c = _json60.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
     assert any(g["group"] == "至宝出世 · 全服择主" for g in help210c)
     assert "至宝出世" in open(PLUGIN / "tests/gen_manual.py", encoding="utf-8").read()
@@ -10359,7 +10361,7 @@ async def main():
                     "W33-fix：墙正文+抢按钮合并单条 MD"):
         assert frag300 in src300, f"按钮追加点缺失：{frag300}"
     assert src300.count('W31：战败生死抉择按钮') == 2, "移动+选择两处战败按钮"
-    assert "_uk_btn(\"xb.t2\"" in src300 and "_uk_btn(\"xb.vow\"" in src300
+    assert "_uk_btn(\"xb.open\"" in src300 and "_uk_btn(\"xb.vow\"" in src300
     print("W30 MD+按钮 UI ok")
 
     # ========================================================= W33：原版 replyOfficialMessage 全量对齐

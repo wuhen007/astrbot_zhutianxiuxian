@@ -161,9 +161,24 @@ def _spend(f: Fighter, sk: Mapping) -> None:
         _uses(f)[name] = left - 1
 
 
-def try_heal_skills(f: Fighter, hp: list[int], idx: int, rng: random.Random, log: list[str]) -> None:
-    """出手前治疗技能：掷 pr → 回复 上限×回复比例（cnt 限次）。"""
+def _on_round(sk: Mapping, action_index: int | None) -> bool:
+    """原版 cnt 语义：指定第几回合触发（-1 = 每回合）。action_index 为空时不过滤。"""
+    if action_index is None:
+        return True
+    raw = sk.get("cnt", -1)
+    cnt = -1 if raw is None else int(raw)
+    return cnt == -1 or cnt == int(action_index)
+
+
+def try_heal_skills(f: Fighter, hp: list[int], idx: int, rng: random.Random,
+                    log: list[str], timing: str = "行动前") -> None:
+    """生机技能：按「触发时机」分流（原版 不灭经=行动前 / 者字秘=受击后）。
+
+    无「触发时机」字段的条目按行动前处理，兼容旧数据。
+    """
     for sk in f.tags.get("heal_skills") or []:
+        if str(sk.get("触发时机") or "行动前") != timing:
+            continue
         if _left(f, sk) == 0:
             continue
         pr = float(sk.get("pr", 0) or 0)
@@ -173,29 +188,32 @@ def try_heal_skills(f: Fighter, hp: list[int], idx: int, rng: random.Random, log
         gained = max(1, int(f.hp_max * ratio))
         if hp[idx] >= f.hp_max:
             continue
+        before = hp[idx]
         hp[idx] = min(f.hp_max, hp[idx] + gained)
         _spend(f, sk)
         log.append(f"【{sk.get('name')}】{sk.get('msg1', '')}"
-                   f"｜{f.name} 回复 {min(gained, f.hp_max - hp[idx] + gained):,}，血量 {hp[idx]}")
+                   f"｜{f.name} 回复 {hp[idx] - before:,}，血量 {hp[idx]}")
 
 
 def roll_attack_skills(
     atk_u: Fighter, def_u: Fighter, dmg: int, rng: random.Random,
     *, triggered: list[Mapping] | None = None, action_index: int | None = None,
+    type_gain: dict[str, int] | None = None,
 ) -> tuple[int, list[str]]:
-    """出手攻击技能：池内逐条独立掷 pr（对齐原版遍历判定）。
+    """出手攻击技能：池内逐条判定，同击最多 3 条（原版 count==3 中断）。
 
-    命中 → 伤害 ×beilv（钳 ≤50，法球不吃倍率）、控制=1 → 定身对手 1 回合、cnt 限次。
+    触发条件对齐原版：cnt 为「第几回合」（-1 每回合）+ 掷 pr。
+    命中 → 伤害 ×beilv + other（法球不吃倍率）、控制=1 → 定身、增量按攻击类型入桶。
     """
     extra: list[str] = []
     pool = atk_u.tags.get("atk_skills") or []
     shared_roll = rng.random() if pool and action_index is not None else None
     counter_shown = False
+    hits = 0
     for sk in pool:
-        if action_index is None:
-            if _left(atk_u, sk) == 0:
-                continue
-        elif int(sk.get("cnt", -1) or 0) not in (-1, action_index):
+        if hits >= 3:
+            break
+        if not _on_round(sk, action_index):
             continue
         pr = float(sk.get("pr", 0) or 0)
         if pr <= 0 or (shared_roll if shared_roll is not None else rng.random()) >= pr:
@@ -209,18 +227,56 @@ def roll_attack_skills(
         raw_b = sk.get("beilv")
         beilv = 1.0 if raw_b is None else float(raw_b)
         beilv = min(SKILL_BEILV_CAP, max(0.1, beilv))
+        before = dmg
         dmg = max(1, int(dmg * beilv + float(sk.get("other", 0) or 0)))
-        if action_index is None:
-            _spend(atk_u, sk)
+        if type_gain is not None:
+            key = str(sk.get("攻击类型") or "神通")
+            type_gain[key] = type_gain.get(key, 0) + (dmg - before)
         extra.append(f"【{sk.get('name')}】{sk.get('msg1', '')}（伤害 ×{beilv:g}）")
         if int(sk.get("控制", 0) or 0) > 0:
             extra.append(_apply_control(def_u, str(sk.get("name") or "控制技能"),
                                         str(sk.get("msg2") or "")))
         if triggered is not None:
             triggered.append(sk)
-            if action_index is not None and len(triggered) >= 3:
-                break
+        hits += 1
     return dmg, extra
+
+
+def type_multiplier(dmg: int, type_gain: Mapping[str, int] | None,
+                    atk_u: Fighter, def_u: Fighter) -> tuple[float, list[str]]:
+    """按「攻击类型」分桶求整体系数（原版类型桶）：基础伤害归神通，各自吃类型增伤/减免。
+
+    type_dealt / type_taken 由 loadout 从遗珍等来源写入；空表时返回 1.0，不改变数值。
+    """
+    gain = {str(k): int(v) for k, v in (type_gain or {}).items() if v}
+    if not gain:
+        return 1.0, []
+    dealt_by = atk_u.eff("type_dealt", {}) or {}
+    taken_by = def_u.eff("type_taken", {}) or {}
+    if not isinstance(dealt_by, Mapping) or not isinstance(taken_by, Mapping):
+        return 1.0, []
+    if not dealt_by and not taken_by:
+        return 1.0, []
+    base = max(1, int(dmg) - sum(gain.values()))
+    buckets = {"神通": base}
+    for t, v in gain.items():
+        buckets[t] = buckets.get(t, 0) + v
+    total = 0.0
+    plain = 0
+    notes: list[str] = []
+    for t, val in buckets.items():
+        if val <= 0:
+            continue
+        plain += val
+        up = float(dealt_by.get(t, 0) or 0)
+        down = float(taken_by.get(t, 0) or 0)
+        hit = val * (1 + up) * max(0.0, 1 - down)
+        total += hit
+        if up or down:
+            notes.append(f"【{t}】类型增伤 +{up:.0%} / 减免 -{down:.0%}")
+    if plain <= 0:
+        return 1.0, notes
+    return max(0.0, total / plain), notes
 
 
 def _apply_hit_effects(attacker, defender, hp, index, triggered, log):
@@ -255,31 +311,45 @@ def _tick_action_effects(unit, hp, index, log):
 
 
 def roll_defense_skills(
-    def_u: Fighter, dealt: int, rng: random.Random,
+    def_u: Fighter, dealt: int, rng: random.Random, *, action_index: int | None = None,
 ) -> tuple[int, list[str]]:
-    """受击防御技能：逐条掷 pr → 伤害 ×beilv（beilv=0 完全格挡）；护盾/反弹写效果槽。"""
+    """受击防御技能（原版语义）：按 优先级 升序，共享一次随机，命中一条即生效。
+
+    beilv ≤ 1 视为减伤率（原版封顶 95%），beilv = 0 完全格挡；护盾/反弹/负面转移随该条结算。
+    """
     extra: list[str] = []
-    for sk in def_u.tags.get("def_skills") or []:
-        if _left(def_u, sk) == 0:
+    pool = def_u.tags.get("def_skills") or []
+    if not pool:
+        return dealt, extra
+    shared = rng.random()
+    ordered = sorted(pool, key=lambda s: int(s.get("优先级", 999) or 999))
+    for sk in ordered:
+        if not _on_round(sk, action_index):
             continue
         pr = float(sk.get("pr", 0) or 0)
-        if pr <= 0 or rng.random() >= pr:
+        if pr <= 0 or shared >= pr:
             continue
-        _spend(def_u, sk)
         raw_b = sk.get("beilv")
-        beilv = 1.0 if raw_b is None else float(raw_b)   # beilv=0 合法：完全格挡（勿用 or 兜底）
+        beilv = 1.0 if raw_b is None else float(raw_b)   # beilv=0 合法：完全格挡
         if beilv <= 0:
-            extra.append(f"【{sk.get('name')}】{sk.get('msg1', '')}——完全格挡！")
             dealt = 0
+            extra.append(f"【{sk.get('name')}】{sk.get('msg1', '')}——完全格挡！")
         elif beilv < 1.0:
-            dealt = max(1, int(dealt * beilv))
-            extra.append(f"【{sk.get('name')}】{sk.get('msg1', '')}（{def_u.name} 受伤 ×{beilv:g}）")
+            dealt = max(1, int(dealt * max(0.05, beilv)))
+            extra.append(f"【{sk.get('name')}】{sk.get('msg1', '')}（{def_u.name} 受伤 ×{max(0.05, beilv):g}）")
+        else:
+            extra.append(f"【{sk.get('name')}】{sk.get('msg1', '')}")
         shield_add = int(sk.get("护盾值", 0) or 0)
         if shield_add > 0:
             def_u.effects["shield"] = int(def_u.eff("shield", 0) or 0) + shield_add
         rb = float(sk.get("反弹伤害", 0) or 0)
         if rb > 0:
             def_u.effects["reflect"] = max(float(def_u.eff("reflect", 0) or 0), rb)
+        sr = float(sk.get("持续减伤", 0) or 0)
+        if sr > 0 and int(sk.get("持续减伤回合", 0) or 0) > 0:
+            def_u.effects["damage_reduction"] = max(
+                float(def_u.eff("damage_reduction", 0) or 0), min(0.95, sr))
+        break
     return dealt, extra
 
 
@@ -387,7 +457,9 @@ def run_1v1(
         summon = max(0.0, float(atk_u.eff("summon_pct", 0) or 0))
         dmg += int(attack * summon)
         triggered: list[Mapping] = []
-        dmg, atk_extra = roll_attack_skills(atk_u, def_u, dmg, rng, triggered=triggered)
+        type_gain: dict[str, int] = {}
+        dmg, atk_extra = roll_attack_skills(atk_u, def_u, dmg, rng, triggered=triggered,
+                                           action_index=rnd, type_gain=type_gain)
         log.extend(atk_extra)
         _apply_hit_effects(atk_u, def_u, hp, j, triggered, log)
         unblockable = any(sk.get("不可防御") == 1 for sk in triggered)
@@ -398,8 +470,12 @@ def run_1v1(
         orb_dmg = (int(atk_u.atk * orb) if orb > 0 else 0)
         orb_dmg += max(0, int(atk_u.eff("orb_damage_flat", 0) or 0))
         dealt = dmg + orb_dmg
+        type_mult, type_notes = type_multiplier(dmg, type_gain, atk_u, def_u)
+        if type_mult != 1.0:
+            dealt = max(0, int(dealt * type_mult))
+            log.extend(type_notes)
         if not unblockable:
-            dealt, def_extra = roll_defense_skills(def_u, dealt, rng)
+            dealt, def_extra = roll_defense_skills(def_u, dealt, rng, action_index=rnd)
             log.extend(def_extra)
         damage_mult = max(0.0, float(atk_u.eff("dmg_dealt_mult", 1.0) or 0))
         damage_mult *= max(0.0, float(def_u.eff("dmg_taken_mult", 1.0) or 0))
@@ -421,6 +497,9 @@ def run_1v1(
         suffix += shield_note
         if dealt > 0:
             rage_stacks[j] = min(10, rage_stacks[j] + 1)
+        # 原版：受击后生机技能（者字秘等）按触发时机回血
+        if hp[j] > 0:
+            try_heal_skills(def_u, hp, j, rng, log, "受击后")
         if orb_dmg > 0:
             suffix += f"，法球 {orb_dmg}"
         line = (f"第{rnd}回合：{atk_u.name}出手，对{def_u.name}造成 {dealt} 点伤害"
@@ -531,15 +610,21 @@ def _team_strike(atk_u: Fighter, def_u: Fighter, rng: random.Random,
     orb = max(0.0, float(atk_u.eff("orb", 0) or 0))
     damage += int(atk_u.atk * orb) + max(0, int(atk_u.eff("orb_damage_flat", 0) or 0))
     triggered: list[Mapping] = []
+    type_gain: dict[str, int] = {}
     damage, attack_log = roll_attack_skills(atk_u, def_u, damage, rng,
-                                             triggered=triggered, action_index=action_index)
+                                             triggered=triggered, action_index=action_index,
+                                             type_gain=type_gain)
     log.extend(attack_log)
     _apply_hit_effects(atk_u, def_u, hp_table, def_idx, triggered, log)
+    type_mult, type_notes = type_multiplier(damage, type_gain, atk_u, def_u)
+    if type_mult != 1.0:
+        damage = max(0, int(damage * type_mult))
+        log.extend(type_notes)
     if not any(sk.get("不可防御") == 1 for sk in triggered):
         if _dodges_next_attack(def_u, rng):
             log.append(f"第{round_no}回合：{def_u.name}看穿攻势，避开一击")
             return 0
-        damage, defense_log = roll_defense_skills(def_u, damage, rng)
+        damage, defense_log = roll_defense_skills(def_u, damage, rng, action_index=action_index)
         log.extend(defense_log)
     damage_mult = max(0.0, float(atk_u.eff("dmg_dealt_mult", 1.0) or 0))
     damage_mult *= max(0.0, float(def_u.eff("dmg_taken_mult", 1.0) or 0))
@@ -555,6 +640,8 @@ def _team_strike(atk_u: Fighter, def_u: Fighter, rng: random.Random,
     damage -= absorbed
     hp_table[def_idx], damage, shield_note = _low_hp_shield(def_u, hp_table[def_idx], damage)
     def_u.hp = hp_table[def_idx]
+    if hp_table[def_idx] > 0:
+        try_heal_skills(def_u, hp_table, def_idx, rng, log, "受击后")
     if absorbed:
         log.append(f"【护盾】{def_u.name}吸收 {absorbed} 点伤害。")
     if shield_note:
@@ -726,10 +813,17 @@ def _raid_strike(
     orb_dmg += max(0, int(atk_u.eff("orb_damage_flat", 0) or 0))
     dmg = int((dmg + orb_dmg + int(atk_u.defense * 0.1))
               * float(atk_u.eff("dmg_dealt_mult", 1.0)))
-    dmg, atk_extra = roll_attack_skills(atk_u, def_u, dmg, rng)
+    type_gain: dict[str, int] = {}
+    pre_skill = dmg
+    dmg, atk_extra = roll_attack_skills(atk_u, def_u, dmg, rng, action_index=rnd,
+                                        type_gain=type_gain)
     log.extend(atk_extra)
+    type_mult, type_notes = type_multiplier(pre_skill, type_gain, atk_u, def_u)
+    if type_mult != 1.0:
+        dmg = max(0, int(dmg * type_mult))
+        log.extend(type_notes)
     dealt = dmg
-    dealt, def_extra = roll_defense_skills(def_u, dealt, rng)
+    dealt, def_extra = roll_defense_skills(def_u, dealt, rng, action_index=rnd)
     log.extend(def_extra)
     reduction = min(0.65, max(0.0, float(def_u.eff("damage_reduction", 0) or 0),
                       float(def_u.eff("time_river_damage_reduction", 0) or 0)))

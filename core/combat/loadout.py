@@ -231,6 +231,16 @@ def build_fighter(
         if rel["taken"] > 0:
             f.effects["dmg_taken_mult"] = max(0.5, float(f.eff("dmg_taken_mult", 1.0))
                                               * (1 - rel["taken"]))
+        if rel.get("dealt_by_type"):
+            cur = dict(f.eff("type_dealt", {}) or {})
+            for k, v in rel["dealt_by_type"].items():
+                cur[k] = float(cur.get(k, 0) or 0) + float(v)
+            f.effects["type_dealt"] = cur
+        if rel.get("taken_by_type"):
+            cur = dict(f.eff("type_taken", {}) or {})
+            for k, v in rel["taken_by_type"].items():
+                cur[k] = float(cur.get(k, 0) or 0) + float(v)
+            f.effects["type_taken"] = cur
         if rel["lifesteal"] > 0:
             f.effects["lifesteal"] = float(f.eff("lifesteal", 0.0)) + rel["lifesteal"]
         if rel["shield"] > 0:
