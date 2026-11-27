@@ -231,6 +231,11 @@ CMD_SIGN_RESET_ALL = "#重置全体签到记录"  # 原版 AutoDailyTask.resetAl
 CMD_TAX = "#交税"                    # 原版 MoneyOperation.MoneyWord（灵石销毁口）
 CMD_BG_RANK = "#赏金榜"              # 原版 Occupation.shangjingbang（全服赏金排行）
 CMD_BG_RANK_CLEAR = "#清空赏金榜"
+CMD_SQ_MINE = "#我的支线任务"          # 原版 zhixianrenwu（core/story_quest 三线，接线薄壳）
+CMD_SQ_DETAIL = "#支线任务详情"
+CMD_SQ_SUBMIT = "#提交支线任务"
+CMD_SQ_CHOICE = "#选择支线"
+CMD_ACH_VERIFY = "#验证自身成就"        # 原版 chegjiu.chengjiu1（扫描授予，achievements 模块救活）
 CMD_SECT_LIST = "#宗门列表"
 CMD_SECT_MINE = "#我的宗门"
 CMD_SECT_DONATE = "#宗门捐赠灵石"
@@ -27317,6 +27322,113 @@ class ZhutianPlugin(Star):
         await self.db.save_calamity(cal)
         yield event.plain_result("赏金榜已清空，江湖重新洗牌。")
 
+    @filter.command(CMD_SQ_MINE, "我的支线任务（隐藏支线进度总览）")
+    async def handle_sq_mine(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import story_quest as sq_mod
+        names = {1: sq_mod.TASK_ONE_NAME, 2: sq_mod.TASK_TWO_NAME, 3: sq_mod.TASK_THREE_NAME}
+        lines = ["--- 支线任务 ---"]
+        active = sq_mod.active_ids(doc)
+        if not active and not any(sq_mod.is_completed(doc, i) for i in names):
+            lines.append("暂无线索。某些奇遇（执念之物、异域来客）会悄然开启它们。")
+        for tid in active:
+            lines.append(f"· 【{names.get(tid, tid)}】进行中｜详情：{CMD_SQ_DETAIL}{tid}")
+        for tid in names:
+            rec = sq_mod.completed_record(doc, tid)
+            if rec:
+                lines.append(f"· 【{names[tid]}】已完成（{rec.get('at_text') or '已归档'}）")
+        if 3 in active:
+            lines.append("异域追杀为自动推进：抵达异域/战胜鹤无双化身都会写入进度。")
+        async for r in self._smart(event, chr(10).join(lines), "支线任务"):
+            yield r
+
+    @filter.command(CMD_SQ_DETAIL, "支线任务详情N")
+    async def handle_sq_detail(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import story_quest as sq_mod
+        tid = int(arg) if (arg or "").strip().isdigit() else 0
+        text = ""
+        if tid == 1:
+            text = sq_mod.detail_huayunfei(doc)
+        elif tid == 2:
+            text = sq_mod.detail_wangteng(doc)
+        elif tid == 3:
+            text = sq_mod.detail_foreign_hunt(doc)
+        if not text:
+            yield event.plain_result(f"没有进行中的支线 {arg or ''}。#我的支线任务 查看总览。")
+            return
+        async for r in self._smart(event, text, "支线详情"):
+            yield r
+
+    @filter.command(CMD_SQ_CHOICE, "选择支线N选项M")
+    @_serialized_player_command
+    async def handle_sq_choice(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import story_quest as sq_mod
+        m = re.match(r"^([123])选项([12])$", (arg or "").strip())
+        if not m:
+            yield event.plain_result(f"格式：{CMD_SQ_CHOICE} 1选项1（支线号 1-3，选项 1/2）")
+            return
+        tid, choice = int(m.group(1)), int(m.group(2))
+        if tid == 1:
+            ok, msg, delta = sq_mod.choose_huayunfei(doc, choice, doc.ext.get("linggen"))
+            if ok:
+                async with self.db.transaction():
+                    await self.db.save_player(doc.model_dump())
+                    for g, q in (delta or {}).items():
+                        if q:
+                            await self.db.add_items(doc.uid, {g: q}) if q > 0 else None
+            yield event.plain_result(msg)
+            return
+        if tid == 2:
+            ok, msg, delta = sq_mod.choose_wangteng(doc, choice, time.time())
+            if ok:
+                async with self.db.transaction():
+                    await self.db.save_player(doc.model_dump())
+                    for g, q in (delta or {}).items():
+                        if q > 0:
+                            await self.db.add_items(doc.uid, {g: q})
+            yield event.plain_result(msg)
+            return
+        yield event.plain_result("【异域追杀】无分支抉择——它随你的战与行自动推进。")
+
+    @filter.command(CMD_SQ_SUBMIT, "提交支线任务N")
+    @_serialized_player_command
+    async def handle_sq_submit(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import story_quest as sq_mod
+        tid = int(arg) if (arg or "").strip().isdigit() else 0
+        if tid != 3:
+            yield event.plain_result("1/2 号支线在分支抉择时即时结算，无需提交；3 号（异域追杀）在此提交。")
+            return
+        ok, msg, items = sq_mod.submit_foreign_hunt(doc, time.time())
+        if ok:
+            async with self.db.transaction():
+                await self.db.save_player(doc.model_dump())
+                if items:
+                    await self.db.add_items(doc.uid, items)
+        yield event.plain_result(msg)
+
     @filter.command(CMD_BG_RUMOR, "江湖传闻（每日随机 3 条）")
     async def handle_bg_rumor(self, event: AstrMessageEvent):
         day = time.strftime("%Y%m%d", time.gmtime(time.time() + 8 * 3600))
@@ -27402,6 +27514,41 @@ class ZhutianPlugin(Star):
                     reset += 1
         await self._adm_note(event, f"重置全体签到记录（{reset} 人）")
         yield event.plain_result(f"已重置全服签到记录（{reset} 人），今日可重新签到。")
+
+    @filter.command(CMD_ACH_VERIFY, "验证自身成就：扫描并授予已达成的成就")
+    @_serialized_player_command
+    async def handle_ach_verify(self, event: AstrMessageEvent):
+        """原版 chegjiu.js：扫描成就列表，达成的记入 ext["achievements"]（称号徽章，无实体奖励）。"""
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import achievements as ach_mod
+        catalog = self.content.table("item/成就列表") or []
+        result = ach_mod.scan_achievements(doc, catalog)
+        new_ids = [str(x) for x in (result.get("new_ids") or [])]
+        if new_ids:
+            owned = set(str(x) for x in (doc.ext.get("achievements") or []))
+            owned |= set(new_ids)
+            doc.ext["achievements"] = sorted(owned)
+            await self.db.save_player(doc.model_dump())
+        prog = result.get("progress") or {}
+        rows = {str(r.get("id")): r for r in catalog if isinstance(r, dict)}
+        lines = [f"--- 成就验证 ---",
+                 f"已达成 {prog.get('unlocked', 0)}/{prog.get('total', len(rows))}"
+                 f"（{prog.get('percent', 0)}%）"]
+        if new_ids:
+            names = [rows.get(x, {}).get("name", x) for x in new_ids]
+            lines.append("新授成就：" + "、".join(names))
+        else:
+            lines.append("本次扫描无新达成成就。")
+        by_type = prog.get("by_type") or {}
+        if by_type:
+            lines.append("分类：" + "｜".join(f"{k} {v}" for k, v in list(by_type.items())[:6]))
+        async for r in self._smart(event, chr(10).join(lines), "成就验证"):
+            yield r
 
     @filter.command(CMD_AT_RECORD, "签到记录（同自动任务状态）")
     async def handle_at_record(self, event: AstrMessageEvent):
