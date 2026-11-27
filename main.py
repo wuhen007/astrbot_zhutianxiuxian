@@ -137,6 +137,8 @@ CMD_FASHAN_GUARD_STOP = "#结束法身镇守永恒未知之地"
 CMD_GUARD = "#镇守永恒未知之地"
 CMD_GUARD_STOP = "#结束镇守永恒未知之地"
 CMD_GUARD_STATUS = "#永恒镇守状态"
+CMD_GUARD_STATUS_ALIAS = "#维度镇守状态"
+CMD_ERA_CONVERT = "#消耗纪元积累"          # 原版 zhengdaotixi.js jiyuanjilei（#转化纪元积累 同义）
 
 # W6-3：help.json 里「有文案无玩法」的指令，统一由 handle_extras 分发
 CMD_EXTRA_MAIN = "#基础帮助"
@@ -145,7 +147,8 @@ EXTRA_ALIASES = {
     "#职业帮助", "#诸天帮助", "#活动帮助", "#三周目帮助", "#无尽轮回帮助",
     "#灵根帮助", "#查看日志", "#传音给作者",
     "#命格图鉴", "#合成图鉴", "#兑换码图鉴", "#成就图鉴",
-    "#位面天骄图鉴", "#更新公告", "#公告网页",
+    "#位面天骄图鉴", "#更新公告", "#公告网页", "#更新内容",
+    "#修仙游玩说明", "#修仙引导", "#开始修仙", "#怎么玩修仙", "#传音状态",
     "#练气境界", "#炼体境界", "#我的练气",
     "#修仙助手", "#打散雷劫",
     "#灵市帮助", "#副本掉落", "#去", "#探索仙府",
@@ -223,6 +226,11 @@ CMD_FAIRY_ADDICT = "#沉迷仙境"
 CMD_SECT_CREATE = "#创建宗门"
 CMD_SECT_JOIN = "#加入宗门"
 CMD_SECT_QUIT = "#退出宗门"
+CMD_SECT_KICK = "#逐出师门"            # 原版 AssociationAdmin.Deleteuser（宗主踢人）
+CMD_SIGN_RESET_ALL = "#重置全体签到记录"  # 原版 AutoDailyTask.resetAllSignRecords（管理员）
+CMD_TAX = "#交税"                    # 原版 MoneyOperation.MoneyWord（灵石销毁口）
+CMD_BG_RANK = "#赏金榜"              # 原版 Occupation.shangjingbang（全服赏金排行）
+CMD_BG_RANK_CLEAR = "#清空赏金榜"
 CMD_SECT_LIST = "#宗门列表"
 CMD_SECT_MINE = "#我的宗门"
 CMD_SECT_DONATE = "#宗门捐赠灵石"
@@ -665,6 +673,7 @@ CMD_ANCIENT_PUSH = "#推进古文明事件"
 CMD_ANCIENT_CLAIM = "#领取古文明奖励"
 CMD_OSW = "#彼岸世界"
 CMD_OSW_LEAVE = "#离开彼岸世界"
+CMD_OSW_LEAVE_ALIAS = "#退出彼岸世界"
 CMD_OSW_STATUS = "#彼岸世界状态"
 CMD_OSW_COORD = "#彼岸坐标"
 CMD_OSW_OBSERVE = "#观测彼岸星图"
@@ -754,6 +763,8 @@ CMD_REIN_RELEASE = "#放弃执掌轮回路"
 CMD_REIN_STATUS = "#轮回路状态"
 CMD_REIN_TOGGLE = "#轮回往生输出切换"
 CMD_REIN_DROPS = "#遗落纳戒列表"
+CMD_REIN_ALLOW = "#准许往生"            # 原版 ZhuanshiTask.allowReincarnation（执掌者裁定）
+CMD_REIN_DENY = "#驳回往生"             # 原版 ZhuanshiTask.denyReincarnation
 CMD_REIN_NEAR = "#附近纳戒"
 CMD_REIN_LOOK = "#查询纳戒"
 CMD_REIN_PICK = "#捡取纳戒"
@@ -1323,6 +1334,17 @@ CMD_WORLD_HABITAT = "#小世界栖息地"
 CMD_WORLD_TOUR = "#图中巡游"
 # W8-D2：星阁 · 竞价拍卖（原版 Auction.js 8 + Auction2.js 8 = 16 条 rule；+ 帮助/规则 2 条补位）
 CMD_STALL = "#冲水堂"
+CMD_GRANT_POST = "#派单"                # 原版 apps/User/ItemGrant.js：群主发单，玩家本人私聊领取
+CMD_GRANT_REVOKE = "#撤单"
+CMD_GRANT_MINE = "#我的单"
+CMD_GRANT_CLAIM = "#领取"
+CMD_GRANT_REPORT = "#举报"
+CMD_CREATE_ALL = "#造化万物"
+CMD_TEACH_GONGFA = "#传授功法"           # 原版 zhengdaotixi.teachGongfa / teachAllGongfa
+CMD_LEARN_ALL = "#一键学习"              # 原版 UserSellAll.all_learn
+CMD_YC_EXCHANGE = "#瑶池兑换"            # 原版 UserHome.Buy_yaochi（源石价、职位门槛）
+CMD_YG_EXCHANGE = "#摇光兑换"            # 原版 UserHome.Buy_yaoguang
+CMD_EQUIP_ALL = "#一键装备"              # 原版 UserSellAll.all_zhuangbei
 CMD_STALL_SELL = "#上架"
 CMD_STALL_OFF = "#下架"
 CMD_STALL_BUY = "#选购"
@@ -3916,6 +3938,13 @@ class ZhutianPlugin(Star):
                 yield event.plain_result(
                     f"「{item_name}」已锁定，先发 {CMD_UNLOCK} {item_name} 再出售（正常使用不受影响）。")
                 return
+            from .core import item_grant as ig_mod
+            grant_locked = ig_mod.locked_of(doc).get(item_name, 0)
+            if grant_locked and held - grant_locked < qty:
+                yield event.plain_result(
+                    f"「{item_name}」中有 {grant_locked} 件来自发放单（到账即锁定自用），"
+                    f"可售 {max(0, held - grant_locked)} 件，不足 {qty}。")
+                return
             if held < qty:
                 yield event.plain_result(lack)
                 return
@@ -4168,6 +4197,126 @@ class ZhutianPlugin(Star):
     # ---- 装备 / 切磋 ----
 
     @_serialized_player_command
+    @filter.command(CMD_LEARN_ALL, "一键学习：参悟纳戒中全部未学功法")
+    @_serialized_player_command
+    async def handle_learn_all(self, event: AstrMessageEvent):
+        """原版 UserSellAll.all_learn：逐门参悟，同 #学习 口径（需持原本、每门静室灵石）。"""
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        learned = {str(x) for x in (doc.ext.get("gongfa") or [])}
+        cost = int(self._val("GONGFA_COST", 1000))
+        names = [n for n, q in inv.items() if q > 0
+                 and (self.item_index.get(n) or {}).get("class") == "功法" and n not in learned]
+        if not names:
+            yield event.plain_result("纳戒里没有可参悟的新功法。")
+            return
+        total_cost = cost * len(names)
+        if doc.stones < total_cost:
+            yield event.plain_result(f"静室灵石不足：共需 {total_cost:,}（{cost:,}×{len(names)} 门），当前 {doc.stones:,}。")
+            return
+        d = doc.model_copy(deep=True, update={"stones": doc.stones - total_cost})
+        d.ext["gongfa"] = sorted(learned | set(names))
+        async with self.db.transaction():
+            for n in names:
+                if not await self.db.remove_item(doc.uid, n, 1):
+                    raise RuntimeError("INSUFFICIENT")
+            await self.db.save_player(d.model_dump())
+        yield event.plain_result(
+            f"【一键参悟】新参悟 {len(names)} 门：{'、'.join(names[:8])}"
+            + (f" 等" if len(names) > 8 else "") + f"｜静室灵石 -{total_cost:,}。")
+
+    @filter.command(CMD_EQUIP_ALL, "一键装备：穿上纳戒中全部装备")
+    async def handle_equip_all(self, event: AstrMessageEvent):
+        """原版 UserSellAll.all_zhuangbei：逐件 wear，同槽替换旧装回纳戒。"""
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        inv = await self.db.get_inventory(doc.uid)
+        names = [n for n, q in inv.items() if q > 0
+                 and (self.item_index.get(n) or {}).get("class") == "装备"]
+        if not names:
+            yield event.plain_result("纳戒里没有可穿戴的装备。")
+            return
+        worn, swapped, failed = [], [], []
+        for n in names[:12]:
+            item = self.item_index.get(n)
+            ok, msg, old = equipment.wear(doc, item)
+            if not ok:
+                failed.append(f"{n}（{msg}）")
+                continue
+            worn.append(n)
+            if old:
+                swapped.append(old)
+        async with self.db.transaction():
+            for n in worn:
+                if not await self.db.remove_item(doc.uid, n, 1):
+                    raise RuntimeError("INSUFFICIENT")
+            if swapped:
+                await self.db.add_items(doc.uid, {n: 1 for n in swapped})
+            await self.db.save_player(doc.model_dump())
+        st = self._stats(doc)
+        lines = [f"【一键装备】穿戴 {len(worn)} 件：{'、'.join(worn) or '无'}"]
+        if failed:
+            lines.append("未穿上：" + "；".join(failed[:5]))
+        lines.append(f"当前属性：攻击 {st.atk} · 防御 {st.defense} · 血量 {st.hp}")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command(CMD_YC_EXCHANGE, "瑶池兑换（职位门槛，源石支付）", alias={CMD_YG_EXCHANGE})
+    async def handle_faction_exchange(self, event: AstrMessageEvent, arg: str = ""):
+        """原版 Buy_yaochi/Buy_yaoguang：本命势力专属商店，圣子/圣女免门槛。"""
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import faction as fc_mod
+        cmd_raw = (event.get_message_str() or "").strip()
+        faction_name = "瑶池圣地" if cmd_raw.startswith(CMD_YC_EXCHANGE) else "摇光圣地"
+        st = fc_mod.state_of(doc)
+        member = fc_mod.member_of(st, faction_name, doc.uid)
+        if not member:
+            yield event.plain_result(
+                f"此乃{faction_name}秘藏，非本门弟子不得兑换（先 #加入{'瑶池' if faction_name == '瑶池圣地' else '摇光'}）。")
+            return
+        table_path = ("item/势力商店/瑶池商店" if faction_name == "瑶池圣地"
+                      else "item/势力商店/摇光商店")
+        shop_rows = self.content.table(table_path) or []
+        spec = (arg or "").strip()
+        if not spec:
+            lines = [f"--- {faction_name}·秘藏 ---"]
+            lines += fc_mod.shop_list(shop_rows, str(member.get("position") or ""), faction_name)
+            lines.append(f"兑换：#{'瑶池' if faction_name == '瑶池圣地' else '摇光'}兑换 物品名（源石支付）")
+            async for r in self._smart(event, chr(10).join(lines), "势力兑换"):
+                yield r
+            return
+        name, _, qty_txt = spec.partition("*")
+        y = yuanshi.system_of(doc)
+        elite = str(member.get("position") or "") in fc_mod.ELITE_POSITIONS
+        price = next((int(r.get("出售价", 0) or 0) for r in shop_rows
+                      if isinstance(r, dict) and str(r.get("name")) == name.strip()), 0)
+        ok, msg, gains = fc_mod.shop_buy(
+            shop_rows, str(member.get("position") or ""), faction_name,
+            name.strip(), 1, int(y.get("amount", 0) or 0), elite=elite)
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        y["amount"] = int(y.get("amount", 0) or 0) - price
+        d = doc.model_copy(deep=True)
+        d.ext["yuanshi"] = y
+        async with self.db.transaction():
+            await self.db.save_player(d.model_dump())
+            await self.db.add_items(doc.uid, gains)
+        yield event.plain_result(msg)
+
     @filter.command(CMD_EQUIP, "穿戴装备")
     async def handle_equip(self, event: AstrMessageEvent, item_name: str = ""):
         if not self._allowed(event):
@@ -6351,7 +6500,7 @@ class ZhutianPlugin(Star):
         async for r in self._fashan_run(event, lambda d: fashan.stop_guard(d, now)):
             yield r
 
-    @filter.command(CMD_GUARD_STATUS)
+    @filter.command(CMD_GUARD_STATUS, alias={CMD_GUARD_STATUS_ALIAS})
     async def handle_guard_status(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
@@ -6361,6 +6510,23 @@ class ZhutianPlugin(Star):
             return
         msg = fashan.guard_text(doc, time.time())
         await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_ERA_CONVERT, "消耗/转化纪元积累", alias={"#转化纪元积累"})
+    @_serialized_player_command
+    async def handle_era_convert(self, event: AstrMessageEvent, arg: str = ""):
+        """原版 zhengdaotixi.jiyuanjilei：N 点纪元积累 → 修为+血气（1e8×权柄×境界×炼体）。"""
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        raw = re.sub(r"[＊×xX]", "*", (arg or "").strip()).lstrip("*").strip() or "1"
+        count = int(raw) if raw.isdigit() else 1
+        ok, msg = fashan.convert_era(doc, count)
+        if ok:
+            await self.db.save_player(doc.model_dump())
         yield event.plain_result(msg)
 
     # ---- 世界 Boss / 疗伤 ----
@@ -14898,7 +15064,7 @@ class ZhutianPlugin(Star):
         await self.db.save_player(d.model_dump())
         yield event.plain_result(msg)
 
-    @filter.command(CMD_ENDLESS_REROLL, "重置无尽能力")
+    @filter.command(CMD_ENDLESS_REROLL, alias={"#刷新无尽能力"})
     async def handle_endless_reroll(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
@@ -17969,6 +18135,28 @@ class ZhutianPlugin(Star):
                 await self.db.save_calamity(world)
         yield event.plain_result(msg)
 
+    @filter.command(CMD_REIN_ALLOW, "准许往生：轮回路执掌者裁定 @玩家", alias={CMD_REIN_DENY})
+    async def handle_rein_decide(self, event: AstrMessageEvent, target: str = ""):
+        """原版 ZhuanshiTask 裁定入口：allow/deny 走 rein_mod.decide（逻辑已备）。"""
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import reincarnation as rein_mod
+        target_uid = self._at_target(event)
+        if not target_uid:
+            yield event.plain_result(f"格式：{'#准许往生' if (event.get_message_str() or '').find(CMD_REIN_ALLOW) >= 0 else '#驳回往生'} @玩家")
+            return
+        world = await self.db.get_calamity()
+        decision = "allow" if CMD_REIN_ALLOW in (event.get_message_str() or "") else "deny"
+        ok, msg, receipt = rein_mod.decide(world, target_uid, doc, decision, time.time())
+        if ok and receipt is not None:
+            async with self.db.transaction():
+                await self.db.save_calamity(world)
+        yield event.plain_result(msg)
+
     @filter.command(CMD_REIN_DROPS, "遗落纳戒列表")
     async def handle_rein_drops(self, event: AstrMessageEvent):
         if not self._allowed(event):
@@ -18980,7 +19168,7 @@ class ZhutianPlugin(Star):
         async for r in self._smart(event, "\\n".join(lines), "彼岸世界"):
             yield r
 
-    @filter.command(CMD_OSW_LEAVE, "离开彼岸世界")
+    @filter.command(CMD_OSW_LEAVE, "离开彼岸世界", alias={CMD_OSW_LEAVE_ALIAS})
     async def handle_other_shore_leave(self, event: AstrMessageEvent):
         if not self._allowed(event):
             return
@@ -20259,6 +20447,58 @@ class ZhutianPlugin(Star):
         await self.db.save_player(d.model_dump())
         yield event.plain_result(f"已退出「{name}」，从此山高水远。")
 
+    @filter.command(CMD_TAX, "交税：销毁指定灵石（向天库纳税）")
+    @_serialized_player_command
+    async def handle_tax(self, event: AstrMessageEvent, arg: str = ""):
+        """原版 MoneyOperation.MoneyWord：#交税N 烧掉灵石，纯销毁口。"""
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        raw = (arg or "").strip()
+        if not raw.isdigit():
+            yield event.plain_result("格式：#交税 数量（销毁对应灵石，天库照单全收）")
+            return
+        amount = int(raw)
+        if amount <= 0 or doc.stones < amount:
+            yield event.plain_result(f"灵石不足：要交 {amount:,}，持有 {doc.stones:,}。")
+            return
+        doc.stones -= amount
+        await self.db.save_player(doc.model_dump())
+        yield event.plain_result(f"已向天库缴纳灵石 {amount:,}（天库：谢谢老板）。当前 {doc.stones:,}。")
+
+    @filter.command(CMD_SECT_KICK, "逐出师门：宗主移除成员")
+    async def handle_sect_kick(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        name = doc.ext.get("sect")
+        sect = await self.db.get_sect(name) if name else None
+        if not name or not sect or sect.get("master_uid") != doc.uid:
+            yield event.plain_result("只有宗主可以逐出弟子。")
+            return
+        target = self._at_target(event)
+        if not target:
+            yield event.plain_result(f"格式：{CMD_SECT_KICK} @弟子")
+            return
+        if str(target) == str(doc.uid):
+            yield event.plain_result("宗主不可逐出自己（要散伙请退位或解散）。")
+            return
+        tdoc_raw = await self.db.get_player(target)
+        if not tdoc_raw or (tdoc_raw.get("ext") or {}).get("sect") != name:
+            yield event.plain_result("对方不是本宗弟子。")
+            return
+        tdoc = PlayerDoc(**tdoc_raw)
+        tdoc.ext.pop("sect", None)
+        async with self.db.transaction():
+            await self.db.save_player(tdoc.model_dump())
+        yield event.plain_result(f"已将「{tdoc.name or target}」逐出师门，从此恩义两断。")
+
     @filter.command(CMD_SECT_LIST, "宗门列表")
     async def handle_sect_list(self, event: AstrMessageEvent):
         if not self._allowed(event):
@@ -20593,6 +20833,300 @@ class ZhutianPlugin(Star):
         row = self.item_index.get(str(name or "").strip())
         return str((row or {}).get("class") or "")
 
+    # ---- 道具发单与领取（公益防诈通道，原版 apps/User/ItemGrant.js） ----
+
+    def _grant_role_ok(self, event: AstrMessageEvent) -> bool:
+        """原版限定群主；跨平台角色能力不一，owner/admin 放行，未知角色降级放行（差异已标注）。"""
+        getter = getattr(event, "get_sender_role", None)
+        try:
+            role = str(getter() or "") if callable(getter) else ""
+        except Exception:
+            role = ""
+        return role in ("", "owner", "admin", "群主", "管理员")
+
+    @filter.command(CMD_GRANT_POST, "派单：群主发道具单，玩家本人私聊领取")
+    async def handle_grant_post(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        if not event.get_group_id():
+            yield event.plain_result("派单必须在群里发（让玩家能核对是谁发的），请回群操作。")
+            return
+        if not self._grant_role_ok(event):
+            yield event.plain_result("只有群主/管理员可以派单。")
+            return
+        target = self._at_target(event)
+        if not target:
+            yield event.plain_result("必须 @ 玩家派单：#派单 @某人 道具名[xN] 理由")
+            return
+        body = (arg or "").strip()
+        m = re.match(r"^(.+?)(?:[xX×＊*]\s*(\d+))?\s+(.*)$", body) or \
+            re.match(r"^(.+?)(?:[xX×＊*]\s*(\d+))?\s*$", body)
+        item = (m.group(1) if m else body).strip()
+        qty = int(m.group(2)) if (m and m.group(2)) else 1
+        reason = (m.group(3) if m else "").strip()
+        row = self.item_index.get(item)
+        if not row:
+            yield event.plain_result(f"没有「{item}」这个道具，请按游戏内名称填写。")
+            return
+        from .core import item_grant as ig_mod
+        state = ig_mod.defaults() | (await self.db.get_grant() or {})
+        ok, result = ig_mod.place_order(
+            state, str(event.get_sender_id()), str(target), item, qty, reason,
+            str(event.get_platform_id() or ""), str(event.get_group_id() or ""), time.time())
+        await self.db.save_grant(state)
+        if not ok:
+            yield event.plain_result(result)
+            return
+        o = state["orders"][result]
+        yield event.plain_result(
+            f"群主给你发了：{item} ×{o['qty']}（{result}）\n"
+            f"理由：{o['reason']}\n"
+            f"请本人私聊我发「{CMD_GRANT_CLAIM}」到账，7 天内有效。\n"
+            "本服公益免费，收费即骗子——道具本来就该免费给你。")
+
+    @filter.command(CMD_GRANT_REVOKE, "撤单：仅发单人、未领取时可撤")
+    async def handle_grant_revoke(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        oid = (arg or "").strip()
+        if not oid:
+            yield event.plain_result(f"格式：{CMD_GRANT_REVOKE} 单号（如 N-0001-8F3A3B）")
+            return
+        from .core import item_grant as ig_mod
+        state = ig_mod.defaults() | (await self.db.get_grant() or {})
+        ok, result = ig_mod.revoke_order(state, oid, str(event.get_sender_id()), time.time())
+        await self.db.save_grant(state)
+        if not ok:
+            yield event.plain_result(result)
+            return
+        yield event.plain_result(f"已撤销 {oid}：{result['item']} ×{result['qty']}，本周额度已退回。")
+
+    @filter.command(CMD_GRANT_MINE, "我的单：列出我名下的待领单")
+    async def handle_grant_mine(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        from .core import item_grant as ig_mod
+        state = ig_mod.defaults() | (await self.db.get_grant() or {})
+        pending = ig_mod.pending_of(state, str(event.get_sender_id()), time.time())
+        if not pending:
+            yield event.plain_result("当前没有待领取的道具。")
+            return
+        lines = ["--- 我的待领单 ---"]
+        for o in pending:
+            lines.append(f"· {o['item']}×{o['qty']}（{o['id']}｜来自 {o['group_id']}）｜理由：{o['reason']}")
+        lines.append(f"私聊我发「{CMD_GRANT_CLAIM}」一次性全部到账。")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command(CMD_GRANT_CLAIM, "领取：私聊本人一次结清名下待领单")
+    async def handle_grant_claim(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if event.get_group_id():
+            yield event.plain_result("领取请私聊我发送「#领取」，群里不刷流水。")
+            return
+        from .core import item_grant as ig_mod
+        state = ig_mod.defaults() | (await self.db.get_grant() or {})
+        ok, msg, delivered = ig_mod.claim_all(state, str(event.get_sender_id()), time.time())
+        if not ok:
+            yield event.plain_result(msg)
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result("请先私聊我发送「#踏入仙途」创建角色，再来领取。")
+            return
+        first = not doc.ext.get("grant_notice_seen")
+        lines = []
+        for o in delivered:
+            lines.append(f"【已到账】{o['item']} ×{o['qty']}（{o['id']}，已锁定自用）")
+            ig_mod.add_lock(doc, o["item"], o["qty"])
+        doc.ext["grant_notice_seen"] = True
+        await self.db.save_grant(state)
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            for o in delivered:
+                await self.db.add_items(doc.uid, {o["item"]: int(o["qty"])})
+        if first:
+            lines.append("本服公益运营，全程免费。机器人不会向你收费，也不会索要账号或验证码。\n"
+                         "凡以「代领/包过/内部渠道/出售道具」收费的，都是骗子。\n"
+                         "遇收费请截图发我，不必先付款。")
+        else:
+            lines.append("（公益防诈提醒：本服免费，收费即骗子。）")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command(CMD_GRANT_REPORT, "举报：收费/代领等违规行为留痕")
+    async def handle_grant_report(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        text = (arg or "").strip()
+        if not text:
+            yield event.plain_result(f"格式：{CMD_GRANT_REPORT} 内容（请附截图说明与相关单号/群）")
+            return
+        from .core import item_grant as ig_mod
+        state = ig_mod.defaults() | (await self.db.get_grant() or {})
+        ig_mod._log_event(state, "report", {"by": str(event.get_sender_id()),
+                                            "text": text[-200:], "at": time.time()})
+        await self.db.save_grant(state)
+        yield event.plain_result("举报已登记留痕，作者核账时会一并查看，感谢守护公益环境。")
+
+    @filter.command(CMD_CREATE_ALL, "造化万物：仙帝以现世承受力创造静态物品")
+    @_serialized_player_command
+    async def handle_create_everything(self, event: AstrMessageEvent, arg: str = ""):
+        """原版 zhengdaotixi.createEverything：承受力换造物，低承受力仙帝有祖反噬风险。"""
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import creation_everything as ce_mod, superdim as ss_mod, calamity as cal_mod
+        now = time.time()
+        rng = random.Random(f"{doc.uid}:ce:{int(now)}")
+        done = ce_mod.claim(doc, now)
+        out = []
+        if done:
+            cal = cal_mod.ensure(await self.db.get_calamity())
+            w = ss_mod.world_of(cal)
+            w["bearing"] = max(0, int(w.get("bearing", 0) or 0) - int(done["bearing_cost"]))
+            await self.db.save_calamity(cal)
+            backlash = ce_mod.apply_ancestral_backlash(
+                doc, int(done["authority_level"]), int(done["bearing_cost"]), rng.random(), now)
+            await self.db.add_items(doc.uid, {done["item"]: int(done["amount"])})
+            out.append(f"【造化万物·成】「{done['item']}」×{done['amount']} 已入纳戒"
+                       f"（承受力 -{done['bearing_cost']:,}）。")
+            if backlash:
+                out.append("【始祖反噬】承受力薄弱，仙路崩塌一境！万道印记黯淡，境界跌落。")
+        spec = (arg or "").strip()
+        if not spec:
+            async for r in self._smart(event, "\n".join(out) or "格式：#造化万物 物品名 [数量]", "造化万物"):
+                yield r
+            return
+        if ce_mod.action_of(doc):
+            out.append("已有一件造化万物行动，先领取再开新炉。")
+            async for r in self._smart(event, "\n".join(out), "造化万物"):
+                yield r
+            return
+        name, _, amt_txt = spec.partition(" ")
+        item = self.item_index.get(name.strip())
+        if not item:
+            out.append(f"没有「{name.strip()}」这个道具。")
+            async for r in self._smart(event, "\n".join(out), "造化万物"):
+                yield r
+            return
+        try:
+            q = ce_mod.quote(ce_mod.authority_level_of(doc), item,
+                             self.sell_item_index.get(item["name"]) or item,
+                             int(amt_txt) if amt_txt.strip().isdigit() else 1)
+        except ValueError as exc:
+            out.append(str(exc))
+            async for r in self._smart(event, "\n".join(out), "造化万物"):
+                yield r
+            return
+        cal = cal_mod.ensure(await self.db.get_calamity())
+        w = ss_mod.world_of(cal)
+        if int(w.get("bearing", 0) or 0) < int(q["bearing_cost"]):
+            out.append(f"现世承受力不足：需 {q['bearing_cost']:,}，当前 {int(w.get('bearing', 0) or 0):,}"
+                       f"（仙帝 #修复位面 可回补）。")
+            async for r in self._smart(event, "\n".join(out), "造化万物"):
+                yield r
+            return
+        ok, msg = ce_mod.begin(doc, item["name"], q, now)
+        out.append(msg)
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+            await self.db.save_calamity(cal)
+        async for r in self._smart(event, "\n".join(out), "造化万物"):
+            yield r
+
+
+    def _gongfa_tier(self, name: str) -> tuple[int, str]:
+        """功法名 → (层级, 类别)：查功法列表的 type 字段（原版 GONGFA_HIERARCHY 键）。"""
+        row = self.item_index.get(str(name or "").strip()) or {}
+        gtype = str(row.get("type") or row.get("class") or "")
+        from .core import gongfa_teaching as gt_mod
+        return gt_mod.gongfa_level(gtype), gtype
+
+    def _learner_aptitude(self, doc: PlayerDoc) -> str:
+        legacy = doc.ext.get("legacy_source") if isinstance(doc.ext.get("legacy_source"), dict) else {}
+        root = (doc.ext.get("linggen") if isinstance(doc.ext.get("linggen"), dict) else None) or legacy.get("灵根") or {}
+        return str(root.get("资质") or "平庸之资")
+
+    @filter.command(CMD_TEACH_GONGFA, "传授功法@玩家（带功法名单传，不带传全部可授）")
+    @_serialized_player_command
+    async def handle_teach_gongfa(self, event: AstrMessageEvent, arg: str = ""):
+        """原版 teachGongfa/teachAllGongfa：老师授学，学员扣潜力+灵石、判定领悟。"""
+        if not self._allowed(event):
+            return
+        teacher, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        target_uid = self._at_target(event)
+        if not target_uid:
+            yield event.plain_result("格式：#传授功法 @玩家 功法名｜#传授全部功法 @玩家")
+            return
+        if str(target_uid) == str(teacher.uid):
+            yield event.plain_result("不能传授给自己。")
+            return
+        from .core import gongfa_teaching as gt_mod
+        if not gt_mod.can_teach_gongfa(teacher):
+            yield event.plain_result("传功需权柄达到 12 档（先提升境界）。")
+            return
+        learned = [str(x) for x in (teacher.ext.get("gongfa") or [])]
+        if not learned:
+            yield event.plain_result("你还没有可传授的功法（先 #学习）。")
+            return
+        last = float(teacher.ext.get("gongfa_teach_at", 0) or 0)
+        cd = gt_mod.teaching_cooldown_hours(teacher) * 3600
+        if time.time() - last < cd:
+            left = int((cd - (time.time() - last)) // 60) + 1
+            yield event.plain_result(f"传功损耗未复（传功冷却 {gt_mod.TEACH_COOLDOWN_HOURS} 小时），约 {left} 分钟后再来。")
+            return
+        learner = await self.db.get_player(target_uid)
+        if not learner:
+            yield event.plain_result("对方尚未踏入仙途，无法传授。")
+            return
+        learner = PlayerDoc(**learner)
+        learner_known = {str(x) for x in (learner.ext.get("gongfa") or [])}
+        known = set(learned) & learner_known
+        teachable = [g for g in learned if g not in learner_known]
+        arg_names = [a for a in re.split(r"[\s,，、]+", (arg or "").strip()) if a and not a.startswith("@")]
+        want = [n for n in arg_names if n in learned] if arg_names else teachable
+        if not want:
+            yield event.plain_result("对方已会你所会的全部功法，或指定的功法你未掌握。")
+            return
+        results = []
+        taught_any = False
+        for name in want[:10]:
+            tier, gtype = self._gongfa_tier(name)
+            apt = self._learner_aptitude(learner)
+            rate = gt_mod.teaching_success_rate(tier, apt, gt_mod.learning_chance_multiplier(learner, time.time()))
+            costs = gt_mod.teaching_costs(tier, learner)
+            state = {"remaining_potential": int(learner.ext.get("potential", 0) or 0),
+                     "remaining_spirit": int(learner.stones or 0)}
+            res = gt_mod.reserve_teaching_costs(state, tier, learner)
+            if not res["ok"]:
+                lack = "潜力" if res["reason"] == "potential" else "灵石"
+                results.append(f"「{name}」：学员{lack}不足（需潜力 {costs['potential']:,}、灵石 {costs['spirit']:,}），未习得。")
+                continue
+            if random.random() < rate:
+                learner_known.add(name)
+                learner.ext["gongfa"] = sorted(learner_known)
+                learner.ext["potential"] = res["remaining_potential"]
+                learner.stones = res["remaining_spirit"]
+                results.append(f"「{name}」传授成功（{rate:.0%}）：学员耗潜力 {res['costs']['potential']:,}、灵石 {res['costs']['spirit']:,}。")
+                taught_any = True
+            else:
+                results.append(f"「{name}」传授未成（{rate:.0%}）——资历尚浅，再试几回。")
+        progress = gt_mod.teaching_count_progress(int(teacher.ext.get("gongfa_teach_count", 0) or 0),
+                                                  sum(1 for r in results if "成功" in r))
+        teacher.ext["gongfa_teach_count"] = progress["stored_count"]
+        teacher.ext["gongfa_teach_at"] = time.time()
+        async with self.db.transaction():
+            await self.db.save_player(teacher.model_dump())
+            await self.db.save_player(learner.model_dump())
+        head = f"【传授功法】@{learner.name or target_uid}（共 {len(results)} 门）"
+        yield event.plain_result(head + "\n".join(results))
+
     @filter.command(CMD_STALL_SELL, "上架到冲水堂")
     @_serialized_player_command
     async def handle_stall_sell(self, event: AstrMessageEvent, arg: str = ""):
@@ -20603,8 +21137,17 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         from .core import auction as auc_mod, exchange as ex_mod
+        from .core import item_grant as ig_mod
         w = ex_mod.world_of(await self.db.get_exchange())
         inv = await self.db.get_inventory(doc.uid)
+        head, _, rest = (arg or "").partition("*")
+        glock = ig_mod.locked_of(doc).get(head.strip(), 0)
+        qty_want = int(rest) if rest.strip().isdigit() else 1
+        held = int(inv.get(head.strip(), 0) or 0)
+        if glock and held - glock < qty_want:
+            yield event.plain_result(
+                f"「{head.strip()}」中有 {glock} 件来自发放单（锁定自用），不可上架。")
+            return
         ok, msg, taken, _notes = ex_mod.sell(w, doc, inv, arg, auc_mod.is_restricted, time.time())
         if not ok:
             yield event.plain_result(msg)
@@ -26728,12 +27271,51 @@ class ZhutianPlugin(Star):
         ok, msg, delta = bt_mod.assassinate(doc, inv, name, time.strftime("%Y%m%d", local),
                                             local.tm_hour, now,
                                             random.Random(f"{doc.uid}:assn:{int(now)}"))
+        ledger_world = None
+        if ok:
+            ledger_world = calamity.ensure(await self.db.get_calamity())
+            ledger = ledger_world.setdefault("bounty_ledger", {})
+            if not isinstance(ledger, dict):
+                ledger = ledger_world["bounty_ledger"] = {}
+            rec = ledger.setdefault(str(doc.uid), {"name": doc.name or doc.uid[:8], "kills": 0, "gold": 0})
+            rec["kills"] = int(rec.get("kills", 0) or 0) + 1
+            rec["gold"] = int(rec.get("gold", 0) or 0) + int((delta or {}).get("灵石", 0) or 0)
+            rec["name"] = doc.name or doc.uid[:8]
         async with self.db.transaction():
             await self.db.save_player(doc.model_dump())
+            if ledger_world is not None:
+                await self.db.save_calamity(ledger_world)
             for g, q in (delta or {}).items():
                 if q < 0:
                     await self.db.remove_item(doc.uid, g, -q)
         yield event.plain_result(msg)
+
+    @filter.command(CMD_BG_RANK, "赏金榜（全服刺杀战绩）")
+    async def handle_bg_rank(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        cal = calamity.ensure(await self.db.get_calamity())
+        ledger = cal.get("bounty_ledger") if isinstance(cal.get("bounty_ledger"), dict) else {}
+        if not ledger:
+            yield event.plain_result("赏金榜空空如也——尚无侠客出鞘。#悬赏榜 查看今日目标。")
+            return
+        rows = sorted(ledger.values(), key=lambda r: (-int(r.get("gold", 0) or 0), -int(r.get("kills", 0) or 0)))
+        lines = ["--- 赏金榜 ---"]
+        for i, r in enumerate(rows[:10], 1):
+            lines.append(f"{i}. {r.get('name')}｜刺杀 {int(r.get('kills', 0) or 0)} 次｜累计赏金 {int(r.get('gold', 0) or 0):,}")
+        yield event.plain_result("\n".join(lines))
+
+    @filter.command(CMD_BG_RANK_CLEAR, "清空赏金榜（管理员）")
+    async def handle_bg_rank_clear(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result(self._adm_deny())
+            return
+        cal = calamity.ensure(await self.db.get_calamity())
+        cal["bounty_ledger"] = {}
+        await self.db.save_calamity(cal)
+        yield event.plain_result("赏金榜已清空，江湖重新洗牌。")
 
     @filter.command(CMD_BG_RUMOR, "江湖传闻（每日随机 3 条）")
     async def handle_bg_rumor(self, event: AstrMessageEvent):
@@ -26792,6 +27374,34 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         yield event.plain_result(at_mod.record_text(doc))
+
+    @filter.command(CMD_SIGN_RESET_ALL, "重置全体签到记录（管理员）",
+                    alias={"#重置全体今日签到记录", "#全员重签"})
+    async def handle_sign_reset_all(self, event: AstrMessageEvent):
+        """原版 AutoDailyTask 重置入口：清全服 last_sign_date/连签，玩家可重签。
+
+        原版分「全部记录」与「今日记录」两条；本地签到状态仅 last_sign_date+连签，
+        两条合并为同一重置（差异已标注）。
+        """
+        if not self._allowed(event):
+            return
+        if not self._adm_ok(event):
+            yield event.plain_result(self._adm_deny())
+            return
+        reset = 0
+        async with self.db.transaction():
+            for raw in await self.db.all_players():
+                pd = PlayerDoc(**raw)
+                changed = False
+                for key in ("last_sign_date", "sign_streak", "sign_streak_count"):
+                    if key in pd.ext:
+                        pd.ext.pop(key, None)
+                        changed = True
+                if changed:
+                    await self.db.save_player(pd.model_dump())
+                    reset += 1
+        await self._adm_note(event, f"重置全体签到记录（{reset} 人）")
+        yield event.plain_result(f"已重置全服签到记录（{reset} 人），今日可重新签到。")
 
     @filter.command(CMD_AT_RECORD, "签到记录（同自动任务状态）")
     async def handle_at_record(self, event: AstrMessageEvent):

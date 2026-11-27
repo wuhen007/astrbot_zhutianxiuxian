@@ -904,3 +904,43 @@ def jian_vault_claim(doc: Any, kind: str, now: float,
            f"奖励等级：{grade}（每组 {mult} 份）\n"
            + "、".join(f"{k}×{v}" for k, v in gain.items()))
     return True, msg, gain, stones
+
+
+# ---------------------------------------------------------------- 势力兑换商店（原版 UserHome Buy_yaoguang/Buy_yaochi）
+
+SHOP_RANKS: dict[str, tuple[str, ...]] = {
+    "摇光圣地": ("记名弟子", "外门弟子", "内门弟子", "核心弟子", "真传弟子", "圣子", "圣女"),
+    "瑶池圣地": ("记名女弟子", "正式女弟子", "亲传女弟子", "真传女弟子", "圣女"),
+}
+
+
+def shop_list(shop_rows: list, member_position: str, faction_name: str) -> list[str]:
+    rows = [r for r in shop_rows if isinstance(r, Mapping)]
+    return [f"· {r.get('name')}｜{r.get('出售价', 0):,} 源石｜要求 {r.get('要求') or '无'}"
+            for r in rows]
+
+
+def shop_buy(shop_rows: list, member_position: str, faction_name: str,
+             item_name: str, quantity: int, yuanshi_have: int,
+             elite: bool = False) -> tuple[bool, str, dict]:
+    """势力商店兑换：势力/职位门槛 + 源石价格；圣子/圣女等 elite 免门槛（原版同）。"""
+    row = next((r for r in shop_rows if isinstance(r, Mapping)
+                and str(r.get("name")) == str(item_name or "").strip()), None)
+    if row is None:
+        names = "、".join(str(r.get("name")) for r in shop_rows if isinstance(r, Mapping))
+        return False, f"商店里没有「{item_name}」。可兑：{names}", {}
+    requirement = row.get("要求")
+    if requirement and not elite:
+        reqs = requirement if isinstance(requirement, list) else [requirement]
+        reqs = [str(x) for x in reqs]
+        if member_position not in reqs:
+            rank_req = min((SHOP_RANKS.get(faction_name, ()).index(r) for r in reqs
+                            if r in SHOP_RANKS.get(faction_name, ())), default=None)
+            rank_cur = (SHOP_RANKS.get(faction_name, ()).index(member_position)
+                        if member_position in SHOP_RANKS.get(faction_name, ()) else -1)
+            if rank_req is None or rank_cur < rank_req:
+                return False, f"「{row.get('name')}」要求职位：{'/'.join(reqs)}（当前 {member_position}）。", {}
+    price = int(row.get("出售价", 0) or 0)
+    if yuanshi_have < price:
+        return False, f"源石不足：「{row.get('name')}」需 {price:,}，持有 {yuanshi_have:,}。", {}
+    return True, f"兑换「{row.get('name')}」成功，扣除源石 {price:,}。", {str(row.get("name")): 1}

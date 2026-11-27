@@ -240,6 +240,32 @@ def spend_era(doc: Any, amount: int) -> int:
     return take
 
 
+ERA_CONVERT_BASE = 100_000_000   # 原版 zhengdaotixi.jiyuanjilei baseReward
+
+
+def convert_era(doc: Any, count: int) -> tuple[bool, str]:
+    """#消耗/转化纪元积累（原版 zhengdaotixi.js jiyuanjilei）：
+
+    N 点纪元积累 → 修为与血气各 +1e8 × max(1,权柄) × 练气境界 × 炼体境界。
+    """
+    from .extra_cultivation import realm_authority_level
+    count = max(1, int(count or 1))
+    if era_of(doc) < count:
+        return False, f"你的纪元积累不足！当前剩余：{era_of(doc)}，需要消耗：{count}"
+    authority = max(1, int(realm_authority_level(doc)))
+    realm = max(1, int(getattr(doc, "realm_index", 0) or 0) + 1)
+    body = max(1, int(getattr(doc, "physique_index", 0) or 0) + 1)
+    reward = int(ERA_CONVERT_BASE * authority * realm * body * count)
+    doc.exp = int(getattr(doc, "exp", 0) or 0) + reward
+    doc.ext["xueqi"] = int(doc.ext.get("xueqi", 0) or 0) + reward
+    doc.ext["era_points"] = era_of(doc) - count
+    efficiency = authority * realm * body * 100
+    return True, (f"【纪元积累转化】\n消耗 {count} 个纪元积累，获得：\n"
+                  f"修为：+{reward:,}\n血气：+{reward:,}\n"
+                  f"当前纪元积累剩余：{era_of(doc)}\n"
+                  f"（转化效率：{efficiency}%）")
+
+
 def condense_breakthrough(doc: Any, now: float) -> tuple[bool, str]:
     """路尽级仙帝突破自带法身凝聚（原版 Level.js:1389）：已凝聚则不重复发，不另扣凝聚资源。"""
     st = state_of(doc)
