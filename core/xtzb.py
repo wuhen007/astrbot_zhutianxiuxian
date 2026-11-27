@@ -5,7 +5,7 @@
 - `model/innateTreasure.js` 1114 行：**23 件**至宝目录（不是规划稿的 8 件）、24 个 CD key、
   全服唯一 `owners` 状态、17 个战斗钩子（只定义不在此文件调用）。
 - `apps/User/xiantianzhibao.js` **与先天至宝无关**，是「功极无相塔」玩法，本移植不搬。
-- `model/innateTreasureContest.js` 408 行：24h 择主之争评分逻辑（本移植简化为单人守护灵挑战）。
+- `model/innateTreasureContest.js` 408 行：24h 全服择主之争评分逻辑，由 realm_event.active[*].contest 持久化；另保留单人守护灵挑战入口。
 - 全服状态 `resources/data/innate_treasure_state.json`：
   `{owners, equipped, decree, landscapeRealms, eternalMap}`。
 
@@ -15,9 +15,8 @@
 2. **「待用」flag 原版无清理/消费点**，只在战斗钩子里被读。本移植将其实现为
    **6~24 小时蓄势窗口**（窗口内所有战斗生效），不做一次性消费——因为 `build_fighter`
    是纯读函数，在多处 PvE/PvP 入口被调用，回写会造成整档竞态。
-3. **原版 22 件本体靠 24h 全服「择主之争」发放**（冠军本体 / 2、3 名七日投影），
-   本移植没有全服定时事件，改为 `#至宝择主 <名>` 单人守护灵挑战 + 秘境投放「先天道痕」。
-   否则整套系统不可玩（与 W8-C1 本命材料同样的问题）。
+3. **原版本体靠 24h 全服「择主之争」发放**（冠军本体 / 2、3 名七日投影），
+   本移植将竞赛挂到 `realm_event.active[*].contest`；`#至宝择主 <名>` 单人守护灵挑战仍作为直接夺宝入口。
 4. **原版至宝本体固定三维 1 亿 / 全属性 100**，本移植境界基础 8e5~1e10，
    统一 **÷1000 折算**（`SCALE`），避免前期一件至宝碾压全境。
 5. 原版被动散落在 17 个战斗钩子（PVE 无视防御、速度、治疗、修炼倍率…），本移植

@@ -356,8 +356,23 @@ def inject_tianjiao_contestants(contest: dict[str, Any], treasure_name: str,
     options = options or {}
     profile = get_profile(treasure_name)
     excluded = set(options.get("excludeNames") or [])
-    pool = [tj for tj in (tianjiao_list or [])
-            if tj.get("名号") and tj.get("名号") not in excluded and float(tj.get("位面", 0) or 0) >= 2]
+    pool = []
+    for row in tianjiao_list or []:
+        name = str(row.get("名号") or row.get("name") or "")
+        # Python's existing 位面天骄.json uses {name, realm}; the original roster
+        # uses {名号, 位面}. Existing realm entries are already upper-realm contestants.
+        plane_level = row.get("位面", row.get("realm", 0))
+        try:
+            eligible = float(plane_level or 0) >= 2
+        except (TypeError, ValueError, OverflowError):
+            eligible = False
+        if not name or name in excluded or not eligible:
+            continue
+        pool.append({
+            **dict(row), "名号": name, "位面": plane_level,
+            "mijinglevel_id": row.get("mijinglevel_id", row.get("realm", 1)),
+            "xiangulevel_id": row.get("xiangulevel_id", row.get("realm", 1)),
+        })
     if not pool:
         return []
     max_count = min(int(options.get("count") or 3), len(pool))

@@ -31,7 +31,7 @@ class ContentStore:
         for path in sorted(self.data_dir.rglob("*.json")):
             rel = path.relative_to(self.data_dir).with_suffix("").as_posix()
             try:
-                with path.open("r", encoding="utf-8") as f:
+                with path.open("r", encoding="utf-8-sig") as f:
                     self.tables[rel] = json.load(f)
             except Exception as e:
                 logger.error(f"[zhutian] 加载 {rel} 失败，已跳过：{e}")

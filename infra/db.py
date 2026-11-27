@@ -12,7 +12,7 @@ from typing import Any, AsyncIterator, Optional
 
 import aiosqlite
 
-LATEST_DB_VERSION = 19
+LATEST_DB_VERSION = 20
 
 
 def _shanghai_date_key(ts: float) -> str:
@@ -177,6 +177,45 @@ class DataBase:
         await self.conn.execute("DELETE FROM combat_sessions WHERE session_id=?", (str(session_id),))
         await self.conn.commit()
 
+    @staticmethod
+    def _spar_session_record(duel: dict[str, Any], platform_id: str | None = None,
+                             group_id: str | None = None) -> dict[str, Any]:
+        record = dict(duel)
+        record.update({
+            "session_id": f"spar:{duel['id']}",
+            "platform_id": str(platform_id if platform_id is not None else duel.get("platform_id", "unknown")),
+            "group_id": str(group_id if group_id is not None else duel.get("group_id", "")),
+            "player_a": str(duel["a"]["uid"]),
+            "player_b": str(duel["b"]["uid"]),
+            "status": "done" if duel.get("phase") == "done" else "active",
+            "expires_at": float(duel.get("deadline", time.time())),
+        })
+        return record
+
+    @_serialized
+    async def get_spar(self, duel_id: str) -> dict[str, Any] | None:
+        """Read a persisted duel, falling back to the pre-v20 table."""
+        session = await self.get_combat_session(f"spar:{duel_id}")
+        if session is not None:
+            return session
+        assert self.conn is not None
+        async with self.conn.execute(
+            "SELECT doc FROM spar_duel WHERE id = ?", (str(duel_id),)
+        ) as cur:
+            row = await cur.fetchone()
+        return json.loads(row[0]) if row else None
+
+    async def create_spar(self, duel: dict[str, Any], platform_id: str,
+                          group_id: str = "") -> tuple[bool, str | None]:
+        """Atomically create a multi-round duel, rejecting busy players."""
+        return await self.create_combat_session(
+            self._spar_session_record(duel, platform_id, group_id),
+        )
+
+    async def save_spar(self, duel: dict[str, Any]) -> None:
+        """Persist an existing multi-round duel state and its current deadline."""
+        await self.save_combat_session(self._spar_session_record(duel))
+
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[aiosqlite.Connection]:
         """多语句事务；异常自动回滚。持写锁执行，期间其它写命令排队。"""
@@ -225,12 +264,13 @@ class DataBase:
                 await _v16_era(self.conn)
                 await _v17_tianjiao_faction(self.conn)
                 await _v18_qq_operations(self.conn)
-                await _v19_combat_sessions(self.conn)
+                await _v19_spar_duel(self.conn)
+                await _v20_combat_sessions(self.conn)
                 await self.conn.execute("INSERT INTO db_info (version) VALUES (?)", (LATEST_DB_VERSION,))
             return
 
         # 后续版本在此登记：MIGRATIONS[n] = upgrade_fn
-        MIGRATIONS = {2: _v2_inventory, 3: _v3_world_boss, 4: _v4_sects, 5: _v5_auction, 6: _v6_sect_score, 7: _v7_daily_tasks, 8: _v8_dark_boss, 9: _v9_raid, 10: _v10_rift, 11: _v11_calamity, 12: _v12_lingjie, 13: _v13_ancient, 14: _v14_other_shore, 15: _v15_market, 16: _v16_era, 17: _v17_tianjiao_faction, 18: _v18_qq_operations, 19: _v19_combat_sessions}
+        MIGRATIONS = {2: _v2_inventory, 3: _v3_world_boss, 4: _v4_sects, 5: _v5_auction, 6: _v6_sect_score, 7: _v7_daily_tasks, 8: _v8_dark_boss, 9: _v9_raid, 10: _v10_rift, 11: _v11_calamity, 12: _v12_lingjie, 13: _v13_ancient, 14: _v14_other_shore, 15: _v15_market, 16: _v16_era, 17: _v17_tianjiao_faction, 18: _v18_qq_operations, 19: _v19_spar_duel, 20: _v20_combat_sessions}
         for version in sorted(v for v in MIGRATIONS if v > current):
             async with self.transaction():
                 await MIGRATIONS[version](self.conn)
@@ -1556,7 +1596,15 @@ async def _v18_qq_operations(conn: aiosqlite.Connection) -> None:
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_item_grants_target ON item_grants(target_uid, claimed_at)")
 
 
-async def _v19_combat_sessions(conn: aiosqlite.Connection) -> None:
+async def _v19_spar_duel(conn: aiosqlite.Connection) -> None:
+    """Legacy persisted multi-round duel state retained for existing databases."""
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS spar_duel ("
+        " id TEXT PRIMARY KEY, doc TEXT NOT NULL)"
+    )
+
+
+async def _v20_combat_sessions(conn: aiosqlite.Connection) -> None:
     """持久化玩家交互切磋的选技与逐回合状态，支持重载恢复。"""
     await conn.execute(
         "CREATE TABLE IF NOT EXISTS combat_sessions ("

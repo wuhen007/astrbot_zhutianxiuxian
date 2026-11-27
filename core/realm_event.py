@@ -19,8 +19,8 @@
 - 原版 `RealmEvents` 整档 JSON + redis 锁 → `calamity_state["realm_event"]` 单例；帝关整档
   JSON → `calamity_state["imperial_pass"]`。db 恒 v17。
 - cron 触发 / 5 分钟检查 → 指令入口惰性 `maybe_spawn()` / `maybe_tick()`。
-- 专属玩法（圣地大战 14 条 / 秦门兵字秘 6 条 / 万化天魔传承 / 先天至宝择主之争）本移植
-  无底座 → 事件类型池剔除，保留 8 类通用参与事件；「先天灵宝出世」折为通用参与。
+- 圣地大战、秦门兵字秘仍未接入本事件档；万化天魔传承使用专属入口。
+  先天至宝择主之争挂在 `realm_event.active[*].contest`，参与时绕过通用修为奖励，过期后按试炼与道心结算。
 - 原版奖励里的 `mijinglevel_id`（秘境阶）改由独立额外境界状态提供，旧档缺字段时按现行境界投影迁移。
 - 帝关门槛使用独立秘境/仙古轨等级 (`mijinglevel_id>=13 || xiangulevel_id>=12`)
   （本移植「九天十地」位面门槛）。原版一次打 12~32 名天骄 → 折算 1 场聚合 `battle.spar`。
@@ -31,10 +31,14 @@
 from __future__ import annotations
 
 import time
+import random
+from copy import deepcopy
 from collections.abc import Mapping, Sequence
 from typing import Any
 
 from . import plane
+from . import xtzb_birth
+from .xtzb import CONTESTABLE
 
 # ---------------------------------------------------------------- 位面大事件常量
 
@@ -238,12 +242,28 @@ def prune(ev: dict, now: float) -> bool:
     return len(ev["active"]) != before
 
 
+def treasure_name_of(event: Mapping) -> str:
+    value = event.get("treasureName")
+    if not value:
+        treasure = event.get("treasure")
+        value = treasure.get("name") if isinstance(treasure, Mapping) else treasure
+    return str(value or "")
+
+
 def spawn_text(e: Mapping) -> str:
     if str(e.get("type")) == TIANMO_LEGACY_TYPE:
         return ("【万化天魔传承·万相魔冢】\n"
                 f"{e['plane']} › {e['location']}（{e['x']}, {e['y']}）裂开一道贯穿诸天的魔隙。\n"
                 "亿万残破灵根与众生本源在其中沉浮，唯有极道天魔可踏入，直面万灵怨胎。\n"
                 "抵达后发送「#进入万相魔冢」接受试炼；魔冢将在 24 小时后闭合。")
+    if str(e.get("type")) == "treasureAppear":
+        name = treasure_name_of(e) or "先天至宝"
+        profile = xtzb_birth.get_profile(name)
+        return ("【逆天机缘·先天至宝出世】\n"
+                f"异象现于 {e['plane']} › {e['location']}（{e['x']}, {e['y']}）。\n"
+                f"先天至宝【{name}】横空出世，{profile['omen']}\n"
+                "抵达精确坐标后发送「#观摩灵宝」，再发送「#夺宝」参加择主。\n"
+                "事件持续 24 小时；完成三种不同试炼并立下道心，结束后按公开评分择主。")
     return (f"【位面大事件 · {EVENT_NAMES.get(str(e['type']), '未知事件')}】\n"
             f"异象现于 {e['plane']} › {e['location']}（{e['x']}, {e['y']}）。\n"
             f"抵达精确坐标后发送「#参与位面大事件」，可发「#诸天大事件」查看全部。")
@@ -253,7 +273,9 @@ def maybe_spawn(ev: dict, world_year: int, era_index: int, now: float, rng: Any,
                 plane_data: Mapping, *, force: bool = False,
                 preferred: str | None = None,
                 exclude_types: Sequence[str] = (),
-                unavailable_planes: Sequence[str] = ()) -> tuple[str, bool]:
+                unavailable_planes: Sequence[str] = (),
+                treasure_names: Sequence[str] | None = None,
+                tianjiao_list: Sequence[Mapping[str, Any]] = ()) -> tuple[str, bool]:
     """惰性触发（原版 triggerRandomEvent 的折算）。返回 (广播文案, 是否变化)。"""
     prune(ev, now)
     if not ev["enabled"]:
@@ -270,6 +292,9 @@ def maybe_spawn(ev: dict, world_year: int, era_index: int, now: float, rng: Any,
     pool = weighted_types(era_index)
     used = {str(e.get("type")) for e in ev["active"]}
     excluded = {str(value) for value in exclude_types}
+    treasures = list(treasure_names) if treasure_names is not None else sorted(CONTESTABLE)
+    if not treasures:
+        excluded.add("treasureAppear")
     avail = [t for t in pool if t not in used and t not in excluded]
     if not avail:
         return "", False
@@ -278,6 +303,11 @@ def maybe_spawn(ev: dict, world_year: int, era_index: int, now: float, rng: Any,
     if not spot:
         return "", False
     e = make_event(kind, spot, now, world_year, rng)
+    if kind == "treasureAppear":
+        name = str(rng.choice(treasures))
+        e["treasureName"] = name
+        e["treasure"] = {"name": name, "rarity": "至宝", "desc": "先天至宝择主之争开启。", "power": 15}
+        ensure_treasure_contest(e, tianjiao_list=tianjiao_list, now=now, rng=rng)
     if force:
         e["source"] = "admin"
     ev["active"].append(e)
@@ -349,6 +379,20 @@ def join(ev: dict, uid: str, name: str, doc: Any, now: float) -> tuple[bool, str
     if not reached:
         spots = "；".join(f"{e['plane']} › {e['location']}（{e['x']}, {e['y']}）" for e in live[:3])
         return False, f"你尚未抵达任何大事件的精确坐标。可先发「#前往 x,y」赶路：{spots}。", 0
+    treasure = next((e for e in reached if str(e.get("type")) == "treasureAppear"), None)
+    if treasure is not None:
+        result = join_treasure_event(ev, treasure, uid, name, now)
+        if not result.get("ok"):
+            if result.get("reason") == "duplicate":
+                return False, "你已经参加本次择主之争，发送「#观摩灵宝」查看进度。", 0
+            return False, "这场先天至宝择主之争已经结束。", 0
+        contest = treasure.get("contest") or {}
+        return True, (
+            f"【{treasure_name_of(treasure) or '先天至宝'}·择主之争】\n"
+            f"你已在 {treasure['plane']} › {treasure['location']}（{treasure['x']}, {treasure['y']}）留下神识烙印。\n"
+            f"参与修士：{len(contest.get('participants') or {})} 人；可完成三种不同试炼并立下道心。\n"
+            "发送「#观摩灵宝」查看试炼与进度；事件结束后按公开评分择主。"
+        ), 0
     generic = [e for e in reached if str(e.get("type")) != TIANMO_LEGACY_TYPE]
     if not generic:
         return False, "万相魔冢需通过专属试炼获取传承，请发送「#进入万相魔冢」，不可使用通用参与奖励。", 0
@@ -383,6 +427,7 @@ def board_lines(ev: dict, now: float, world_year: int, era_name: str = "") -> li
         lines.append(f"· {EVENT_NAMES.get(str(e['type']), '未知事件')}｜"
                      f"{e['plane']} › {e['location']}（{e['x']}, {e['y']}）")
         command = ("#进入万相魔冢" if str(e.get("type")) == TIANMO_LEGACY_TYPE
+                   else "#夺宝" if str(e.get("type")) == "treasureAppear"
                    else "#参与位面大事件")
         lines.append(f"  剩余 {_left_text(e, now)}｜已参与 {len(e.get('participants') or [])} 人"
                      f"｜「{command}」")
@@ -416,6 +461,108 @@ def record_participant(ev: dict, event_id: str, uid: str) -> bool:
     for row in ev.get("history", []):
         if str(row.get("id") or "") == event_id:
             row["participants"] = list(participants)
+    return True
+
+
+# ---------------------------------------------------------------- 先天灵宝出世：择主赛事薄接线
+
+def _sync_treasure_event(ev: dict, event: dict) -> None:
+    """同步专属参与者到通用事件记录及历史快照。"""
+    event_id = str(event.get("id") or "")
+    contest = event.get("contest") or {}
+    participants = event.setdefault("participants", [])
+    for uid in (contest.get("participants") or {}):
+        if not str(uid).startswith("tianjiao:") and str(uid) not in participants:
+            participants.append(str(uid))
+    for row in ev.get("active", []) + ev.get("history", []):
+        if str(row.get("id") or "") == event_id and row is not event:
+            row["contest"] = deepcopy(contest)
+            row["participants"] = list(participants)
+
+
+def sync_treasure_event(ev: dict, event: dict) -> None:
+    """Synchronize a lazily initialized contest to the event-history snapshot."""
+    _sync_treasure_event(ev, event)
+
+
+def ensure_treasure_contest(event: dict, tianjiao_list=None, now=None, rng=None) -> dict:
+    """惰性初始化 treasureAppear 赛事；返回 contest。"""
+    if str(event.get("type")) != "treasureAppear":
+        return {}
+    contest = event.get("contest")
+    if not isinstance(contest, dict):
+        rng = rng or random
+        treasure = treasure_name_of(event) or str(rng.choice(sorted(CONTESTABLE)))
+        event["treasureName"] = treasure
+        seed = str(event.get("id") or "")
+        contest = xtzb_birth.contest_create(treasure, seed, now)
+        contest["expires_at"] = float(event.get("expires_at") or
+                                       (float(now if now is not None else time.time()) + xtzb_birth.TREASURE_CONTEST_DURATION))
+        event["contest"] = contest
+    if not contest.get("tianjiaoInjected") and tianjiao_list is not None:
+        xtzb_birth.inject_tianjiao_contestants(
+            contest, treasure_name_of(event) or "先天至宝",
+            tianjiao_list, {"now": now}, rng or random)
+        contest["tianjiaoInjected"] = True
+    return contest
+
+
+def _treasure_call(ev, event, func, *args, **kwargs):
+    contest = ensure_treasure_contest(event)
+    before = deepcopy(contest)
+    result = func(contest, *args, **kwargs)
+    if not result.get("ok"):
+        event["contest"] = before
+        return result
+    _sync_treasure_event(ev, event)
+    return result
+
+
+def join_treasure_event(ev, event, uid, name, now):
+    treasure = treasure_name_of(event) or "先天至宝"
+    return _treasure_call(ev, event, xtzb_birth.contest_join, uid, name, now,
+                          event.get("expires_at"))
+
+
+def record_treasure_trial(ev, event, uid, trial, options, rng):
+    options = dict(options or {})
+    options.setdefault("expires_at", event.get("expires_at"))
+    treasure = treasure_name_of(event) or "先天至宝"
+    return _treasure_call(ev, event, xtzb_birth.contest_trial, treasure, uid,
+                          trial, options, rng)
+
+
+def set_treasure_dao_heart(ev, event, uid, choice, now):
+    return _treasure_call(ev, event, xtzb_birth.contest_vow, uid, choice, now,
+                          event.get("expires_at"))
+
+
+def rank_treasure_event(event, event_seed=""):
+    contest = event.get("contest") or {}
+    return xtzb_birth.contest_rank(
+        contest, treasure_name_of(event) or "先天至宝",
+        event_seed or event.get("id") or contest.get("eventSeed") or "")
+
+
+def settle_treasure_event(ev, event, now):
+    contest = ensure_treasure_contest(event)
+    result = xtzb_birth.contest_settle(
+        contest, treasure_name_of(event) or "先天至宝",
+        event.get("id") or contest.get("eventSeed") or "", now,
+        event.get("expires_at"))
+    if result.get("ok"):
+        _sync_treasure_event(ev, event)
+    return result
+
+
+def mark_treasure_rewarded(ev, event, uid):
+    contest = ensure_treasure_contest(event)
+    rewarded = contest.setdefault("rewardedQqs", [])
+    uid = str(uid)
+    if uid in rewarded:
+        return False
+    rewarded.append(uid)
+    _sync_treasure_event(ev, event)
     return True
 
 
