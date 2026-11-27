@@ -7,7 +7,9 @@
 - 单人入口暂保留同步事件兼容；多人队伍按原版 15 分钟阶段状态机运行，含待援、献祭续战、敌人续血与阶段奖励。
   原版门槛按权柄 20。随机事件
   （遇敌三帝法身 → 走 1v1 引擎；悟道；拾遗；荒天帝传道）。
-- 奖励落点：修为/灵石/感悟值 + **岁月结晶**（ext["river_crystal"]，后续兑换接口预留）。
+- 奖励落点：修为/灵石/感悟值 + **岁月结晶**（ext["river"].crystal，后续兑换接口预留）+ **纪元积累**
+  （ext["era_points"]，走 fashan.add_era 封顶入账；原版每场阶段战结算，胜 3-5、败 1-2，
+  triad 胜 ×3，shijianchangheTask.js:477-482）。
 - 已知的时间长河技能数值和奖励沿用原版数据；当前额外体系模型不足处由状态层记载并报告。
 """
 
@@ -25,6 +27,9 @@ ATTR_RANGE = (1.5, 3.0)          # 原版 TIME_RIVER_ATTRIBUTE_RANGE
 CRYSTAL_TRIAD = (3, 5)           # 三帝胜利岁月沉淀
 CRYSTAL_HUANG = 15               # 荒天帝
 CRYSTAL_LOSE = 1
+ERA_WIN = (3, 5)                 # 原版 rollTimeRiverEraReward 胜利 3-5
+ERA_LOSE = (1, 2)                # 原版败退 1-2
+TRIAD_ERA_MULT = 3               # 原版 triad 阶段胜利 ×3（shijianchangheTask.js:478）
 TEACHING_PROF = 2
 TEACHING_MAX = 30
 
@@ -59,6 +64,12 @@ def check(doc: PlayerDoc, now: float) -> str | None:
 
 def _crystal_gain(rng: random.Random) -> int:
     return rng.randint(*CRYSTAL_TRIAD)
+
+
+def _grant_era(doc: PlayerDoc, amount: int) -> int:
+    """纪元积累封顶入账（fashan.add_era 为唯一实现，原版 addCappedEraAccumulation）。"""
+    from . import fashan as fashan_mod
+    return fashan_mod.add_era(doc, amount)
 
 
 def roam(doc: PlayerDoc, stats: Any, build_fighter_fn: Any, rng: random.Random,
@@ -110,12 +121,17 @@ def roam(doc: PlayerDoc, stats: Any, build_fighter_fn: Any, rng: random.Random,
             exp_g = 800_000 * (int(doc.realm_index) + 1)
             gains["crystal"] = c
             gains["exp"] = exp_g
-            lines.append(f"苍、鸿、羽三帝败退于长河——岁月沉淀 +{c}，修为 +{exp_g:,}。")
+            # 原版每场阶段战结算纪元积累：基础胜 3-5；本战对应 triad 阶段，胜利 ×3。
+            era_gained = _grant_era(doc, rng.randint(*ERA_WIN) * TRIAD_ERA_MULT)
+            lines.append(f"苍、鸿、羽三帝败退于长河——岁月沉淀 +{c}，修为 +{exp_g:,}，"
+                         f"纪元积累 +{era_gained}。")
         else:
             gains["crystal"] = CRYSTAL_LOSE
             losses = int(doc.exp * 0.1)
             gains["exp"] = -losses
-            lines.append(f"长河反噬，岁月沉淀 +{CRYSTAL_LOSE}，修为 -{losses:,}。")
+            era_gained = _grant_era(doc, rng.randint(*ERA_LOSE))
+            lines.append(f"长河反噬，岁月沉淀 +{CRYSTAL_LOSE}，修为 -{losses:,}，"
+                         f"纪元积累 +{era_gained}。")
         gains["hp"] = max(0, int(me_f.hp))
     elif roll < 0.70:
         # 悟道：观长河上游岁月（W7-5c：位面青睐 50 点换 +20% 感悟）
@@ -178,7 +194,9 @@ def roam(doc: PlayerDoc, stats: Any, build_fighter_fn: Any, rng: random.Random,
         name = teach_random_prof(doc, rng)
         if name:
             lines.append(f"传道落定：{name}")
-    header = f"【时间长河·终局战报】\n岁月沉淀：{int(st['crystal']):,}"
+    from . import fashan as fashan_mod
+    header = (f"【时间长河·终局战报】\n岁月沉淀：{int(st['crystal']):,}"
+              f"｜纪元积累 {fashan_mod.era_of(doc)}/{fashan_mod.ERA_CAP}")
     return header + "\n" + "\n".join(lines), gains
 
 
@@ -197,14 +215,16 @@ def teach_random_prof(doc: PlayerDoc, rng: random.Random) -> str | None:
 
 
 def text(doc: PlayerDoc) -> str:
+    from . import fashan as fashan_mod
     st = state_of(doc)
     return "\n".join([
         "--- 时间长河 ---",
         f"岁月沉淀：{int(st.get('crystal', 0) or 0):,}",
         f"荒天帝传道：{int(st.get('teachings', 0) or 0)}/{TEACHING_MAX} 次",
-        f"门槛：权柄 {GATE_AUTHORITY}/21｜同行阶段：15 分钟",
-        "组队：#组队时间长河 → #加入时间长河队伍 队伍编号 → #组队遨游时间长河",
-        "战败待援：#献祭魂与血 @战败玩家（需同灵根、额外体系至少一条成仙）。",
+        f"纪元积累：{fashan_mod.era_of(doc)}/{fashan_mod.ERA_CAP}",
+        f"门槛：权柄 {GATE_AUTHORITY}/21｜冷却 {ROAM_CD // 60} 分钟",
+        "河程遭遇战结算纪元积累（胜 3-5×3、败 1-2）；法身长河每阶段另结。",
+        "多人同行与战败献祭续战暂未开放。",
     ])
 
 # 多人同行状态机纯函数；AstrBot handler 负责在数据库事务内读改写世界状态并触发定时结算。

@@ -12,7 +12,7 @@ from typing import Any, AsyncIterator, Optional
 
 import aiosqlite
 
-LATEST_DB_VERSION = 20
+LATEST_DB_VERSION = 22
 
 
 def _shanghai_date_key(ts: float) -> str:
@@ -266,11 +266,13 @@ class DataBase:
                 await _v18_qq_operations(self.conn)
                 await _v19_spar_duel(self.conn)
                 await _v20_combat_sessions(self.conn)
+                await _v21_exchange(self.conn)
+                await _v22_universe(self.conn)
                 await self.conn.execute("INSERT INTO db_info (version) VALUES (?)", (LATEST_DB_VERSION,))
             return
 
         # 后续版本在此登记：MIGRATIONS[n] = upgrade_fn
-        MIGRATIONS = {2: _v2_inventory, 3: _v3_world_boss, 4: _v4_sects, 5: _v5_auction, 6: _v6_sect_score, 7: _v7_daily_tasks, 8: _v8_dark_boss, 9: _v9_raid, 10: _v10_rift, 11: _v11_calamity, 12: _v12_lingjie, 13: _v13_ancient, 14: _v14_other_shore, 15: _v15_market, 16: _v16_era, 17: _v17_tianjiao_faction, 18: _v18_qq_operations, 19: _v19_spar_duel, 20: _v20_combat_sessions}
+        MIGRATIONS = {2: _v2_inventory, 3: _v3_world_boss, 4: _v4_sects, 5: _v5_auction, 6: _v6_sect_score, 7: _v7_daily_tasks, 8: _v8_dark_boss, 9: _v9_raid, 10: _v10_rift, 11: _v11_calamity, 12: _v12_lingjie, 13: _v13_ancient, 14: _v14_other_shore, 15: _v15_market, 16: _v16_era, 17: _v17_tianjiao_faction, 18: _v18_qq_operations, 19: _v19_spar_duel, 20: _v20_combat_sessions, 21: _v21_exchange, 22: _v22_universe}
         for version in sorted(v for v in MIGRATIONS if v > current):
             async with self.transaction():
                 await MIGRATIONS[version](self.conn)
@@ -1615,4 +1617,22 @@ async def _v20_combat_sessions(conn: aiosqlite.Connection) -> None:
     await conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_combat_sessions_active_player "
         "ON combat_sessions(status, player_a, player_b, expires_at)"
+    )
+
+
+async def _v21_exchange(conn: aiosqlite.Connection) -> None:
+    """交易行：冲水堂挂单 + 聚宝堂委托（单例 JSON）。"""
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS exchange_state ("
+        " id INTEGER PRIMARY KEY CHECK (id = 1),"
+        " doc TEXT NOT NULL)"
+    )
+
+
+async def _v22_universe(conn: aiosqlite.Connection) -> None:
+    """仙王大宇宙：全服宇宙注册表（单例 JSON）。"""
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS universe_state ("
+        " id INTEGER PRIMARY KEY CHECK (id = 1),"
+        " doc TEXT NOT NULL)"
     )

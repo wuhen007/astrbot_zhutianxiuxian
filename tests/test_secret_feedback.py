@@ -52,7 +52,14 @@ class SecretFeedbackTests(unittest.TestCase):
         self.assertIsInstance(command.args[0], ast.Name)
         self.assertEqual(command.args[0].id, "CMD_SEARCH")
         self.assertEqual(command.args[1].value, "秘境寻宝")
-        self.assertNotIn("#" + "寻宝", source)
+        # 禁止注册裸命令「#寻宝」（会与寻宝五分支/秘境寻宝冲突）；前缀命令如 #寻宝挖矿 不受限。
+        self.assertNotIn("#" + "寻宝", constants.values())
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "command"):
+                for arg in node.args:
+                    if isinstance(arg, ast.Constant) and arg.value == "#" + "寻宝":
+                        self.fail("裸命令 #寻宝 不应注册")
 
     def test_state_mutating_single_player_handlers_use_the_player_lock(self):
         main_path = Path(__file__).resolve().parents[1] / "main.py"

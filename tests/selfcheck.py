@@ -2595,7 +2595,7 @@ async def main():
     from core import mingge as mg_mod  # noqa: E402
 
     table_m = store.table("item/命格词条")
-    assert len(table_m) == 75, len(table_m)
+    assert len(table_m) == 76, len(table_m)   # 0.1.7 补「折冠破妄」后全套 76 条
     rng_m = _random.Random(7)
     drawn = mg_mod.roll(store, rng_m)
     assert drawn and drawn.get("name") and "effects" in drawn, drawn

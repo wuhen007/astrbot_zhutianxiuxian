@@ -854,3 +854,53 @@ def jyh_rules() -> str:
         "",
         "触发：#造访剑云海（需主轨 42 境 + 剑云海令牌 ×1）",
     ])
+
+
+# ---------------------------------------------------------------- 剑云海双库
+
+JIAN_SECRET_STONES = 30_000_000
+JIAN_VAULT_STONES = 40_000_000
+JIAN_VAULTS = {
+    # kind: (名称, 源石, 固定组, 概率档次)
+    "secret": ("剑云海秘库", JIAN_SECRET_STONES,
+               ("众生仙钓", "剑云海圣药", "仙品秘境结算卡")),
+    "vault": ("剑宫宝库", JIAN_VAULT_STONES,
+              ("众生仙钓", "剑云海圣药", "圣品秘境结算卡")),
+}
+
+
+def _day_key(ts: float) -> str:
+    return time.strftime("%Y%m%d", time.gmtime(ts + 8 * 3600))
+
+
+def jian_vault_claim(doc: Any, kind: str, now: float,
+                     rng: Any | None = None) -> tuple[bool, str, dict[str, int], int]:
+    """剑云海弟子每日开启秘库/宝库：源石 + 三组物品 3/5 份，10% 额外 10 个超越宝盒。"""
+    rng = rng or random
+    if kind not in JIAN_VAULTS:
+        return False, "没有这个宝库。", {}, 0
+    title, stones, items = JIAN_VAULTS[kind]
+    ext = getattr(doc, "ext", None)
+    if not isinstance(ext, dict):
+        return False, "档案异常。", {}, 0
+    marks = ext.setdefault("jian_vault", {})
+    if not isinstance(marks, dict):
+        marks = ext["jian_vault"] = {}
+    day = _day_key(now)
+    if marks.get(kind) == day:
+        return False, f"【{title}禁令】今日已为尊驾开启，明日再来。", {}, 0
+    marks[kind] = day
+    mult, grade = 3, "【基础赏赐】"
+    roll = rng.random()
+    gain: dict[str, int] = {}
+    if roll >= 0.9:
+        mult, grade = 5, "【天选厚赐】"
+        gain["超越宝盒"] = 10
+    elif roll >= 0.7:
+        mult, grade = 5, "【鸿运嘉赏】"
+    for name in items:
+        gain[name] = gain.get(name, 0) + mult
+    msg = (f"【{title}·开启】\n作为剑云海传人，你获 {stones:,} 源石供奉。\n"
+           f"奖励等级：{grade}（每组 {mult} 份）\n"
+           + "、".join(f"{k}×{v}" for k, v in gain.items()))
+    return True, msg, gain, stones

@@ -43,6 +43,16 @@ GATE_TIERS: tuple[tuple[int, int], ...] = (
 )
 RARITY_BY_TIER = {"one": 2, "two": 4, "three": 6}
 
+# 真身位面沉迷（原版 SecretPlaceplus.js Gozhetian/Goxiajie/Gojiutianshidi）：
+# N 组 = 10N 轮；每轮分钟数来自原版 baseTime = i * 10 * {12, 10, 10}；
+# 资源按单程报价 ×10N 计，秘境之匙 N 把（岁云免费）。每轮判定沿用上苍式权柄胜率
+# （原版为遭遇战，本移植无逐轮战斗引擎，按 authority − Price 档位差折算）。
+PLANE_ADDICT_MINUTES: dict[str, int] = {"遮天位面": 12, "下界八域": 10, "九天十地": 10}
+PLANE_ADDICT_KINDS: tuple[str, ...] = tuple(PLANE_ADDICT_MINUTES)
+ADDICT_ROUNDS_PER_COUNT = 10
+ADDICT_MAX_COUNT = 12
+PLANE_ADDICT_KEY = "plane_addiction"
+
 # 原版 SecretPlace 的定时历练入口。此目录独立于逐层寻宝 TABLES，
 # 避免旧 #降临秘境 命令把定时玩法悄悄变成新的随机地层玩法。
 ORIGINAL_TABLES: dict[str, str] = {
@@ -259,6 +269,254 @@ def begin_original_expedition(
     return True, (f"已开始「{map_place}」历练，预计 {minutes} 分钟后归来；"
                   f"消耗 {action['price_paid']:,} 灵石、{action['experience_paid']:,} 修为、"
                   f"{action['xueqi_paid']:,} 血气、{action['shouyuan_paid']:,} 寿元。"), action
+
+
+def plane_addict_rate(doc: Any, row: Mapping) -> float:
+    """逐轮胜率：权柄 − Price 档位差折算（与上苍历练同式，钳 25%~90%）。"""
+    from . import authority
+    edge = int(authority.authority_of(doc)) - gate_of(int(row.get("Price", 0) or 0))
+    return max(0.25, min(0.90, 0.55 + edge * 0.02))
+
+
+def begin_plane_addiction(doc: Any, kind: str, place: str, count: int, now: float,
+                          content: Callable[[str], Any], rng: Any,
+                          *, free_entry: bool = False, keys: int = 0) -> tuple[bool, str]:
+    """真身位面沉迷（原版 Gozhetian/Goxiajie/Gojiutianshidi）：10N 轮队列，费用 10N 计。
+
+    境界/位面/灵根等门槛复用 original_entry_quote（free_entry 只免秘境之匙，不免资源，
+    与原版 entryKeys = 0 语义一致）。
+    """
+    if kind not in PLANE_ADDICT_KINDS:
+        return False, "该位面暂未开放沉迷连探。"
+    from . import plane as plane_mod
+    count = max(1, min(ADDICT_MAX_COUNT, int(count or 1)))
+    st = plane_mod.state_of(doc)
+    current = str(st.get("current") or plane_mod.DEFAULT_PLANE)
+    found = original_find(place, content)
+    if not found or found[1] != kind:
+        return False, f"没有找到「{place}」的{kind}地点。"
+    row, _kind = found
+    quote = original_entry_quote(doc, row, kind, current, free_entry=False)
+    if not quote.get("ok"):
+        return False, str(quote.get("reason") or "当前条件不满足。")
+    ext = getattr(doc, "ext", {}) or {}
+    if isinstance(ext.get(PLANE_ADDICT_KEY), Mapping):
+        return False, "已有进行中的位面沉迷，先发送原指令结算收获。"
+    mult = ADDICT_ROUNDS_PER_COUNT * count
+    price = int(quote.get("price", 0) or 0) * mult
+    experience = int(quote.get("experience", 0) or 0) * mult
+    xueqi = int(quote.get("xueqi", 0) or 0) * mult
+    shouyuan = int(quote.get("shouyuan", 0) or 0) * mult
+    if price and int(getattr(doc, "stones", 0) or 0) < price:
+        return False, f"没有灵石寸步难行，攒到 {price:,} 灵石才够哦～"
+    if experience and int(getattr(doc, "exp", 0) or 0) < experience:
+        return False, f"你需要积累 {experience:,} 修为，才能抵抗{kind}魔气！"
+    blood = int(ext.get("xueqi", 0) or 0)
+    if xueqi and blood < xueqi:
+        return False, f"血气不足：需 {xueqi:,}。"
+    if shouyuan:
+        try:
+            from . import lifespan
+            cur_sy = int(lifespan.shouyuan_of(doc))
+        except Exception:
+            cur_sy = int(ext.get("shouyuan", 0) or 0)
+        if cur_sy < shouyuan:
+            return False, "道友这点寿元就不要去了吧，免得原地坐化了。"
+    entry_keys = 0 if free_entry else max(1, int(count))
+    if entry_keys and int(keys or 0) < entry_keys:
+        return False, f"你需要 {entry_keys} 个秘境之匙才能沉迷此地。"
+    doc.stones = max(0, int(getattr(doc, "stones", 0) or 0) - price)
+    doc.exp = max(0, int(getattr(doc, "exp", 0) or 0) - experience)
+    if xueqi:
+        ext["xueqi"] = max(0, blood - xueqi)
+    if shouyuan:
+        try:
+            from .lifespan import spend as spend_sy
+            spend_sy(doc, shouyuan)
+        except Exception:
+            ext["shouyuan"] = max(1, int(ext.get("shouyuan", 0) or 0) - shouyuan)
+    rounds = ADDICT_ROUNDS_PER_COUNT * count
+    minutes = PLANE_ADDICT_MINUTES.get(kind, int(quote.get("minutes") or 10))
+    interval = minutes * 60
+    ext[PLANE_ADDICT_KEY] = {
+        "kind": kind, "place": str(row.get("name")), "row": dict(row),
+        "count": count, "rounds_total": rounds, "rounds_done": 0,
+        "interval": float(interval), "start_at": float(now),
+        "end_at": float(now) + rounds * interval,
+    }
+    doc.ext = ext
+    doc.state = "历练中"
+    doc.state_start = float(now)
+    cost_parts = [f"{label}×{amount:,}" for label, amount in
+                  (("灵石", price), ("修为", experience), ("血气", xueqi), ("寿元", shouyuan)) if amount]
+    if entry_keys:
+        cost_parts.append(f"秘境之匙×{entry_keys}")
+    return True, (f"开始沉迷{kind}「{row.get('name')}」×{count} 组：共 {rounds} 轮，"
+                  f"每轮 {minutes} 分钟（总 {minutes * rounds} 分钟），逐轮自动结算。\n"
+                  f"消耗 {'、'.join(cost_parts) or '无'}。\n"
+                  f"再次发送原指令或 #沉迷收获 查看进度并领取已到轮次。")
+
+
+def settle_plane_addiction(doc: Any, now: float, rng: Any) -> tuple[bool, str, dict[str, int]]:
+    """逐轮结算到期的位面沉迷轮次；战败即停（已结算轮次不回滚），全部完成清队。"""
+    ext = getattr(doc, "ext", {}) or {}
+    rec = ext.get(PLANE_ADDICT_KEY)
+    if not isinstance(rec, Mapping) or not rec.get("rounds_total"):
+        return False, "", {}
+    interval = max(60.0, float(rec.get("interval") or 600))
+    start_at = float(rec.get("start_at") or now)
+    total = max(1, int(rec["rounds_total"]))
+    done = max(0, int(rec.get("rounds_done") or 0))
+    due = min(total, int((now - start_at) // interval))
+    if due <= done:
+        left = max(0, int((start_at + interval * total) - now))
+        return False, (f"【{rec.get('kind')}·{rec.get('place')}】沉迷进行中 "
+                       f"{done}/{total} 轮，还需约 {left // 60} 分钟。"), {}
+    from . import secret as secret_mod, authority
+    row = rec.get("row") if isinstance(rec.get("row"), Mapping) else {"name": rec.get("place")}
+    kind = str(rec.get("kind") or "")
+    realm_id = max(1, int(getattr(doc, "realm_index", 0) or 0) + 1)
+    body_id = max(1, int(getattr(doc, "physique_index", 0) or 0) + 1)
+    rate = plane_addict_rate(doc, row)
+    gains: dict[str, int] = {}
+    exp_sum = xueqi_sum = 0
+    defeated = False
+    rounds_played = 0
+    for _ in range(due - done):
+        loot = secret_mod.original_drop(row, rng)
+        won = rng.random() < rate
+        delta = secret_mod.original_settlement(
+            won, {"kind": kind, "loot": loot}, realm_id, body_id, rng)
+        exp_sum += int(delta.get("exp", 0) or 0)
+        xueqi_sum += int(delta.get("xueqi", 0) or 0)
+        for name, qty in (delta.get("items") or {}).items():
+            gains[str(name)] = gains.get(str(name), 0) + max(0, int(qty or 0))
+        rounds_played += 1
+        if not won:
+            defeated = True
+            break
+    doc.exp = max(0, int(getattr(doc, "exp", 0) or 0) + exp_sum)
+    if xueqi_sum:
+        ext["xueqi"] = max(0, int(ext.get("xueqi", 0) or 0) + xueqi_sum)
+    rec["rounds_done"] = done + rounds_played
+    place = str(rec.get("place"))
+    body = "、".join(f"{k}×{v}" for k, v in gains.items()) or "空手而归"
+    if defeated:
+        doc.ext["hp"] = 1
+        doc.state = "空闲"
+        doc.state_start = 0.0
+        ext.pop(PLANE_ADDICT_KEY, None)
+        doc.ext = ext
+        return True, (f"【{kind}·{place}】沉迷第 {rec['rounds_done']}/{total} 轮战败："
+                      f"你在{place}被击退，气血降至 1，剩余轮次中止（已结算奖励保留）。\n{body}"
+                      + (f"\n修为 +{exp_sum:,}｜血气 +{xueqi_sum:,}" if exp_sum or xueqi_sum else "")), gains
+    if rec["rounds_done"] >= total:
+        doc.state = "空闲"
+        doc.state_start = 0.0
+        ext.pop(PLANE_ADDICT_KEY, None)
+        doc.ext = ext
+        return True, (f"【{kind}·{place}】沉迷完成（{total} 轮）：\n{body}"
+                      + (f"\n修为 +{exp_sum:,}｜血气 +{xueqi_sum:,}" if exp_sum or xueqi_sum else "")), gains
+    left = max(1, int((start_at + interval * total - now) // 60) + 1)
+    return True, (f"【{kind}·{place}】沉迷进度 {rec['rounds_done']}/{total} 轮，本轮收获：\n{body}"
+                  + (f"\n修为 +{exp_sum:,}｜血气 +{xueqi_sum:,}" if exp_sum or xueqi_sum else "")
+                  + f"\n剩余约 {left} 分钟自动结算。"), gains
+
+
+def plane_addict_status(doc: Any, now: float) -> str:
+    ext = getattr(doc, "ext", {}) or {}
+    rec = ext.get(PLANE_ADDICT_KEY)
+    if not isinstance(rec, Mapping) or not rec.get("rounds_total"):
+        return ""
+    left = max(0, int((float(rec.get("start_at") or now)
+                       + float(rec.get("interval") or 600) * int(rec["rounds_total"])) - now))
+    return (f"{doc.name or doc.uid}正在沉迷{rec.get('kind')}「{rec.get('place')}」，"
+            f"进度 {int(rec.get('rounds_done') or 0)}/{int(rec['rounds_total'])} 轮，"
+            f"约 {left // 60} 分钟后全部归来。")
+
+
+def begin_sect_addiction(doc: Any, place: str, count: int, now: float,
+                         content: Callable[[str], Any], *, keys: int = 0) -> tuple[bool, str]:
+    """沉迷宗门秘境（原版 BlessPlace.js Go_Guild_Secretsplus）。
+
+    费用 Price×10×N 灵石、秘境之匙 N 把（硬性要求）、其中 5% 入宗门灵石池；
+    共 10N 轮，总时长 N×10×5+10 分钟。结算复用 settle_plane_addiction 同一队列槽。
+    """
+    sect_table = content("item/副本/宗门秘境") or []
+    row = next((r for r in sect_table
+                if isinstance(r, Mapping) and str(r.get("name")) == str(place or "").strip()), None)
+    if row is None:
+        names = "、".join(str(r.get("name")) for r in sect_table if isinstance(r, Mapping))
+        return False, f"没有「{place}」这处宗门秘境。可选：{names}"
+    ext = getattr(doc, "ext", {}) or {}
+    if isinstance(ext.get(PLANE_ADDICT_KEY), Mapping):
+        return False, "已有进行中的位面沉迷，先发送原指令结算收获。"
+    count = max(1, min(ADDICT_MAX_COUNT, int(count or 1)))
+    price = int(row.get("Price", 0) or 0) * ADDICT_ROUNDS_PER_COUNT * count
+    if price and int(getattr(doc, "stones", 0) or 0) < price:
+        return False, f"没有灵石寸步难行，攒到 {price:,} 灵石才够哦～"
+    if int(keys or 0) < count:
+        return False, f"你没有足够数量的秘境之匙（需 {count} 把）。"
+    doc.stones = max(0, int(getattr(doc, "stones", 0) or 0) - price)
+    rounds = ADDICT_ROUNDS_PER_COUNT * count
+    total_minutes = count * ADDICT_ROUNDS_PER_COUNT * 5 + 10   # 原版 i*10*5+10 分钟
+    interval = round(total_minutes * 60 / rounds, 1)
+    ext[PLANE_ADDICT_KEY] = {
+        "kind": "宗门秘境", "place": str(row.get("name")), "row": dict(row),
+        "count": count, "rounds_total": rounds, "rounds_done": 0,
+        "interval": float(interval), "start_at": float(now),
+        "end_at": float(now) + total_minutes * 60,
+    }
+    doc.ext = ext
+    doc.state = "历练中"
+    doc.state_start = float(now)
+    return True, (f"开始探索「{row.get('name')}」宗门秘境 ×{count} 组：共 {rounds} 轮，"
+                  f"总时长 {total_minutes} 分钟，逐轮自动结算。\n"
+                  f"消耗 灵石 {price:,}、秘境之匙×{count}（其中 {int(price * 0.05):,} 灵石注入宗门灵石池）。"
+                  f"\n再次发送原指令或 #沉迷收获 查看进度并领取已到轮次。")
+
+
+def settle_original_expedition(doc: Any, now: float, rng: Any) -> tuple[bool, str, dict[str, int]]:
+    """结算到期的单次定时历练（begin_original_expedition 所建 ext["original_expedition"]）。
+
+    原版历练归来即一场遭遇战；本移植无逐轮战斗引擎，按 plane_addict_rate 权柄胜率判定。
+    """
+    ext = getattr(doc, "ext", {}) or {}
+    act = ext.get("original_expedition")
+    if not isinstance(act, Mapping) or not act.get("ends_at"):
+        return False, "", {}
+    ends = float(act["ends_at"])
+    if now < ends:
+        left = int(ends - now)
+        return False, (f"「{act.get('place')}」历练中，还需 {left // 60} 分 {left % 60} 秒。"), {}
+    from . import secret as secret_mod
+    row = act.get("row") if isinstance(act.get("row"), Mapping) else {"name": act.get("place")}
+    won = rng.random() < plane_addict_rate(doc, row)
+    realm_id = max(1, int(getattr(doc, "realm_index", 0) or 0) + 1)
+    body_id = max(1, int(getattr(doc, "physique_index", 0) or 0) + 1)
+    delta = secret_mod.original_settlement(won, act, realm_id, body_id, rng)
+    exp_gain = int(delta.get("exp", 0) or 0)
+    xueqi_gain = int(delta.get("xueqi", 0) or 0)
+    doc.exp = max(0, int(getattr(doc, "exp", 0) or 0) + exp_gain)
+    if xueqi_gain:
+        ext["xueqi"] = max(0, int(ext.get("xueqi", 0) or 0) + xueqi_gain)
+    gains = {str(k): max(0, int(v or 0)) for k, v in (delta.get("items") or {}).items()}
+    place = str(act.get("place"))
+    kind = str(act.get("kind") or "")
+    ext.pop("original_expedition", None)
+    doc.state = "空闲"
+    doc.state_start = 0.0
+    doc.ext = ext
+    if won:
+        item_name = str(delta.get("item_name") or "")
+        msg = (f"【{kind}·{place}】历练归来：胜利！\n"
+               + (f"战利：{item_name}×{delta.get('item_count', 0)}\n" if item_name else "")
+               + f"修为 +{exp_gain:,}｜血气 +{xueqi_gain:,}")
+    else:
+        doc.ext["hp"] = 1
+        msg = (f"【{kind}·{place}】历练归来：败。被地点生灵击退，气血降至 1。\n"
+               f"修为 +{exp_gain:,}")
+    return True, msg, gains
 
 
 def original_palace_map(rng: random.Random) -> dict[str, Any]:

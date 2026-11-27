@@ -548,7 +548,8 @@ def record_result(s: dict, target_name: str, win: bool, now: float) -> dict:
 
 
 def dispose(s: dict, kind: str, target_s: dict, now: float,
-            target_snapshot: dict | None = None, target_realm: int = 0) -> tuple[bool, str, dict, dict]:
+            target_snapshot: dict | None = None, target_realm: int = 0,
+            master: Mapping | None = None) -> tuple[bool, str, dict, dict]:
     """处置战果。返回 (ok, msg, 自己档, 对方档变更)。
 
     W8-F6：新增两个可选参数，供人傀链写遗蜕快照 / 开放夺果；不传时保持 B5 旧行为。
@@ -569,7 +570,8 @@ def dispose(s: dict, kind: str, target_s: dict, now: float,
         s["pending"] = None
         return True, (f"你在{tname}的真灵上烙下魂印！\n"
                       f"{tname} 魂印缠身 3 天（闭关效率 -30%）；你获魂奴「{tname}」（三维 +10%，3 天）。"), s, {
-            "brand": {"until": now + BRAND_DURATION, "by": "镇魂"},
+            "brand": {"until": now + BRAND_DURATION, "by": "镇魂",
+                      "master": dict(master or {})},
             "protected_until": now + PROTECTION,
         }
     if kind == "灭魂":
@@ -658,3 +660,94 @@ def panel(s: Mapping, now: float) -> str:
                  f"｜魔石供奉：#供奉魔石")
     lines.append("#镇魂 @目标（魔道 100+ / 境界 30+ / 无 7 天保护）｜#修炼魔功｜#冲击魂印")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------- 万相魔冢
+
+TOMB_COOLDOWN = 0          # 原版按「事件时间戳」去重，无固定 CD；本地置 0 表示不限
+TOMB_ATK_RATE = 0.8        # 原版 createTianmoTrialOpponent
+TOMB_DEF_RATE = 0.75
+TOMB_HP_RATE = 0.9
+
+
+def tomb_gate(doc: Any, now: float) -> tuple[bool, str]:
+    """万相魔冢准入：极道天魔 / 未学天魔化生功 / 冷却已过。"""
+    root = doc.ext.get("linggen") if isinstance(doc.ext, Mapping) else {}
+    if str((root or {}).get("name") or "") != JIDAO_TIANMO:
+        return False, "只有【极道天魔】能够进入万相魔冢。"
+    techniques = (doc.ext.get("gongfa") if isinstance(doc.ext, Mapping) else None) or []
+    if TIANMO_TECHNIQUE in techniques:
+        return False, f"你已获得【{TIANMO_TECHNIQUE}】，无需再次接受传承。"
+    state = (doc.ext.get("wanxiang_tomb") if isinstance(doc.ext, Mapping) else None)
+    last = float((state or {}).get("last", 0) or 0)
+    left = last + TOMB_COOLDOWN - now
+    if TOMB_COOLDOWN > 0 and left > 0:
+        hours = int((left + 3599) // 3600)
+        return False, f"万灵怨念尚未散尽，约 {hours} 小时后可再闯魔冢。"
+    return True, ""
+
+
+def tomb_foe(stats: Any) -> dict[str, int]:
+    """万灵怨胎：攻 ×0.8、防 ×0.75、血 ×0.9（原版 createTianmoTrialOpponent）。"""
+    return {
+        "atk": max(1, int(float(getattr(stats, "atk", 1) or 1) * TOMB_ATK_RATE)),
+        "defense": max(1, int(float(getattr(stats, "defense", 1) or 1) * TOMB_DEF_RATE)),
+        "hp": max(1, int(float(getattr(stats, "hp", 1) or 1) * TOMB_HP_RATE)),
+    }
+
+
+def tomb_record(doc: Any, now: float, passed: bool) -> None:
+    if not isinstance(doc.ext, Mapping):
+        return
+    doc.ext["wanxiang_tomb"] = {"last": float(now), "result": "通过" if passed else "失败"}
+
+
+def grant_tianmo_technique(doc: Any) -> str:
+    techs = doc.ext.setdefault("gongfa", [])
+    if not isinstance(techs, list):
+        techs = doc.ext["gongfa"] = list(techs or [])
+    if TIANMO_TECHNIQUE not in techs:
+        techs.append(TIANMO_TECHNIQUE)
+    return f"炼尽万灵怨胎，得禁忌功法【{TIANMO_TECHNIQUE}】"
+
+
+# ---------------------------------------------------------------- 斩断魂印（援助他人）
+
+ASSIST_COST_PCT = 0.20     # 原版扣 20% 元神；印主反噬需跨档写，暂只记文案
+ASSIST_DAILY_LIMIT = 1
+
+
+def assist_break(helper: Any, helper_s: dict, target: Any, target_s: dict,
+                 now: float) -> tuple[bool, str, dict, dict]:
+    """替他人斩印：校验印主权柄、扣气血、每日一次。
+
+    返回 (ok, msg, 援助者档, 目标档)。
+    """
+    brand = target_s.get("brand")
+    if not isinstance(brand, Mapping):
+        return False, "目标身上没有魂印。", helper_s, target_s
+    if float(brand.get("until", 0) or 0) and now >= float(brand["until"]):
+        return False, "目标魂印已自行消散。", helper_s, target_s
+    master = brand.get("master") if isinstance(brand.get("master"), Mapping) else {}
+    helper_uid = str(getattr(helper, "uid", ""))
+    if str(master.get("uid") or "") == helper_uid:
+        return False, "印主不能假意援助自己的魂奴。", helper_s, target_s
+    master_realm = int(master.get("realm", 0) or 0)
+    if master_realm and int(getattr(helper, "realm_index", 0) or 0) < master_realm:
+        return False, "你的境界权柄低于烙印时的印主，无法斩断魂印。", helper_s, target_s
+    day = time.strftime("%Y%m%d", time.gmtime(now + 8 * 3600))
+    if str(brand.get("assist_day") or "") == day:
+        return False, "目标今日已接受过一次斩印援助。", helper_s, target_s
+    from . import yuanshen as ys_mod
+    cost = max(1, int(ys_mod.cur_of(helper) * ASSIST_COST_PCT))
+    if ys_mod.cur_of(helper) < cost:
+        return False, f"援助需消耗 {cost:,} 点元神（现有 {ys_mod.cur_of(helper):,}）。", helper_s, target_s
+    ys_mod.add_cur(helper, -cost)
+    s2 = dict(target_s)
+    b2 = dict(brand)
+    b2["assist_day"] = day
+    s2["brand"] = None
+    s2["break_ts"] = now
+    msg = (f"【斩断魂印】你以元神为引，替 {getattr(target, 'name', '?')} 震碎魂印。\n"
+           f"消耗元神 {cost:,}；印主（{master.get('name') or '不明'}）遭反噬。")
+    return True, msg, helper_s, s2

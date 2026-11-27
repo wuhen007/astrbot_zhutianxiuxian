@@ -72,6 +72,9 @@ def ensure(g: Mapping | None, now: float, rng: Any) -> tuple[dict, dict, bool]:
     state = dict(g or default_state())
     state.setdefault("history", [])
     win = int(now // WINDOW_SECONDS)
+    # 管理员手动关闭后，本窗口内不再自动开启
+    if state.get("rift") is None and int(state.get("closed_window", -1) or -1) == win:
+        return state, {}, False
     rift = state.get("rift")
     if isinstance(rift, Mapping) and float(rift.get("expires_at", 0) or 0) > now \
             and int(state.get("window", -1)) == win:
@@ -95,6 +98,52 @@ def ensure(g: Mapping | None, now: float, rng: Any) -> tuple[dict, dict, bool]:
     state["window"] = win
     state["rift"] = rift
     return state, rift, True
+
+
+def admin_open(g: Mapping | None, now: float, rng: Any,
+               plane: str = "") -> tuple[dict, dict | None, str]:
+    """管理员手动开启裂界（可指定位面），立即生效并占满当前窗口。"""
+    state = dict(g or default_state())
+    state.setdefault("history", [])
+    if plane and plane not in PLANES:
+        return state, None, f"没有「{plane}」这个位面。可选：{'、'.join(PLANES)}。"
+    win = int(now // WINDOW_SECONDS)
+    plane_name = plane or PLANES[win % len(PLANES)]
+    defs = DEFINITIONS[plane_name]
+    definition = defs[rng.randrange(len(defs))]
+    old = state.get("rift")
+    if isinstance(old, Mapping):
+        state["history"] = (list(state["history"]) + [{
+            "id": old.get("id"), "name": old.get("name"),
+            "plane": old.get("plane"), "anchor": old.get("anchor", 0)}])[-8:]
+    rift = {
+        "id": f"rift-manual-{int(now)}", "plane": plane_name, **definition,
+        "opened_at": float(now), "expires_at": float(now) + WINDOW_SECONDS,
+        "anchor": 0, "contribution": {}, "participants": [],
+    }
+    state["window"] = win
+    state["rift"] = rift
+    state.pop("closed_window", None)
+    return state, rift, (f"已在{plane_name}开启裂界「{rift['name']}」，"
+                         f"{WINDOW_SECONDS // 3600} 小时后自动消散。")
+
+
+def admin_close(g: Mapping | None, now: float,
+                name: str = "") -> tuple[dict, bool, str]:
+    """管理员关闭当前裂界；本窗口内不再自动重开。"""
+    state = dict(g or default_state())
+    state.setdefault("history", [])
+    rift = state.get("rift")
+    if not isinstance(rift, Mapping):
+        return state, False, "当前没有裂界。"
+    if name and str(rift.get("name")) != name:
+        return state, False, f"当前裂界是「{rift.get('name')}」，不是「{name}」。"
+    state["history"] = (list(state["history"]) + [{
+        "id": rift.get("id"), "name": rift.get("name"),
+        "plane": rift.get("plane"), "anchor": rift.get("anchor", 0)}])[-8:]
+    state["rift"] = None
+    state["closed_window"] = int(now // WINDOW_SECONDS)
+    return state, True, f"已关闭裂界「{rift.get('name')}」。"
 
 
 def current_rift(g: Mapping | None, now: float) -> dict | None:

@@ -1394,7 +1394,10 @@ def shop_text(st: Mapping, shop_content: Mapping, celestial: Mapping, now: float
         limit = shop_limit(p, celestial)
         used = int(counts.get(pid, 0) or 0)
         limit_txt = "不限购" if limit <= 0 else f"今日 {used}/{limit}"
-        lock = "" if action == "item" else "（购买后引动先天至宝出世）" if action == "clue" else "（暂未开放）"
+        lock = ("" if action == "item"
+                else "（购买后引动先天至宝出世）" if action == "clue"
+                else "（直接入账纪元积累）" if action == "era"
+                else "（暂未开放）")
         qty = int(p.get("quantity", 1) or 1)
         qty_txt = f"×{qty}" if qty > 1 else ""
         lines.append(f"· [{p.get('id')}] {p.get('name')}{qty_txt}｜{price:,} 道痕｜{limit_txt}{lock}")
@@ -1404,7 +1407,8 @@ def shop_text(st: Mapping, shop_content: Mapping, celestial: Mapping, now: float
 
 
 def buy_shop(st: Mapping, product_id: str, qty: int, now: float,
-             shop_content: Mapping, celestial: Mapping) -> tuple[bool, str, dict, dict]:
+             shop_content: Mapping, celestial: Mapping,
+             era_doc: Any = None) -> tuple[bool, str, dict, dict]:
     st2 = copy.deepcopy(dict(st))
     qty = max(1, int(qty or 1))
     key = str(product_id or "").strip()
@@ -1416,7 +1420,7 @@ def buy_shop(st: Mapping, product_id: str, qty: int, now: float,
     if not product:
         return False, f"商店里没有「{product_id}」。", st2, {}
     action = str(product.get("action") or "item")
-    if action not in ("item", "clue"):
+    if action not in ("item", "clue", "era"):
         return False, f"「{product['name']}」对应系统尚未开放，暂不可购买。", st2, {}
     today = time_key(now)
     counts = shop_today(st2, now)
@@ -1436,6 +1440,16 @@ def buy_shop(st: Mapping, product_id: str, qty: int, now: float,
     grant = int(product.get("quantity", 1) or 1) * qty
     if action == "clue":
         return True, f"购入「{product['name']}」，耗道痕 {price:,}（余 {st2['marks_total']:,}）。", st2, {}
+    if action == "era":
+        # 原版 grantEndlessDirectReward（endlessShop.js:105）：era 商品直接入账纪元积累，不入纳戒。
+        if era_doc is None:
+            return False, f"「{product['name']}」对应系统尚未开放，暂不可购买。", st2, {}
+        from . import fashan as fashan_mod
+        gained = fashan_mod.add_era(era_doc, grant)
+        extra = "" if gained == grant else f"（超出上限，实得 +{gained}）"
+        return True, (f"购入「{product['name']}」×{grant}，耗道痕 {price:,}"
+                      f"（余 {st2['marks_total']:,}）｜纪元积累 +{gained}{extra}"
+                      f"（{fashan_mod.era_of(era_doc)}/{fashan_mod.ERA_CAP}）。"), st2, {}
     return True, (f"购入「{product['name']}」×{grant}，耗道痕 {price:,}"
                   f"（余 {st2['marks_total']:,}）。"), st2, {str(product["name"]): grant}
 

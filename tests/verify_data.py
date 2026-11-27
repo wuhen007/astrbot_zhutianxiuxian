@@ -42,6 +42,8 @@ ALLOWED_ADDED_ROWS = {
     "item/位面boss列表.json": {("名号", "猪咪岁岁")},
     "item/功法列表.json": {("name", "鹤鸣九霄")},
     "item/成就列表.json": {("name", "破网者")},
+    # 折冠破妄：pin 快照 04af6a9 之后原版新增（GitHub V1.0 快照已含），0.1.7 按原版补齐。
+    "item/命格词条.json": {("name", "折冠破妄")},
     "item/技能组/攻击技能.json": {("name", "鹤鸣九霄")},
     "item/每日抽奖列表.json": {("name", "奇怪的石头")},
     "item/装备列表.json": {

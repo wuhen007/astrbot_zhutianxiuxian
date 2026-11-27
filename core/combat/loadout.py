@@ -16,7 +16,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from .. import trib
-from . import skills
+from . import loadout_config, skills
 from .engine import Fighter
 
 
@@ -60,9 +60,12 @@ def equip_skill_pool(f: Fighter, doc: Any, tables: Mapping[str, Any] | None) -> 
     want = ({lg_name} if lg_name else set()) | learned
     if bool(getattr(doc, "ext", {}).get("武道天眼")):
         want.add("大帝之姿")
+    innate = {lg_name} if lg_name else set()
     try:                                  # W8-B1b：重瞳 / 仙骨 / 瞳骨共鸣附加灵根类技能
         from .. import supreme as _sp
-        want |= set(_sp.skill_names(doc))
+        extra = set(_sp.skill_names(doc))
+        want |= extra
+        innate |= extra
     except Exception:
         pass
 
@@ -82,16 +85,24 @@ def equip_skill_pool(f: Fighter, doc: Any, tables: Mapping[str, Any] | None) -> 
                 if int(cur.get(key) or 0) > int(merged.get(key) or 0):
                     merged[key] = cur[key]
         atk_by_name[str(e["name"])] = merged
-    if atk_by_name:
-        f.tags["atk_skills"] = list(atk_by_name.values())
 
     def_pool = [dict(e) for e in (tables.get("def") or [])
                 if isinstance(e, Mapping) and e.get("name") in want]
-    if def_pool:
-        f.tags["def_skills"] = def_pool
-
     heal_pool = [dict(e) for e in (tables.get("heal") or [])
                  if isinstance(e, Mapping) and e.get("name") in want]
+
+    # 玩家配置（原版 战斗技能配置）：仅约束已学功法技能，灵根自带始终生效
+    cfg = loadout_config.effective(doc, tables, learned)
+    atk_sel, def_sel, vit_sel = set(cfg["攻击"]), set(cfg["防御"]), cfg["生机"]
+    atk_by_name = {k: v for k, v in atk_by_name.items() if k in innate or k in atk_sel}
+    def_pool = [e for e in def_pool if str(e.get("name")) in innate or str(e.get("name")) in def_sel]
+    heal_pool = [e for e in heal_pool
+                 if str(e.get("name")) in innate or str(e.get("name")) == vit_sel]
+
+    if atk_by_name:
+        f.tags["atk_skills"] = list(atk_by_name.values())
+    if def_pool:
+        f.tags["def_skills"] = def_pool
     if heal_pool:
         f.tags["heal_skills"] = heal_pool
 

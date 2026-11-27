@@ -76,7 +76,12 @@ def travel(doc: Any, target: str, now: float) -> tuple[bool, str]:
     target = (target or "").strip()
     if target not in plane.GATES:
         return False, f"未知位面「{target}」。可选：{'、'.join(plane.PLANES)}"
-    if plane.GATES[target] > authority_of(doc):
+    if plane.is_high_dim(target):
+        # 原版高维位面走维度壁垒（破界强度/仙帝通行），不走双轨境界门槛（plane.py barrier_check）。
+        ok, why = plane.barrier_check(doc, st["plane"], target)
+        if not ok:
+            return False, why
+    elif plane.GATES[target] > authority_of(doc):
         return False, f"【{target}】需双轨境界 ≥{plane.GATES[target]}，当前 {authority_of(doc)}。"
     if target == st["plane"]:
         return False, f"法身已驻【{target}】。"
@@ -89,6 +94,40 @@ def travel(doc: Any, target: str, now: float) -> tuple[bool, str]:
     doc.ext["xueqi"] = int(doc.ext.get("xueqi", 0) or 0) - need_xq
     st["plane"] = target
     return True, f"法身已抵达【{target}】（耗修为 {need_exp:,}、血气 {need_xq:,}）。"
+
+
+def begin_shangcang(doc: Any, row: Mapping, count: int, now: float) -> tuple[bool, str]:
+    """#法身探索/沉迷上苍之上（原版 startFashanShangcang）：法身须在上苍之上，消耗走 shangcang 口径。"""
+    from . import shangcang as sc_mod
+    st = state_of(doc)
+    if not st["owned"]:
+        return False, "尚未凝聚法身，请发送 #凝聚无上法身。"
+    if st["state"] == "行动中":
+        return False, "法身正在行动中，请先 #法身沉迷收获 结算。"
+    if st["plane"] != "上苍之上":
+        return False, "法身当前不在上苍之上，先 #法身穿梭 上苍之上。"
+    if int(st["hp"]) <= 0:
+        return False, "法身血量耗尽，先 #法身疗伤。"
+    if authority_of(doc) < sc_mod.GATE_AUTHORITY:
+        return False, (f"【{row.get('name')}】需仙帝权柄（{sc_mod.GATE_AUTHORITY} 档），"
+                       f"当前 {authority_of(doc)} 档。")
+    count = max(1, min(MAX_COUNT, int(count or 1)))
+    unit = sc_mod.cost_of(row)
+    total = {k: v * count for k, v in unit.items()}
+    lack = sc_mod.shortages(doc, total)
+    if lack:
+        return False, "资源不足：" + "；".join(lack)
+    sc_mod.pay(doc, total)
+    minutes, notes = sc_mod.duration_minutes(doc)
+    st["action"] = {"kind": "上苍之上", "plane": "上苍之上",
+                    "place": str(row.get("name")), "count": count, "rounds": count,
+                    "row": dict(row), "start": float(now),
+                    "end": float(now) + minutes * count * 60}
+    st["state"] = "行动中"
+    tail = f"（{'｜'.join(notes)}）" if notes else ""
+    return True, (f"法身降临上苍之上【{row.get('name')}】×{count}，"
+                  f"消耗 {sc_mod.cost_text(total)}，预计 {minutes * count} 分钟{tail}，"
+                  f"到期发 #法身沉迷收获 结算；真身仍可自由行动。")
 
 
 def begin(doc: Any, plane_name: str, count: int, now: float) -> tuple[bool, str]:
@@ -192,6 +231,25 @@ def add_era(doc: Any, amount: int) -> int:
     new = min(ERA_CAP, old + max(0, int(amount)))
     doc.ext["era_points"] = new
     return new - old
+
+
+def spend_era(doc: Any, amount: int) -> int:
+    """扣除纪元积累，最多扣到 0（原版突破处无门槛会扣成负数，按移植口径封底）。"""
+    take = min(max(0, int(amount)), era_of(doc))
+    doc.ext["era_points"] = era_of(doc) - take
+    return take
+
+
+def condense_breakthrough(doc: Any, now: float) -> tuple[bool, str]:
+    """路尽级仙帝突破自带法身凝聚（原版 Level.js:1389）：已凝聚则不重复发，不另扣凝聚资源。"""
+    st = state_of(doc)
+    if st["owned"]:
+        return False, ""
+    st.update({"owned": True, "plane": INITIAL_PLANE, "state": "空闲",
+               "hp_max": 1_000_000, "hp": 1_000_000, "action": None,
+               "created_at": float(now)})
+    return True, ("【法身凝聚】你盘坐永恒未知之地，万古不动，"
+                  "一缕神念自天灵冲出，化作与真身无异的法身！")
 
 
 def _ready(st: Mapping, doc: Any, gate: int) -> str | None:
@@ -583,6 +641,45 @@ def _settle_special(doc: Any, st: dict, act: dict, now: float, rng: random.Rando
     kind = act["kind"]
     realm = authority_of(doc) + 1
     lines = [f"--- 法身{kind}结算 ---"]
+    if kind == "上苍之上":
+        # 原版 startFashanShangcang：逐轮胜率判定 → 四档池掉落 → 胜场/纪元进度写 ext["shangcang"]；
+        # 法身败退只扣法身，真身不受伤害。
+        from . import shangcang as sc_mod
+        row = act.get("row") if isinstance(act.get("row"), Mapping) else {"name": act.get("place")}
+        count = max(1, int(act.get("count") or 1))
+        gains: dict[str, int] = {}
+        sc_state = sc_mod.state_of(doc)
+        wins = 0
+        for i in range(count):
+            if rng.random() > sc_mod.win_rate(doc):
+                st["hp"] = 0
+                lines.append(f"第 {i + 1} 轮：败。法身被上苍生灵击退，法身力竭（真身无伤）。")
+                break
+            wins += 1
+            got = sc_mod.roll_rewards(row, rng)
+            for name, qty in got.items():
+                gains[name] = gains.get(name, 0) + qty
+            sc_state["wins"] = int(sc_state.get("wins") or 0) + 1
+            sc_state["progress"] = int(sc_state.get("progress") or 0) + 1
+            era_note = ""
+            if sc_state["progress"] >= sc_mod.ERA_PER_WINS:
+                sc_state["progress"] -= sc_mod.ERA_PER_WINS
+                gained = add_era(doc, sc_mod.ERA_REWARD)
+                era_note = f"｜纪元积累 +{gained}"
+            lines.append(f"第 {i + 1} 轮：胜。战利："
+                         + ("、".join(f"{n}×{q}" for n, q in got.items()) or "无") + era_note)
+        if wins:
+            receipt = f"{act.get('place')}:{int(now)}:法身{wins}"
+            receipts = [str(r) for r in (sc_state.get("receipts") or [])]
+            if receipt not in receipts:
+                receipts.append(receipt)
+            sc_state["receipts"] = receipts[-sc_mod.RECEIPT_CAP:]
+            lines.append(f"本次 {wins}/{count} 胜｜累计胜场 {sc_state['wins']}｜"
+                         f"纪元进度 {sc_state['progress']}/{sc_mod.ERA_PER_WINS}")
+        st["state"] = "空闲"
+        st["action"] = None
+        lines[0] = f"--- 法身上苍之上结算（{act.get('place')}）---"
+        return True, "\n".join(lines), gains, []
     if kind == "圣墟":
         if battle_runner is None:
             return False, ("法身圣墟需要共享回合战斗结算；当前缺少战斗回调，行动保留待接线。"), {}, []
@@ -663,7 +760,7 @@ def settle_detailed(doc: Any, now: float, rng: random.Random, *, battle_runner=N
     left = remaining(st, now)
     if left > 0:
         return False, f"尚需 {int(left // 60)} 分 {int(left % 60)} 秒，未到结算时辰。", {}, []
-    if act.get("kind") in ("时间长河", "界海", "圣墟"):
+    if act.get("kind") in ("时间长河", "界海", "圣墟", "上苍之上"):
         return _settle_special(doc, st, act, now, rng, battle_runner=battle_runner,
                                river_battle_runner=river_battle_runner,
                                jiehai_battle_runner=jiehai_battle_runner,
