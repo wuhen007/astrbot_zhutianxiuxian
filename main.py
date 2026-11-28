@@ -695,6 +695,18 @@ CMD_TW_GOTO = "#前往真世界"
 CMD_TW_EXPLORE = "#探索真世界"
 CMD_TW_FIGHT = "#迎战真世界敌群"
 CMD_TW_CLAIM = "#领取真世界战果"
+# 区域远征（原版 otherShoreExpedition 主链，每玩家会话）
+CMD_EXP_START = "#进入区域远征"
+CMD_EXP_START_ALIAS = "#彼岸远征"
+CMD_EXP_ADVANCE = "#推进彼岸战役"
+CMD_EXP_CAMP = "#建设前线营地"
+CMD_EXP_CAMP_ALIAS = "#彼岸营地"
+CMD_EXP_PANEL = "#彼岸行囊"
+CMD_EXP_DEPOSIT = "#存放彼岸战利品"
+CMD_EXP_EVAC = "#彼岸撤离"
+CMD_EXP_FORCE = "#彼岸强撤"
+CMD_EXP_FORCE_ALIAS = "#强制撤离"
+CMD_EXP_CLAIM = "#领取彼岸远征战果"
 CMD_OSW_NEAREST = "#最近星辰"
 # W7-5a：彼岸大道至宝
 CMD_OSF_PANEL = "#彼岸铸宝"
@@ -19183,6 +19195,165 @@ class ZhutianPlugin(Star):
             yield r
 
     # ---- 真世界主链（原版 OtherShoreWorld 真世界层） ----
+
+    # ---- 彼岸区域远征（原版 otherShoreExpedition 主链） ----
+
+    def _tw_fight_enemy(self, doc: PlayerDoc, foe_stats: Mapping, hp_cur: int):
+        """构造真世界/远征敌群 Fighter 并打一场真实 run_1v1，返回 (won, hp_after, log_tail)。"""
+        from .core.combat.loadout import build_fighter
+        from .core.combat import run_1v1
+        from .core.combat.engine import Fighter
+        stats = self._stats(doc)
+        hp_cur, hp_max = self._hp_pair(doc)
+        me = build_fighter(doc, doc.name or "道友", stats.atk, stats.defense,
+                           hp_cur, stats.bao, self.item_index.get)
+        foe = Fighter(name=str(foe_stats.get("name") or "敌群"),
+                      atk=max(1, int(foe_stats.get("atk", 0) or 0)),
+                      defense=max(1, int(foe_stats.get("def", 0) or 0)),
+                      hp=max(1, int(foe_stats.get("hp", 0) or 0)),
+                      hp_max=max(1, int(foe_stats.get("hp", 0) or 0)),
+                      bao=0.10, speed=1150)
+        rng = random.Random(f"{doc.uid}:twf:{int(time.time() * 10)}")
+        result = run_1v1([me], [foe], rng)
+        won = result.winner == 0
+        hp_after = max(0, min(hp_max, int(result.a_hp))) if won else 1
+        return won, hp_after, hp_max
+
+    @filter.command(CMD_EXP_START, "进入区域远征（踏足战役大星后开启）", alias={CMD_EXP_START_ALIAS})
+    @_serialized_player_command
+    async def handle_exp_start(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import other_shore_expedition as ex_mod
+        star = (arg or "").strip()
+        if not star:
+            from .core import other_shore_true_world as tw_mod
+            st = tw_mod.state_of(doc)
+            star = f"{int(st.get('q', 0) or 0)},{int(st.get('r', 0) or 0)}"
+        ok, msg = ex_mod.start_run(doc, star)
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_EXP_ADVANCE, "推进彼岸战役（battle/boss 阶段触发真实战斗）")
+    @_serialized_player_command
+    async def handle_exp_advance(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import other_shore_expedition as ex_mod
+        st = ex_mod.state_of(doc)
+        found = ex_mod._run_of(st)
+        now = time.time()
+        battle_cb = None
+        if found:
+            star, _run = found
+            tier = ex_mod.battle_tier_of(st, star)
+            if tier is not None:
+                def battle_cb(tier_row):
+                    won, hp_after, _m = self._tw_fight_enemy(doc, tier_row, 0)
+                    doc.ext["hp"] = hp_after
+                    return won, hp_after
+        ok, msg = ex_mod.advance(doc, now, random.Random(f"{doc.uid}:exp:{int(now)}"),
+                                 battle_cb=battle_cb)
+        if ok:
+            async with self.db.transaction():
+                await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_EXP_CAMP, "建设前线营地（每轮远征限一次）", alias={CMD_EXP_CAMP_ALIAS})
+    @_serialized_player_command
+    async def handle_exp_camp(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import other_shore_expedition as ex_mod
+        ok, msg = ex_mod.build_camp(doc, None)
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_EXP_PANEL, "彼岸行囊/区域战役面板")
+    async def handle_exp_panel(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import other_shore_expedition as ex_mod
+        yield event.plain_result(ex_mod.panel(doc))
+
+    @filter.command(CMD_EXP_DEPOSIT, "存放彼岸战利品（营地封存）")
+    @_serialized_player_command
+    async def handle_exp_deposit(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import other_shore_expedition as ex_mod
+        ok, msg = ex_mod.deposit(doc)
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_EXP_EVAC, "彼岸撤离（营地韧性护航，物资无损）")
+    @_serialized_player_command
+    async def handle_exp_evac(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import other_shore_expedition as ex_mod
+        ok, msg = ex_mod.evacuate(doc, forced=False)
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_EXP_FORCE, "彼岸强撤（物资损失 30%）", alias={CMD_EXP_FORCE_ALIAS})
+    @_serialized_player_command
+    async def handle_exp_force(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import other_shore_expedition as ex_mod
+        ok, msg = ex_mod.evacuate(doc, forced=True)
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_EXP_CLAIM, "领取彼岸远征战果")
+    @_serialized_player_command
+    async def handle_exp_claim(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import other_shore_expedition as ex_mod
+        ok, msg, items, _era, keys = ex_mod.claim(doc)
+        if ok:
+            async with self.db.transaction():
+                await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
 
     @filter.command(CMD_TW_ENTER, "进入真世界（完成大星≥7 解锁）")
     @_serialized_player_command
