@@ -721,6 +721,8 @@ CMD_SW_JOIN = "#圣战站队"
 CMD_SW_ACTION = "#战场行动"
 CMD_SW_INVESTIGATE = "#调查战端"
 CMD_SW_DECIDE = "#提交战场决议"
+# 灵宝熔炼
+CMD_REFINE = "#熔炼灵宝"
 CMD_OSW_NEAREST = "#最近星辰"
 # W7-5a：彼岸大道至宝
 CMD_OSF_PANEL = "#彼岸铸宝"
@@ -19717,6 +19719,25 @@ class ZhutianPlugin(Star):
             await self.db.save_calamity(world)
         yield event.plain_result(msg)
 
+
+    @filter.command(CMD_REFINE, "熔炼灵宝 至宝名（残片温养至宝）")
+    @_serialized_player_command
+    async def handle_refine(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        treasure_name = (arg or "").strip()
+        if not treasure_name:
+            yield event.plain_result("格式：#熔炼灵宝 至宝名")
+            return
+        from .core import refine_treasure as ref_mod
+        ok, msg = ref_mod.refine(doc, treasure_name)
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
     @filter.command(CMD_TW_ENTER, "进入真世界（完成大星≥7 解锁）")
     @_serialized_player_command
     async def handle_tw_enter(self, event: AstrMessageEvent):
