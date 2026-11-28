@@ -72,17 +72,18 @@ EVENT_NAMES: dict[str, str] = {
 ERA_WEIGHTS: tuple[dict[str, int], ...] = (
     {"treasureAppear": 3, "merchantVisit": 2, "prodigyRise": 2,
      "worldChange": 3, "tianmoHuashengLegacy": 1,
-     "coordinateClue": 2, "wenxianClue": 1},                                   # 神话时代
+     "coordinateClue": 2, "wenxianClue": 1, "sectWar": 1},                     # 神话时代
     {"forbiddenZone": 2, "prodigyRise": 2, "treasureAppear": 2,
-     "tianmoHuashengLegacy": 1, "coordinateClue": 2, "wenxianClue": 1},       # 太古时代
+     "tianmoHuashengLegacy": 1, "coordinateClue": 2, "wenxianClue": 1,
+     "sectWar": 1},                                                    # 太古时代
     {"prodigyRise": 2, "merchantVisit": 2, "tianmoHuashengLegacy": 1,
-     "coordinateClue": 2, "wenxianClue": 1},                                   # 天命时代
+     "coordinateClue": 2, "wenxianClue": 1, "sectWar": 1},                     # 天命时代
     {"mysteriousRuins": 3, "forbiddenZone": 2, "worldChange": 2,
      "tianmoHuashengLegacy": 1,
-     "coordinateClue": 2, "wenxianClue": 1},                                   # 末法时代
+     "coordinateClue": 2, "wenxianClue": 1, "sectWar": 1},                     # 末法时代
     {"forbiddenZone": 3, "worldChange": 3, "merchantVisit": 2,
      "mysteriousRuins": 2, "tianmoHuashengLegacy": 1,
-     "coordinateClue": 2, "wenxianClue": 1},                                   # 绝灵时代
+     "coordinateClue": 2, "wenxianClue": 1, "sectWar": 1},                     # 绝灵时代
 )
 
 OUTCOMES: dict[str, str] = {
@@ -94,6 +95,7 @@ OUTCOMES: dict[str, str] = {
     "mysteriousRuins": "你踏入遗迹外围完成初步探查，带回一份残缺的古史记录。",
     "coordinateClue": "你拓下石壁上的残缺星图，辨出一处未曾记录的位面坐标。",
     "wenxianClue": "古碑道纹入心，你隐约窥见问仙之路的一段残章。",
+    "sectWar": "你亲赴圣地大战的战场，于攻守之间记下一笔战功。",
 }
 
 # ---------------------------------------------------------------- 帝关常量
@@ -219,7 +221,7 @@ def make_event(kind: str, spot: tuple[str, str, dict], now: float,
                world_year: int, rng: Any) -> dict[str, Any]:
     pname, locname, coord = spot
     eid = f"{int(now * 1000)}:{kind}:{rng.randrange(1 << 30)}"
-    return {
+    event = {
         "id": eid,
         "type": kind,
         "plane": pname,
@@ -232,6 +234,12 @@ def make_event(kind: str, spot: tuple[str, str, dict], now: float,
         "source": "era",
         "participants": [],
     }
+    if kind == "sectWar":
+        from . import sect_war as sect_war_mod
+        sects = random.Random(eid).sample(["摇光圣地", "瑶池圣地", "剑云海"], 2)
+        event["war"] = sect_war_mod.create(
+            "mine", {"name": sects[0]}, {"name": sects[1]}, None, float(now))
+    return event
 
 
 def prune(ev: dict, now: float) -> bool:

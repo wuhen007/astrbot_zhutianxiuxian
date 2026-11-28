@@ -715,6 +715,12 @@ CMD_BZ_GUESS = "#辨认石山"
 CMD_BZ_OBSERVE = "#月下观兵"
 CMD_BZ_WEAPON = "#以器证兵"
 CMD_BZ_RANK = "#兵字秘榜"
+# 圣地大战（原版 RealmEvents sectWar 事件）
+CMD_SW_DETAIL = "#圣战详情"
+CMD_SW_JOIN = "#圣战站队"
+CMD_SW_ACTION = "#战场行动"
+CMD_SW_INVESTIGATE = "#调查战端"
+CMD_SW_DECIDE = "#提交战场决议"
 CMD_OSW_NEAREST = "#最近星辰"
 # W7-5a：彼岸大道至宝
 CMD_OSF_PANEL = "#彼岸铸宝"
@@ -19547,6 +19553,169 @@ class ZhutianPlugin(Star):
         await self.db.save_calamity(world)
         async for r in self._smart(event, chr(10).join(lines), "兵字秘榜"):
             yield r
+
+    # ---- 圣地大战（原版 RealmEvents sectWar 事件） ----
+
+    async def _sw_world(self) -> dict:
+        from .core import calamity as cal_mod
+        return cal_mod.ensure(await self.db.get_calamity())
+
+    def _sw_settle_expired(self, ev: dict, world: dict) -> list[dict]:
+        """惰性结算过期圣地大战：结果与奖励归档 sect_war_history，供本人领取。"""
+        from .core import sect_war as sw_mod
+        settled = []
+        for e in list(ev.get("active") or []):
+            if e.get("type") != "sectWar" or float(e.get("expires_at") or 0) > time.time():
+                continue
+            war = e.get("war")
+            if not isinstance(war, dict) or war.get("status") == "settled":
+                continue
+            outcome = sw_mod.settle(war, time.time())
+            rewards = sw_mod.settle_rewards(war, 10_000_000)
+            history = world.setdefault("sect_war_history", {})
+            history[str(e.get("id"))] = {"war": war, "outcome": outcome,
+                                         "rewards": rewards,
+                                         "title": str(outcome.get("title") or "")}
+            settled.append({"id": str(e.get("id")), "title": str(outcome.get("title") or "")})
+        if settled:
+            ev["active"] = [e for e in (ev.get("active") or [])
+                            if not (e.get("type") == "sectWar"
+                                    and float(e.get("expires_at") or 0) <= time.time())]
+        return settled
+
+    def _sw_find(self, ev: dict) -> dict | None:
+        """当前进行中的圣地大战事件（含惰性结算后的最新一条）。"""
+        for e in reversed(ev.get("active") or []):
+            if e.get("type") == "sectWar" and isinstance(e.get("war"), dict):
+                return e
+        return None
+
+    @filter.command(CMD_SW_DETAIL, "圣战详情：圣地大战战场面板")
+    async def handle_sw_detail(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import sect_war as sw_mod
+        world = await self._sw_world()
+        settled_list = self._sw_settle_expired(world, world)
+        if settled_list:
+            await self.db.save_calamity(world)
+        ev = world.get("realm_event") if isinstance(world.get("realm_event"), dict) else {}
+        found = self._sw_find(ev)
+        if not found:
+            lines = ["--- 圣地大战 ---", "当前没有正在进行的圣地大战。"]
+            if settled_list:
+                lines.append("刚刚结算：" + "；".join(s["title"] for s in settled_list))
+            lines.append("（圣地大战随天地纪元随机爆发，届时 #圣战详情 查看战场。）")
+            async for r in self._smart(event, chr(10).join(lines), "圣战详情"):
+                yield r
+            return
+        settled = self._sw_settle_expired(world, world)
+        if settled:
+            await self.db.save_calamity(world)
+            found = self._sw_find(world.get("realm_event") or {})
+        if not found:
+            lines = ["--- 圣地大战 ---", "刚刚结算：" + "；".join(s["title"] for s in settled)]
+            async for r in self._smart(event, chr(10).join(lines), "圣战详情"):
+                yield r
+            return
+        yield event.plain_result(sw_mod.panel(found["war"], time.time(), found))
+
+    @filter.command(CMD_SW_JOIN, "圣战站队 阵营（攻方/守方/中立）")
+    @_serialized_player_command
+    async def handle_sw_join(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import sect_war as sw_mod
+        world = await self._sw_world()
+        self._sw_settle_expired(world, world)
+        ev = world.get("realm_event") if isinstance(world.get("realm_event"), dict) else {}
+        found = self._sw_find(ev)
+        if not found:
+            yield event.plain_result("当前没有正在进行的圣地大战。")
+            return
+        war = found["war"]
+        side_map = {"攻方": "attacker", "守方": "defender", "联军": "coalition",
+                    "中立": "neutral", "观望": "neutral"}
+        side = side_map.get((arg or "").strip())
+        if not side:
+            yield event.plain_result(f"格式：{CMD_SW_JOIN} 攻方|守方|中立")
+            return
+        ok, msg = sw_mod.join(war, doc.uid, doc.name, side)
+        if ok:
+            await self.db.save_calamity(world)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_SW_ACTION, "战场行动 行动名（#调查战端 = 潜入夺证）")
+    @_serialized_player_command
+    async def handle_sw_action(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import sect_war as sw_mod
+        from .core import extra_cultivation as extra_mod
+        world = await self._sw_world()
+        self._sw_settle_expired(world, world)
+        ev = world.get("realm_event") if isinstance(world.get("realm_event"), dict) else {}
+        found = self._sw_find(ev)
+        if not found:
+            yield event.plain_result("当前没有正在进行的圣地大战。")
+            return
+        war = found["war"]
+        raw = (event.get_message_str() or "").strip()
+        action = "潜入夺证" if raw == CMD_SW_INVESTIGATE else \
+            raw.replace(CMD_SW_ACTION, "").strip()
+        if str(doc.uid) not in (war.get("participants") or {}):
+            # 原版抵达战场后执行行动即入列（第一次行动自动带站队提示）
+            ok, msg = sw_mod.join(war, doc.uid, doc.name, "neutral")
+            if ok:
+                pre = "【自动站队·中立】也可 #圣战站队 攻方/守方 换阵营。\n"
+            else:
+                pre = ""
+        else:
+            pre = ""
+        power = extra_cultivation.realm_authority_level(doc)
+        ok, msg = sw_mod.record_action(war, doc.uid, action, power)
+        if ok:
+            await self.db.save_calamity(world)
+        yield event.plain_result((pre or "") + msg)
+
+    @filter.command(CMD_SW_DECIDE, "提交战场决议 决议名（真相≥50 开放）")
+    @_serialized_player_command
+    async def handle_sw_decide(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import sect_war as sw_mod
+        world = await self._sw_world()
+        self._sw_settle_expired(world, world)
+        ev = world.get("realm_event") if isinstance(world.get("realm_event"), dict) else {}
+        found = self._sw_find(ev)
+        if not found:
+            yield event.plain_result("当前没有正在进行的圣地大战。")
+            return
+        choice = (arg or "").strip()
+        if not choice:
+            choices = sw_mod.DECISIONS.get(found["war"].get("mode") or "mine", ())
+            yield event.plain_result(f"格式：{CMD_SW_DECIDE} 决议名（可选：{'/'.join(choices)}）")
+            return
+        ok, msg = sw_mod.submit_decision(found["war"], doc.uid, choice)
+        if ok:
+            await self.db.save_calamity(world)
+        yield event.plain_result(msg)
 
     @filter.command(CMD_TW_ENTER, "进入真世界（完成大星≥7 解锁）")
     @_serialized_player_command
