@@ -1459,7 +1459,7 @@ ITEM_TABLES = (
     PLUGIN_NAME,
     "wuhen",
     "诸天万界修仙（Python 重构版）",
-    "0.6.0",
+    "0.1.6",
     "",
 )
 class ZhutianPlugin(Star):
