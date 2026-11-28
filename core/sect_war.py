@@ -19,10 +19,14 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from typing import Any
 
 MAX_ACTIONS = 5
+MAX_SUPPORTS = 3
+MIN_SUPPORT = 1_000
+MAX_SUPPORT = 1_000_000_000_000
 POWER_CAP = (1, 12)
 CLAMP = (0, 100)
 
@@ -75,7 +79,7 @@ def create(mode: str, attacker: Mapping, defender: Mapping,
                    {"attacker": 0, "defender": 0, "neutral": 0}),
         "meters": {"military": 0, "supplies": 0, "truth": 0, "seal": 0},
         "participants": {}, "decision_votes": {}, "clues": [],
-        "action_log": [], "rewarded": [], "outcome": None, "settled_at": 0,
+        "action_log": [], "support_log": [], "rewarded": [], "outcome": None, "settled_at": 0,
     }
 
 
@@ -103,7 +107,8 @@ def join(war: dict, uid: str, name: str, side: str) -> tuple[bool, str]:
     if key in parts:
         return False, "你已加入本次圣战。"
     parts[key] = {"uid": key, "name": str(name or key), "side": side,
-                  "contribution": 0, "actions": [], "joined_at": 0.0,
+                  "contribution": 0, "actions": [],
+                  "support_count": 0, "source_stones": 0,
                   "joined_at": __import__("time").time()}
     return True, f"【圣战站队】你已加入「{war['sides'][side]['name']}」阵营（{side}）。"
 
@@ -180,6 +185,50 @@ def submit_decision(war: dict, uid: str, choice: str) -> tuple[bool, str]:
                   "投票可在事件结束前修改，最终采用票数最多的方案。")
 
 
+def support(war: dict, uid: str, amount: int, now: float = 0.0) -> tuple[bool, str, dict[str, int]]:
+    """#投入战资 源石*数量（对齐原版 RealmEvents.recordSectWarSupport）：最多 3 批，增辎重与贡献。"""
+    if war.get("status") != "open":
+        return False, "本次圣地大战已经结束。", {}
+    parts = war.setdefault("participants", {})
+    p = parts.get(str(uid))
+    if not p:
+        return False, "你尚未加入本次圣战（先 #圣战站队）。", {}
+    if int(p.get("support_count", 0) or 0) >= MAX_SUPPORTS:
+        return False, f"每场圣战最多投入 {MAX_SUPPORTS} 批战资。", {}
+    try:
+        amt = int(amount)
+    except (TypeError, ValueError):
+        amt = 0
+    if amt < MIN_SUPPORT or amt > MAX_SUPPORT:
+        return False, f"单次战资须为 {MIN_SUPPORT:,} 至 {MAX_SUPPORT:,} 源石。", {}
+    contribution = max(1, min(30, round(math.log10(amt / 1000 + 1) * 6)))
+    supplies = max(1, round(contribution * 1.5))
+    seal = max(1, round(contribution / 3)) if war.get("mode") == "frontier" else 0
+    p["source_stones"] = int(p.get("source_stones", 0) or 0) + amt
+    p["support_count"] = int(p.get("support_count", 0) or 0) + 1
+    p["contribution"] = int(p.get("contribution", 0) or 0) + contribution
+    war.setdefault("scores", {})
+    war["scores"][p["side"]] = int(war["scores"].get(p["side"], 0) or 0) + contribution
+    meters = war.setdefault("meters", {"military": 0, "supplies": 0, "truth": 0, "seal": 0})
+    meters["supplies"] = _clamp(float(meters.get("supplies", 0) or 0) + supplies)
+    if seal:
+        meters["seal"] = _clamp(float(meters.get("seal", 0) or 0) + seal)
+    war.setdefault("support_log", []).append(
+        {"uid": str(uid), "side": p["side"], "amount": amt,
+         "contribution": contribution, "supplies": supplies, "seal": seal,
+         "at": float(now or __import__("time").time())})
+    if len(war["support_log"]) > 100:
+        war["support_log"] = war["support_log"][-100:]
+    lines = [
+        "【圣战战资·交割完成】",
+        f"投入源石：{amt:,}（第 {p['support_count']}/{MAX_SUPPORTS} 批）",
+        f"增加辎重：+{supplies}%（当前 {meters['supplies']}%）"
+        + (f"｜封印：+{seal}%（{meters['seal']}%）" if seal else ""),
+        f"获得战功：+{contribution}｜个人总贡献：{p['contribution']}",
+    ]
+    return True, "\n".join(lines), {"contribution": contribution, "supplies": supplies, "seal": seal}
+
+
 def _top_votes(war: dict) -> str | None:
     votes = war.get("decision_votes") or {}
     if not votes:
@@ -241,19 +290,43 @@ def rank(war: Mapping) -> list[dict]:
 
 
 def settle_rewards(war: Mapping, total_pool: int) -> list[dict[str, Any]]:
-    """按贡献占比折算个人奖励（修为+灵石），榜首追加战功徽记。差异已标注。"""
+    """按贡献占比折算个人奖励（修为+灵石+圣地战功），榜首追加战功徽记。差异已标注。"""
     rows = rank(war)
     if not rows:
         return []
     total = sum(int(p.get("contribution", 0) or 0) for p in rows) or 1
     out = []
     for i, p in enumerate(rows):
-        share = int(p.get("contribution", 0) or 0) / total
+        contrib = int(p.get("contribution", 0) or 0)
+        share = contrib / total
         exp = int(total_pool * share)
         stones = max(1, int(exp * 0.05))
+        merits = max(1, contrib)
         out.append({"uid": p["uid"], "name": p.get("name"), "exp": exp,
-                    "stones": stones, "top": i == 0})
+                    "stones": stones, "merits": merits, "top": i == 0})
     return out
+
+
+def ranking_text(war: Mapping, event: Mapping | None = None, my_merits: int = 0) -> str:
+    """#查看战场榜：前 10 战功排行 + 结局 + 个人圣地战功余额。"""
+    phase = war.get("phase") or "圣地大战"
+    lines = [f"【{phase}·战场榜】"]
+    if isinstance(event, Mapping) and event.get("location"):
+        loc = event["location"]
+        if isinstance(loc, Mapping):
+            lines.append(f"地点：{loc.get('plane', '')} ({loc.get('x', '?')},{loc.get('y', '?')})")
+    rows = rank(war)[:10]
+    sides = war.get("sides") or {}
+    if not rows:
+        lines.append("尚无人留下战功。")
+    for i, entry in enumerate(rows, 1):
+        side_name = (sides.get(entry.get("side")) or {}).get("name") or entry.get("side") or "中立"
+        lines.append(f"{i}. {entry.get('name', entry.get('uid'))}｜{side_name}｜战功 {int(entry.get('contribution', 0) or 0)}")
+    outcome = war.get("outcome")
+    if isinstance(outcome, Mapping) and outcome.get("title"):
+        lines.append(f"结局：{outcome['title']}")
+    lines.append(f"个人圣地战功余额：{int(my_merits or 0):,}（#战功商店 查看可兑）")
+    return "\n".join(lines)
 
 
 def panel(war: dict, now: float, event: Mapping | None = None) -> str:
@@ -277,5 +350,5 @@ def panel(war: dict, now: float, event: Mapping | None = None) -> str:
     for clue in (war.get("clues") or [])[-3:]:
         lines.append(f"· 线索：{clue}")
     lines.append("动作：#圣战站队 阵营｜#战场行动 行动名（含 #调查战端）｜"
-                 "#提交战场决议 决议名｜#圣战详情")
+                 "#投入战资 源石*数量｜#提交战场决议 决议名｜#查看战场榜｜#圣战详情")
     return "\n".join(lines)

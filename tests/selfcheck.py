@@ -8894,13 +8894,14 @@ async def main():
     assert not ok120 and "用法" in msg120, msg120
 
     src120 = open(PLUGIN / "main.py", encoding="utf-8").read()
-    names120 = ["CMD_PE_WAR",
-                "CMD_PE_SIDE", "CMD_PE_ACT", "CMD_PE_FUND", "CMD_PE_RANK",
+    names120 = ["CMD_SW_DETAIL", "CMD_SW_JOIN", "CMD_SW_ACTION", "CMD_SW_FUND",
+                "CMD_SW_RANK", "CMD_SW_DECIDE",
                 "CMD_PE_SHOP", "CMD_PE_BUY", "CMD_PE_XW_BUY", "CMD_PE_HEIM",
                 "CMD_PE_HEIM_BUY", "CMD_PE_XIANZI"]
     miss120 = [c for c in names120 if f"@filter.command({c}" not in src120]
     assert miss120 == [], f"漏注册：{miss120}"
     assert "pe_mod.war_exchange(" in src120
+    assert "sw_mod.support(" in src120
     assert "pe_mod.pass_state" not in src120, "帝关已交由远端 realm_event，不得残留"
     assert "rev_mod.maybe_tick(" in src120, "帝关走远端 W8-F9 状态机"
     help120b = _json60.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
@@ -8969,7 +8970,7 @@ async def main():
 
     src140 = open(PLUGIN / "main.py", encoding="utf-8").read()
     assert 'get_raid(team["code"])' in src140, "审计修复5：_raid_settle 需复读 settled"
-    assert "pending_bonus" in src140, "审计修复9：handler 需兑现轮末奖励"
+    assert "sw_mod.support(" in src140 and "_sw_claim_history" in src140, "圣战战资与战果兑现"
     assert src140.count('if not self._adm_ok(event)') >= 2, "审计修复10：门禁统一"
     print("W19-A audit fixes ok")
 

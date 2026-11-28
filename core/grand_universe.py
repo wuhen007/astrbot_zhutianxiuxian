@@ -39,12 +39,64 @@ def _ext(doc: Any) -> dict | None:
     return ext if isinstance(ext, dict) else None
 
 
+def _migrate_legacy_dict(old: Mapping[str, Any]) -> dict[str, Any]:
+    """将旧版 ext['universe'] 结构无损迁移至 ext['grand_universe']。"""
+    level = max(0, min(LAW_MAX, int(old.get("law", 0) or 0)))
+    created_at = float(old.get("ascend_ts", 0) or 0)
+    dungeons: list[dict[str, Any]] = []
+    for i, d in enumerate(old.get("dungeons") or []):
+        if not isinstance(d, Mapping):
+            continue
+        dungeons.append({
+            "id": f"d{i + 1}",
+            "name": str(d.get("name") or f"秘境{i + 1}"),
+            "mode": "item",
+            "category": "",
+            "itemName": "",
+            "description": str(d.get("intro") or ""),
+            "enemyName": str(d.get("enemy") or ""),
+            "rewardText": "",
+            "lawLevel": level,
+            "runs": int(d.get("cleared", 0) or 0),
+            "lastRunAt": 0.0,
+            "created_at": created_at,
+        })
+    return {
+        "name": str(old.get("name") or "无名大宇宙"),
+        "level": level,
+        "aura": max(0, int(old.get("aura", 0) or 0)),
+        "dungeons": dungeons,
+        "dungeon_seq": len(dungeons),
+        "open": bool(old.get("open", True)),
+        "created_at": created_at,
+    }
+
+
+def migrate_legacy(doc: Any) -> dict[str, Any] | None:
+    """若存在旧版 ext['universe'] 且尚未迁移，则就地转换为 ext['grand_universe']。"""
+    ext = _ext(doc)
+    if ext is None:
+        return None
+    st = ext.get(EXT_KEY)
+    if isinstance(st, dict):
+        return st
+    old = ext.get("universe")
+    if isinstance(old, Mapping) and old:
+        migrated = _migrate_legacy_dict(old)
+        ext[EXT_KEY] = migrated
+        ext.pop("universe", None)
+        return migrated
+    return None
+
+
 def state_of(doc: Any) -> dict[str, Any] | None:
     ext = _ext(doc)
     if ext is None:
         return None
     st = ext.get(EXT_KEY)
-    return st if isinstance(st, dict) else None
+    if isinstance(st, dict):
+        return st
+    return migrate_legacy(doc)
 
 
 def _new_state(name: str, now: float) -> dict[str, Any]:

@@ -292,7 +292,6 @@ CMD_MIRROR_EXIT = "#退出投影"
 CMD_MIRROR_AVATAR = "#诸天化身"
 CMD_MIRROR_LOAD = "#装载化身"
 CMD_ZTJ_USE = "#使用诸天镜"
-CMD_UNI = "#大宇宙"
 CMD_TOWER = "#挑战镇妖塔"
 CMD_TOWER_ALL = "#一键挑战镇妖塔"
 CMD_PET_SEND = "#派仙宠寻宝"
@@ -714,6 +713,8 @@ CMD_SW_JOIN = "#圣战站队"
 CMD_SW_ACTION = "#战场行动"
 CMD_SW_INVESTIGATE = "#调查战端"
 CMD_SW_DECIDE = "#提交战场决议"
+CMD_SW_FUND = "#投入战资"
+CMD_SW_RANK = "#查看战场榜"
 # 灵宝熔炼
 CMD_REFINE = "#熔炼灵宝"
 CMD_OSW_NEAREST = "#最近星辰"
@@ -993,7 +994,13 @@ CMD_RS_SQUAD = "#轮回小队"
 CMD_RS_ATTR = "#轮回属性"
 CMD_RS_MON = "#轮回怪物"
 CMD_RS_FILE = "#轮回档案"
-# W17-F1：位面大事件（帝关 / 圣地大战 / 游商）
+# W17-F1：位面大事件（战功商店 / 游商）
+CMD_PE_SHOP = "#战功商店"
+CMD_PE_BUY = "#战功兑换"
+CMD_PE_XIANZI = "#求取"
+CMD_PE_XW_BUY = "#购买仙翁商品"
+CMD_PE_HEIM = "#黑衣神秘人"
+CMD_PE_HEIM_BUY = "#购买黑市商品"
 # W20-F1：至宝出世 · 24h 全服择主（冠军本体 / 2、3 名七日投影）
 CMD_XB_OPEN = "#观摩灵宝"
 CMD_XB_T1 = "#挑战守护灵"
@@ -2922,15 +2929,6 @@ class ZhutianPlugin(Star):
                 ("#1 / #2 / #3 / #选择 序号", "投影剧情抉择（慧/勇/仁）"),
                 ("#探索友枝町/#探索见泷原/#探索骑士世界 地点", "世界探索（镜能 -1，掉材料/卡牌/印记）"),
                 (f"{CMD_MIRROR_AVATAR} / {CMD_MIRROR_LOAD} 名", "化身谱与装载（灵根替换+三维加成）"),
-            ]},
-            {"title": "大宇宙终局", "lines": [
-                (CMD_UNIVERSE_ASCEND, "小世界 5 级+金仙+潜力151 → 升格大宇宙"),
-                (f"{CMD_UNIVERSE_VIEW} / #我的大宇宙", "宇宙面板（法则/灵韵/秘境）"),
-                (f"{CMD_UNIVERSE_LAW}", "完善法则（承载真仙→帝光仙王）"),
-                (f"{CMD_UNIVERSE_AURA} 物品*数量", "纳戒物品炼化灵韵"),
-                (f"{CMD_UNIVERSE_FORGE} 名*简介*守关者", "铸造宇宙秘境（100 灵韵）"),
-                (f"{CMD_UNIVERSE_DERIVE} 名", "演绎万物轮回生成秘境"),
-                (f"{CMD_UNIVERSE_ENTER} 名", "挑战秘境（8h CD，胜得灵韵）"),
             ]},
             {"title": "图鉴查询", "lines": [
                 (f"{CMD_LOU} 类目 页码", "丹药楼/装备楼/功法楼/道具楼/仙宠楼/锻造材料楼/灵根图鉴等"),
@@ -5666,17 +5664,24 @@ class ZhutianPlugin(Star):
     # ---- 仙王大宇宙：升格 / 面板 / 法则 / 灵韵（原版 apps/Garden/GrandUniverse.js）----
 
     async def _universe_state(self, event: AstrMessageEvent):
-        """→ ((doc, state), "") 或 (None, 错误文案)。"""
+        """→ ((doc, state), "") 或 (None, 错误文案)。旧 ext['universe'] 自动无损迁移。"""
         if not self._allowed(event):
             return None, "未授权"
         doc, err = await self._require_player(event)
         if err:
             return None, err
         from .core import grand_universe as gu_mod
+        had_legacy = isinstance(doc.ext.get("universe"), dict) and bool(doc.ext.get("universe"))
         st = gu_mod.state_of(doc)
         if st is None:
             return None, (f"你尚无大宇宙。发「{CMD_UNIVERSE_ASCEND} [宇宙名]」升格"
                           "（需仙王权柄 + 自身之道 + 1000 万修为）。")
+        if had_legacy:
+            reg = await self.db.get_universe()
+            reg[str(doc.uid)] = gu_mod.registry_entry(st, doc, time.time())
+            async with self.db.transaction():
+                await self.db.save_player(doc.model_dump())
+                await self.db.save_universe(reg)
         return (doc, st), ""
 
     @filter.command(CMD_UNIVERSE_ASCEND, "小世界升格为大宇宙")
@@ -5689,9 +5694,16 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         from .core import grand_universe as gu_mod
+        had_legacy = isinstance(doc.ext.get("universe"), dict) and bool(doc.ext.get("universe"))
         title = (name or "").strip() or f"{doc.name or '无名'}的宇宙"
         ok, msg, st = gu_mod.ascend(doc, title, time.time())
         if not ok:
+            if had_legacy and gu_mod.state_of(doc) is not None:
+                reg = await self.db.get_universe()
+                reg[str(doc.uid)] = gu_mod.registry_entry(gu_mod.state_of(doc), doc, time.time())
+                async with self.db.transaction():
+                    await self.db.save_player(doc.model_dump())
+                    await self.db.save_universe(reg)
             yield event.plain_result(msg)
             return
         reg = await self.db.get_universe()
@@ -10488,64 +10500,27 @@ class ZhutianPlugin(Star):
             await self.db.save_player(d.model_dump())
         yield event.plain_result(msg)
 
-    # ---- 大宇宙（小世界升格终局玩法，对齐原版 Garden/GrandUniverse） ----
+    # ---- A 档：镇妖塔 / 仙宠寻宝 / 洗劫 / 道侣赠礼 ----
 
-    @filter.command(CMD_UNI, "大宇宙面板")
-    async def handle_uni(self, event: AstrMessageEvent):
-        async for r in self._uni_view(event):
-            yield r
-
-    @filter.command("#我的大宇宙", "大宇宙面板（别名）")
-    async def handle_uni_alias(self, event: AstrMessageEvent):
-        async for r in self._uni_view(event):
-            yield r
-
-    async def _uni_view(self, event: AstrMessageEvent):
-        if not self._allowed(event):
-            return
-        doc, err = await self._require_player(event)
-        if err:
-            yield event.plain_result(err)
-            return
-        u = universe.system_of(doc)
-        if not u:
-            check = universe.can_ascend(doc)
-            if check.get("ok"):
-                yield event.plain_result(
-                    "【大宇宙·就绪】升格条件已全部满足！发送「#升格大宇宙」即可开辟大宇宙。"
-                )
-                return
-            reason = check.get("reason", "")
-            cur = check.get("current", 0)
-            req = check.get("required", 0)
-            if reason == "world":
-                tip = "尚未开辟小世界（#开辟小世界）。"
-            elif reason == "world-level":
-                tip = f"小世界演化 {cur}/5 级（#演化小世界）。"
-            elif reason == "authority":
-                tip = f"境界不足：需金仙 {req} 境（当前 {cur} 境）。"
-            elif reason == "potential":
-                tip = f"仙道潜力不足：{cur:g}/{req}（凝聚精血类丹药提升）。"
-            else:
-                tip = ""
-            yield event.plain_result(
-                "尚未升格大宇宙。升格条件：\n· 小世界演化圆满（5 级）\n· 境界 ≥ 金仙\n· 仙道潜力 ≥ 151\n" + tip
-            )
-            return
-        stage = universe.LAW_STAGES[int(u.get("law", 0))]
-        lines = [
-            f"--- 大宇宙 · {u.get('name')} ---",
-            f"法则：{stage['name']}（承载上限 {stage['capacity']}）｜完善 {u.get('law_refined', 0)} 次",
-            f"宇宙灵韵：{u.get('aura', 0)}｜对外开放：{'是' if u.get('open') else '否'}",
-            f"秘境（{len(u.get('dungeons') or [])}/{universe.MAX_DUNGEONS}）："
-            + ("、".join(d["name"] for d in u.get("dungeons", [])) or "（无）"),
-        ]
-        nxt = universe.LAW_STAGES[int(u.get("law", 0)) + 1] if int(u.get("law", 0)) + 1 < len(universe.LAW_STAGES) else None
-        if nxt:
-            lines.append(f"下一阶「{nxt['name']}」需：潜力 {nxt['potential']}｜修为血气各 {nxt['cultivation']:,}｜灵韵 {nxt['aura']}")
-        lines.append("炼化：#炼化宇宙灵韵 物品*数量｜铸造：#铸造宇宙秘境 名*简介*守关者｜挑战：#进入宇宙秘境 名")
-        async for _r in self._smart(event, "\n".join(lines)):
-            yield _r
+    def _tower_view(self, doc: PlayerDoc, stats: equipment.Stats, rng, once: bool):
+        """单次或连打镇妖塔。返回 (msg, floors, total_stones, final_doc)。"""
+        total_stones = 0
+        floors = 0
+        d = doc
+        for _ in range(1 if once else 60):
+            st = {"atk": stats.atk, "defense": stats.defense, "hp": stats.hp, "bao": stats.bao}
+            ok, msg, ext2, consume = adventure.tower_fight(d, st, rng)
+            if not ok:
+                return msg, 0, 0, d
+            total_stones += consume.get("stones", 0)
+            d = d.model_copy(deep=True)
+            d.ext.update(ext2)
+            if consume.get("stones", 0) < 0:  # 战败
+                return msg, floors, total_stones, d
+            floors += 5
+            if once:
+                return msg, floors, total_stones, d
+        return f"一键挑战结束：连过 {floors} 层！灵石 +{total_stones:,}", floors, total_stones, d
 
     @filter.command(CMD_TOWER, "挑战镇妖塔")
     async def handle_tower(self, event: AstrMessageEvent):
@@ -19384,6 +19359,56 @@ class ZhutianPlugin(Star):
                 return e
         return None
 
+    async def _sw_claim_history(self, doc: PlayerDoc, world: dict) -> list[str]:
+        """懒结算玩家尚未领取的历史圣战奖励（修为/灵石/圣地战功/榜首徽记）。"""
+        history = world.get("sect_war_history")
+        if not isinstance(history, dict) or not history:
+            return []
+        notes: list[str] = []
+        changed_world = False
+        changed_player = False
+        add_items: dict[str, int] = {}
+        uid = str(doc.uid)
+        for eid, entry in history.items():
+            if not isinstance(entry, dict):
+                continue
+            war = entry.get("war")
+            if not isinstance(war, dict):
+                continue
+            rewarded = war.setdefault("rewarded", [])
+            if uid in rewarded:
+                continue
+            hit = next((r for r in (entry.get("rewards") or [])
+                        if isinstance(r, dict) and str(r.get("uid")) == uid), None)
+            if not hit:
+                continue
+            rewarded.append(uid)
+            changed_world = True
+            exp_gain = int(hit.get("exp", 0) or 0)
+            stone_gain = int(hit.get("stones", 0) or 0)
+            merit_gain = int(hit.get("merits", 0) or 0)
+            doc.exp = int(doc.exp or 0) + exp_gain
+            doc.stones = int(doc.stones or 0) + stone_gain
+            sw = doc.ext.setdefault("sect_war", {})
+            if not isinstance(sw, dict):
+                sw = doc.ext["sect_war"] = {}
+            sw["merits"] = int(sw.get("merits", 0) or 0) + merit_gain
+            changed_player = True
+            tail = ""
+            if hit.get("top"):
+                add_items["战功徽记"] = add_items.get("战功徽记", 0) + 1
+                tail = "、战功徽记 ×1"
+            notes.append(f"「{entry.get('title') or eid}」战果：修为 +{exp_gain:,}、灵石 +{stone_gain:,}、圣地战功 +{merit_gain}{tail}")
+        if changed_player or changed_world:
+            async with self.db.transaction():
+                if changed_player:
+                    await self.db.save_player(doc.model_dump())
+                if add_items:
+                    await self.db.add_items(doc.uid, add_items)
+                if changed_world:
+                    await self.db.save_calamity(world)
+        return notes
+
     @filter.command(CMD_SW_DETAIL, "圣战详情：圣地大战战场面板")
     async def handle_sw_detail(self, event: AstrMessageEvent):
         if not self._allowed(event):
@@ -19393,30 +19418,30 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         from .core import sect_war as sw_mod
-        world = await self._sw_world()
-        settled_list = self._sw_settle_expired(world, world)
-        if settled_list:
-            await self.db.save_calamity(world)
+        async with self.db.calamity_lock:
+            world = await self._sw_world()
+            settled_list = self._sw_settle_expired(world, world)
+            if settled_list:
+                await self.db.save_calamity(world)
+            claims = await self._sw_claim_history(doc, world)
         ev = world.get("realm_event") if isinstance(world.get("realm_event"), dict) else {}
         found = self._sw_find(ev)
         if not found:
             lines = ["--- 圣地大战 ---", "当前没有正在进行的圣地大战。"]
             if settled_list:
                 lines.append("刚刚结算：" + "；".join(s["title"] for s in settled_list))
+            if claims:
+                lines.append("【已领取历史战果】")
+                lines.extend(claims)
             lines.append("（圣地大战随天地纪元随机爆发，届时 #圣战详情 查看战场。）")
             async for r in self._smart(event, chr(10).join(lines), "圣战详情"):
                 yield r
             return
-        settled = self._sw_settle_expired(world, world)
-        if settled:
-            await self.db.save_calamity(world)
-            found = self._sw_find(world.get("realm_event") or {})
-        if not found:
-            lines = ["--- 圣地大战 ---", "刚刚结算：" + "；".join(s["title"] for s in settled)]
-            async for r in self._smart(event, chr(10).join(lines), "圣战详情"):
-                yield r
-            return
-        yield event.plain_result(sw_mod.panel(found["war"], time.time(), found))
+        body = sw_mod.panel(found["war"], time.time(), found)
+        if claims:
+            body += "\n\n【已领取历史战果】\n" + "\n".join(claims)
+        async for r in self._smart(event, body, "圣战详情"):
+            yield r
 
     @filter.command(CMD_SW_JOIN, "圣战站队 阵营（攻方/守方/中立）")
     @_serialized_player_command
@@ -19428,26 +19453,29 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         from .core import sect_war as sw_mod
-        world = await self._sw_world()
-        self._sw_settle_expired(world, world)
-        ev = world.get("realm_event") if isinstance(world.get("realm_event"), dict) else {}
-        found = self._sw_find(ev)
-        if not found:
-            yield event.plain_result("当前没有正在进行的圣地大战。")
-            return
-        war = found["war"]
         side_map = {"攻方": "attacker", "守方": "defender", "联军": "coalition",
-                    "中立": "neutral", "观望": "neutral"}
+                    "中立": "neutral", "观望": "neutral", "攻": "attacker", "守": "defender", "观": "neutral"}
         side = side_map.get((arg or "").strip())
         if not side:
             yield event.plain_result(f"格式：{CMD_SW_JOIN} 攻方|守方|中立")
             return
-        ok, msg = sw_mod.join(war, doc.uid, doc.name, side)
-        if ok:
-            await self.db.save_calamity(world)
+        async with self.db.calamity_lock:
+            world = await self._sw_world()
+            settled_list = self._sw_settle_expired(world, world)
+            ev = world.get("realm_event") if isinstance(world.get("realm_event"), dict) else {}
+            found = self._sw_find(ev)
+            if not found:
+                if settled_list:
+                    await self.db.save_calamity(world)
+                yield event.plain_result("当前没有正在进行的圣地大战。")
+                return
+            ok, msg = sw_mod.join(found["war"], doc.uid, doc.name, side)
+            if ok or settled_list:
+                await self.db.save_calamity(world)
         yield event.plain_result(msg)
 
-    @filter.command(CMD_SW_ACTION, "战场行动 行动名（#调查战端 = 潜入夺证）")
+    @filter.command(CMD_SW_ACTION, "战场行动 行动名（#调查战端 = 潜入夺证）",
+                    alias={CMD_SW_INVESTIGATE})
     @_serialized_player_command
     async def handle_sw_action(self, event: AstrMessageEvent, arg: str = ""):
         if not self._allowed(event):
@@ -19458,31 +19486,116 @@ class ZhutianPlugin(Star):
             return
         from .core import sect_war as sw_mod
         from .core import extra_cultivation as extra_mod
-        world = await self._sw_world()
-        self._sw_settle_expired(world, world)
-        ev = world.get("realm_event") if isinstance(world.get("realm_event"), dict) else {}
-        found = self._sw_find(ev)
-        if not found:
-            yield event.plain_result("当前没有正在进行的圣地大战。")
-            return
-        war = found["war"]
-        raw = (event.get_message_str() or "").strip()
+        raw = self._msg_of(event).strip()
         action = "潜入夺证" if raw == CMD_SW_INVESTIGATE else \
-            raw.replace(CMD_SW_ACTION, "").strip()
-        if str(doc.uid) not in (war.get("participants") or {}):
-            # 原版抵达战场后执行行动即入列（第一次行动自动带站队提示）
-            ok, msg = sw_mod.join(war, doc.uid, doc.name, "neutral")
-            if ok:
-                pre = "【自动站队·中立】也可 #圣战站队 攻方/守方 换阵营。\n"
+            (arg or "").strip() or raw.replace(CMD_SW_ACTION, "", 1).strip()
+        power = extra_mod.realm_authority_level(doc)
+        async with self.db.calamity_lock:
+            world = await self._sw_world()
+            settled_list = self._sw_settle_expired(world, world)
+            ev = world.get("realm_event") if isinstance(world.get("realm_event"), dict) else {}
+            found = self._sw_find(ev)
+            if not found:
+                if settled_list:
+                    await self.db.save_calamity(world)
+                yield event.plain_result("当前没有正在进行的圣地大战。")
+                return
+            war = found["war"]
+            if str(doc.uid) not in (war.get("participants") or {}):
+                # 原版抵达战场后执行行动即入列（第一次行动自动带站队提示）
+                ok_j, _ = sw_mod.join(war, doc.uid, doc.name, "neutral")
+                pre = "【自动站队·中立】也可 #圣战站队 攻方/守方 换阵营。\n" if ok_j else ""
             else:
                 pre = ""
-        else:
-            pre = ""
-        power = extra_cultivation.realm_authority_level(doc)
-        ok, msg = sw_mod.record_action(war, doc.uid, action, power)
-        if ok:
-            await self.db.save_calamity(world)
+            ok, msg = sw_mod.record_action(war, doc.uid, action, power)
+            if ok or pre or settled_list:
+                await self.db.save_calamity(world)
         yield event.plain_result((pre or "") + msg)
+
+    @filter.command(CMD_SW_FUND, "投入战资 源石*数量")
+    @_serialized_player_command
+    async def handle_sw_fund(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        raw = (arg or "").strip() or self._msg_of(event).replace(CMD_SW_FUND, "", 1).strip()
+        digits = "".join(ch for ch in raw if ch.isdigit())
+        qty = int(digits) if digits else 0
+        if qty <= 0:
+            yield event.plain_result(f"格式：{CMD_SW_FUND} 源石*数量（单次 1,000 ~ 1 万亿）")
+            return
+        from .core import sect_war as sw_mod
+        inv = await self.db.get_inventory(doc.uid)
+        inv_have = int((inv or {}).get("源石", 0) or 0)
+        ys_acc = doc.ext.get("yuanshi") if isinstance(doc.ext.get("yuanshi"), dict) else None
+        acc_have = int(ys_acc.get("amount", 0) or 0) if ys_acc else 0
+        use_inv = inv_have >= qty
+        if not use_inv and acc_have < qty:
+            yield event.plain_result(f"源石不足：需 {qty:,}（背包 {inv_have:,} / 源石账户 {acc_have:,}）。")
+            return
+        async with self.db.calamity_lock:
+            world = await self._sw_world()
+            settled_list = self._sw_settle_expired(world, world)
+            ev = world.get("realm_event") if isinstance(world.get("realm_event"), dict) else {}
+            found = self._sw_find(ev)
+            if not found:
+                if settled_list:
+                    await self.db.save_calamity(world)
+                yield event.plain_result("当前没有正在进行的圣地大战。")
+                return
+            ok, msg, _res = sw_mod.support(found["war"], doc.uid, qty, time.time())
+            if not ok:
+                if settled_list:
+                    await self.db.save_calamity(world)
+                yield event.plain_result(msg)
+                return
+            async with self.db.transaction():
+                if use_inv:
+                    if not await self.db.remove_item(doc.uid, "源石", qty):
+                        raise RuntimeError("INSUFFICIENT_YUANSHI")
+                    rem = inv_have - qty
+                else:
+                    ys_acc["amount"] = acc_have - qty
+                    await self.db.save_player(doc.model_dump())
+                    rem = ys_acc["amount"]
+                await self.db.save_calamity(world)
+        yield event.plain_result(f"{msg}\n剩余源石：{rem:,}")
+
+    @filter.command(CMD_SW_RANK, "查看战场榜：圣地大战战功排行")
+    async def handle_sw_rank(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import sect_war as sw_mod
+        async with self.db.calamity_lock:
+            world = await self._sw_world()
+            settled_list = self._sw_settle_expired(world, world)
+            if settled_list:
+                await self.db.save_calamity(world)
+            claims = await self._sw_claim_history(doc, world)
+        ev = world.get("realm_event") if isinstance(world.get("realm_event"), dict) else {}
+        found = self._sw_find(ev)
+        sw_st = doc.ext.get("sect_war") if isinstance(doc.ext.get("sect_war"), dict) else {}
+        my_merits = int(sw_st.get("merits", 0) or 0)
+        if found:
+            txt = sw_mod.ranking_text(found["war"], found, my_merits)
+        else:
+            history = world.get("sect_war_history") if isinstance(world.get("sect_war_history"), dict) else {}
+            latest = list(history.values())[-1] if history else None
+            if isinstance(latest, dict) and isinstance(latest.get("war"), dict):
+                txt = sw_mod.ranking_text(latest["war"], None, my_merits)
+            else:
+                txt = f"当前没有圣地大战记录。\n个人圣地战功余额：{my_merits:,}（#战功商店 查看可兑）"
+        if claims:
+            txt += "\n\n【已领取历史战果】\n" + "\n".join(claims)
+        async for r in self._smart(event, txt, "查看战场榜"):
+            yield r
 
     @filter.command(CMD_SW_DECIDE, "提交战场决议 决议名（真相≥50 开放）")
     @_serialized_player_command
@@ -19494,21 +19607,24 @@ class ZhutianPlugin(Star):
             yield event.plain_result(err)
             return
         from .core import sect_war as sw_mod
-        world = await self._sw_world()
-        self._sw_settle_expired(world, world)
-        ev = world.get("realm_event") if isinstance(world.get("realm_event"), dict) else {}
-        found = self._sw_find(ev)
-        if not found:
-            yield event.plain_result("当前没有正在进行的圣地大战。")
-            return
         choice = (arg or "").strip()
-        if not choice:
-            choices = sw_mod.DECISIONS.get(found["war"].get("mode") or "mine", ())
-            yield event.plain_result(f"格式：{CMD_SW_DECIDE} 决议名（可选：{'/'.join(choices)}）")
-            return
-        ok, msg = sw_mod.submit_decision(found["war"], doc.uid, choice)
-        if ok:
-            await self.db.save_calamity(world)
+        async with self.db.calamity_lock:
+            world = await self._sw_world()
+            settled_list = self._sw_settle_expired(world, world)
+            ev = world.get("realm_event") if isinstance(world.get("realm_event"), dict) else {}
+            found = self._sw_find(ev)
+            if not found:
+                if settled_list:
+                    await self.db.save_calamity(world)
+                yield event.plain_result("当前没有正在进行的圣地大战。")
+                return
+            if not choice:
+                choices = sw_mod.DECISIONS.get(found["war"].get("mode") or "mine", ())
+                yield event.plain_result(f"格式：{CMD_SW_DECIDE} 决议名（可选：{'/'.join(choices)}）")
+                return
+            ok, msg = sw_mod.submit_decision(found["war"], doc.uid, choice)
+            if ok or settled_list:
+                await self.db.save_calamity(world)
         yield event.plain_result(msg)
 
 
@@ -25539,7 +25655,7 @@ class ZhutianPlugin(Star):
         """按固定原版阶段表结算独立仙古冲关；战斗效果层保留已声明的端口适配。"""
         from .core import extra_cultivation as extra_mod, wallet as wallet_mod, selfdao as selfdao_mod
         from .core import xiangu_tribulation as tribulation_mod, wudao as wudao_mod
-        from .core import plane as plane_mod, universe as universe_mod, dao_heart as dao_heart_mod
+        from .core import plane as plane_mod, grand_universe as gu_mod, dao_heart as dao_heart_mod
         from .core import worldline as worldline_mod
 
         level = extra_mod.level_of(doc, "xiangu")
@@ -25602,9 +25718,9 @@ class ZhutianPlugin(Star):
 
         if target_id >= 16 and not passed_breakking:
             place = plane_mod.current(plane_mod.state_of(doc))
-            universe = universe_mod.system_of(doc)
-            law = max(0, min(len(universe_mod.LAW_STAGES) - 1, int(universe.get("law", 0) or 0)))
-            capacity = str(universe_mod.LAW_STAGES[law]["capacity"])
+            gu = gu_mod.state_of(doc) or {}
+            law = max(0, min(gu_mod.LAW_MAX, int(gu.get("level", 0) or 0)))
+            capacity = str(gu_mod.law_stage(law)[2])
             capacity_order = {"真仙": 16, "红尘仙": 16, "仙王": 17, "绝顶仙王": 18, "仙王巨头": 19, "帝光仙王": 20, "准仙帝": 21}
             if place != "仙域" and capacity_order.get(capacity, 0) < target_id:
                 yield event.plain_result(f"【仙域法则未至】冲击{target_name}需仙域或大宇宙承载至该境；本次未扣资源。")
@@ -26876,9 +26992,86 @@ class ZhutianPlugin(Star):
         """同玩家的存档读改写串行，最后一个等待者退出后释放锁记录。"""
         return self._player_locks.hold(uid)
 
+    @filter.command(CMD_PE_SHOP, "战功商店")
+    async def handle_pe_shop(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        yield event.plain_result(pe_mod.war_shop(None, self.content.table("圣地战功商店", [])))
+
+    @filter.command(CMD_PE_BUY, "战功兑换 名称")
+    async def handle_pe_buy(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        async with self.db.calamity_lock:
+            ok, msg, delta = pe_mod.war_exchange(doc, await self.db.get_calamity(),
+                                                 arg, self.content.table("圣地战功商店", []))
+            await self._pe_save(doc, delta)
+        yield event.plain_result(msg)
+
     @filter.command("#白须仙翁", "游商：唯一百分比装备与黑市（总览）")
     async def handle_pe_merchants(self, event: AstrMessageEvent):
         yield event.plain_result(pe_mod.merchant_text())
+
+    @filter.command(CMD_PE_XW_BUY, "购买仙翁商品 编号（源石计价）")
+    async def handle_pe_xw_buy(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        try:
+            idx = int((arg or "0").strip())
+        except ValueError:
+            idx = 0
+        inv = await self.db.get_inventory(doc.uid)
+        ok, msg, delta = pe_mod.buy(doc, pe_mod.IMPERIAL_GOODS, idx, inv, "源石")
+        if ok and pe_mod.IMPERIAL_GOODS[idx - 1][0] not in self.item_index:
+            ok, msg, delta = False, "该商品尚无可用物品定义，暂停售卖，未扣除源石。", {}
+        await self._pe_save(doc, delta)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_PE_HEIM, "黑衣神秘人（已开放神药与潜力丹）")
+    async def handle_pe_heim(self, event: AstrMessageEvent):
+        yield event.plain_result(pe_mod.merchant_text())
+
+    @filter.command(CMD_PE_HEIM_BUY, "购买黑市商品 编号（源石计价）")
+    async def handle_pe_heim_buy(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        try:
+            idx = int((arg or "0").strip())
+        except ValueError:
+            idx = 0
+        inv = await self.db.get_inventory(doc.uid)
+        ok, msg, delta = pe_mod.buy(doc, pe_mod.BLACK_GOODS, idx, inv, "源石")
+        if ok and pe_mod.BLACK_GOODS[idx - 1][0] not in self.item_index:
+            ok, msg, delta = False, "该商品尚无可用物品定义，暂停售卖，未扣除源石。", {}
+        await self._pe_save(doc, delta)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_PE_XIANZI, "求取问道签|历练签|寻缘签（50万灵石，24小时效果）")
+    async def handle_pe_xianzi(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        ok, msg = pe_mod.ask_sign(doc, arg, time.time())
+        if ok:
+            await self._pe_save(doc)
+        yield event.plain_result(msg)
+
+    # ------------------------------------------------ W18-F1：金银坊
 
     @filter.command(CMD_GMF, "金银坊 大|小 [注额]（默认1万，3分钟CD）")
     async def handle_gmf(self, event: AstrMessageEvent, arg: str = ""):
