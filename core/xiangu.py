@@ -1,6 +1,6 @@
 """仙古秘境（W25 引擎）——原版 `apps/SecretPlace/xianguPlace.js`(11764 行) +
 `xianguMap.js` + `xianguEvacuation.js` + `xianguBag.js` + `apps/tasks/xianguLifecycle.js`
-的网格引擎移植：14 碎片 × 11×11 迷雾地图、八方向移动、格子结算、探索选项、
+的网格引擎移植：14 碎片 × 11×11 迷雾地图、八方向移动、格子结算、神识开图、
 秘境背包、撤离状态机、生命周期状态机、道种掉落表。
 
 对齐设计（用户确认）：完整网格引擎 / NPC 交互 W26 做生态简化 / 道种神火 W27 完整移植。
@@ -802,7 +802,7 @@ def state_of(doc: Any) -> dict[str, Any]:
 
 def clear_session(st: dict, summary: dict | None = None) -> None:
     """一轮结束（撤离/死亡/闭合）：清临时态，保留 gains 供查看/奖励。"""
-    for key in ("map", "history", "run", "evac", "options", "pending_defeat",
+    for key in ("map", "history", "run", "evac", "pending_defeat",
                 "soul_target", "teammate", "npc_interactions", "defeated_npcs",
                 "fusion", "hp_max_hint"):
         st.pop(key, None)
@@ -1552,15 +1552,6 @@ def run_summary(st: Mapping, now: float) -> dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------- 探索选项（performExplore）
-
-_LOCATION_RISKS: dict[str, dict[str, float]] = {
-    "边缘区域": {"risk": 0.10, "reward": 30, "boss": 0.02, "success": 0.70},
-    "中层区域": {"risk": 0.30, "reward": 60, "boss": 0.15, "success": 0.60},
-    "深层区域": {"risk": 0.50, "reward": 100, "boss": 0.30, "success": 0.50},
-    "核心区域": {"risk": 0.70, "reward": 150, "boss": 0.50, "success": 0.40},
-    "火道禁区": {"risk": 0.80, "reward": 200, "boss": 0.60, "success": 0.35},
-}
 
 _LOCATION_ITEMS: dict[str, tuple[dict, ...]] = {
     "边缘区域": (
@@ -1598,323 +1589,15 @@ _LOCATION_ITEMS: dict[str, tuple[dict, ...]] = {
         {"name": "神火本源", "type": "材料", "rarity": "神话", "desc": "神火的本源之力，可大幅提升神火品质"}),
 }
 
-_SPECIAL_ITEMS: dict[str, tuple[dict, ...]] = {
-    "边缘区域": (),
-    "中层区域": (
-        {"name": "仙药园令牌", "type": "道具", "rarity": "稀有", "desc": "可召唤一处临时仙药园的令牌"},
-        {"name": "传承石碑", "type": "传承", "rarity": "史诗", "desc": "刻有古代修士传承的石碑"},
-        {"name": "不死神药种子", "type": "仙种", "rarity": "传说", "desc": "传说中能活出第二世的不死神药之种"},
-        {"name": "真龙逆鳞", "type": "材料", "rarity": "传说", "desc": "真龙身上最坚硬的逆鳞，可炼制至宝"}),
-    "深层区域": (
-        {"name": "仙王讲道录", "type": "传承", "rarity": "传说", "desc": "记载仙王讲道的玉简，蕴含无上道法"},
-        {"name": "黑暗牢笼钥匙", "type": "道具", "rarity": "史诗", "desc": "传说可开启黑暗牢笼深处秘藏的钥匙"},
-        {"name": "三千道火", "type": "试炼", "rarity": "传说", "trial": True,
-         "desc": "触及三千道火试炼——三千种大道之火汇聚成的火海，熬过去可淬炼出三千道火种！"}),
-    "核心区域": (
-        {"name": "唯一道则碎片", "type": "传说", "rarity": "神话", "desc": "蕴含完整大道的至高之物，全图仅此一份"},
-        {"name": "仙古花蕾精华", "type": "材料", "rarity": "神话", "desc": "仙古花蕾凝聚的至高精华"},
-        {"name": "鸿蒙紫气", "type": "材料", "rarity": "神话", "desc": "开天辟地前的原始之气，价值无法估量"},
-        {"name": "唯一真血", "type": "材料", "rarity": "神话", "desc": "来自不可名状存在的唯一真血，世间仅此一滴"}),
-}
-
-_BOSS_DEFS: dict[str, tuple[dict, ...]] = {
-    "中层区域": (
-        {"name": "真龙残魂", "skills": ("龙吟九天", "真龙摆尾", "龙战于野"),
-         "drops": (("真龙宝术", "功法", 0.10, "史诗"), ("真龙龙鳞", "道具", 0.50, "稀有"))},
-        {"name": "仙药守护兽", "skills": ("守护之怒", "药香迷惑", "灵根护体"),
-         "drops": (("不死神药幼苗", "仙种", 0.05, "传说"), ("守护兽内丹", "材料", 0.40, "稀有"))}),
-    "深层区域": (
-        {"name": "仙王残念", "skills": ("轮回印", "无终一击", "仙王道则"),
-         "drops": (("六道轮回天功", "功法", 0.08, "传说"), ("仙王精血", "材料", 0.30, "传说"))},
-        {"name": "黑暗古祖", "skills": ("黑暗侵蚀", "不朽之触", "黑暗牢笼"),
-         "drops": (("黑暗物质样本", "材料", 0.40, "稀有"), ("折仙咒原本", "材料", 0.15, "传说"))}),
-    "核心区域": (
-        {"name": "仙古意志投影", "skills": ("法则压制", "道则领域", "天罚降临"),
-         "drops": (("道韵结晶", "材料", 0.30, "神话"), ("法则感悟", "材料", 0.50, "传说"))},
-        {"name": "纪元终结者", "skills": ("纪元终结", "时间静止", "因果抹杀"),
-         "drops": (("时间法则碎片", "材料", 0.20, "神话"), ("唯一道则", "材料", 0.05, "神话"))}),
-}
 
 
-def explore_options(location: str, rng: Callable[[], float]) -> list[dict]:
-    base = [
-        {"id": "daoyun", "icon": "🌊", "label": "东方·灵力波动涌来——感应到浓郁道韵",
-         "bias": {"daoyun": 0.5, "item": 0.2, "fight": 0.15, "special": 0.1}},
-        {"id": "item", "icon": "💎", "label": "西方·古物气息弥漫——似乎有宝物埋藏",
-         "bias": {"item": 0.5, "daoyun": 0.2, "lingshi": 0.2, "special": 0.1}},
-        {"id": "fight", "icon": "⚔️", "label": "深处·隐约传来打斗声——或有战斗",
-         "bias": {"fight": 0.5, "lingshi": 0.2, "item": 0.2, "daoyun": 0.1}},
-    ]
-    if location in ("深层区域", "核心区域", "火道禁区"):
-        base.append({"id": "special", "icon": "✨", "label": "北方·古老遗迹显现——可能有惊天发现",
-                     "bias": {"special": 0.5, "daoyun": 0.2, "item": 0.2, "fight": 0.1}})
-    if location == "火道禁区":
-        base.append({"id": "seed", "icon": "🌟", "label": "深渊·三千道火翻涌——感悟火道道种气息",
-                     "bias": {"item": 0.5, "special": 0.2, "daoyun": 0.2, "fight": 0.1}})
-    return _shuffle(rng, base)[:3]
 
 
-def options_text(options: list[dict]) -> str:
-    lines = ["【神识探索·三径择一】"]
-    for i, opt in enumerate(options, 1):
-        lines.append(f"{i}. {opt['icon']} {opt['label']}")
-    lines += ["", "回复 1/2/3 选择探索方向。"]
-    return "\n".join(lines)
 
 
-def _flame_trial(doc: Any, st: dict, now: float,
-                 rng: Callable[[], float]) -> tuple[str, dict]:
-    """三千道火试炼：三波焚身，扛过得三千道火种 + 道火精粹。"""
-    hp_max = _hp_max_of(doc)
-    hp = _hp_of(doc)
-    for i in range(3):
-        burn = int(hp_max * 0.15 * (1 + i * 0.3))
-        hp -= burn
-        if hp <= 0:
-            _set_hp(doc, 1)
-            return ("\n".join([
-                "【三千道火·大道试炼】", "",
-                "第一波道火焚身，肉身龟裂！",
-                "第二波道火袭来，道基震颤！",
-                "第三波道火铺天盖地，你终于支撑不住...", "",
-                "【试炼失败】生命降至 1 点，需休养后再挑战。"]), {})
-        _set_hp(doc, hp)
-    _set_hp(doc, max(1, int(hp_max * 0.2)))
-    st["daohuo_jingcui"] = int(st.get("daohuo_jingcui", 0) or 0) + 1
-    seed = {"名称": "三千道火种", "品质": "神话", "类型": "火道", "融合成功率": 0.95,
-            "属性加成": {"攻击加成": 0.1, "血气加成": 0.1},
-            "专属技能": "万火共鸣", "额外效果": "不受秘境境界压制", "顶级道种": False}
-    bag_add_seed(st["bag"], seed)
-    return "\n".join([
-        "【三千道火·大道试炼·通过！！！】", "",
-        "第一波道火焚身——肉身抽搐，却咬牙坚持！",
-        "第二波道火更烈——道基轰鸣，血液都在沸腾！",
-        "第三波道火铺天盖地——你硬扛三千道火！", "",
-        "【获得】三千道火种 [神话]｜道火精粹 +1",
-        "专属技能：万火共鸣｜融合成功率 95%"]), {"daoyun": 20}
 
 
-def perform_explore(doc: Any, st: dict, location: str, bias: Mapping | None,
-                    cfg: Mapping, rng: Callable[[], float], now: float,
-                    battle: Callable[[dict, str], tuple[bool, list[str]]] | None = None,
-                    crowned: bool = False) -> tuple[str, dict]:
-    """探索选择结算（原版 performExplore）。返回 (message, extra_gains)。
 
-    battle(enemy_spec, battle_type) -> (won, log_lines)：handler 组装双方走
-    combat.run_1v1；core 只产出敌规格并消费战果。
-    """
-    gains: dict[str, int] = {}
-    risk = _LOCATION_RISKS.get(location) or _LOCATION_RISKS["边缘区域"]
-    infamy = int(st.get("infamy", 0) or 0)
-    eff = explore_efficiency(st, now)
-    risk_mult = min(1.0, risk["risk"] + min(0.5, infamy / 500))
-    boss_chance = min(1.0, risk["boss"] + infamy / 1000)
-    success = min(0.95, risk["success"] + (xg_level_of(doc) - 5) * 0.03) * eff
-
-    # 门槛检查：凶名 PvP 伏击预警（不做真实 PvP，警示文案）
-    thresholds = {"daoyun": 0.40, "lingshi": 0.30, "item": 0.15, "fight": 0.10, "special": 0.05}
-    for key, boost in (bias or {}).items():
-        thresholds[key] = thresholds.get(key, 0.1) + float(boost) * 0.5
-    total = sum(thresholds.values()) or 1.0
-    thresholds = {k: v / total for k, v in thresholds.items()}
-
-    if rng.random() >= success:
-        fails = (f"{getattr(doc, 'name', '')}在{location}中搜索良久，却一无所获...",
-                 "岁月沧桑，此地机缘早已被前人取尽...",
-                 "迷雾重重，方向难辨，探索无果...")
-        return ("\n".join(["【探索·无果】", "", _pick(rng, list(fails)), "",
-                           f"【探索统计】位置：{location}｜危险：{'★' * int(risk['risk'] * 5 + 1)}"]), gains)
-
-    mult = risk["reward"] / 30.0
-    roll = rng.random()
-    cum = 0.0
-    kind = "special"
-    for key in ("daoyun", "lingshi", "item", "fight"):
-        cum += thresholds[key]
-        if roll < cum:
-            kind = key
-            break
-
-    if kind == "daoyun":
-        gain = int(risk["reward"] * (0.8 + rng.random() * 0.4))
-        gains["daoyun"] = gains.get("daoyun", 0) + gain
-        st.setdefault("gains", {})
-        st["gains"]["daoyun"] = int(st["gains"].get("daoyun", 0) or 0) + gain
-        xw, xq = calc_rewards(doc, mult, rng)
-        rw = grant_growth(doc, xw, xq)
-        msg = "\n".join([
-            "【探索·道韵领悟】", "",
-            f"{getattr(doc, 'name', '')}盘膝而坐，感悟{location}中的残留道则...", "",
-            f"【获得】道韵 +{gain}｜修为 +{rw['xiuwei']:,}｜血气 +{rw['xueqi']:,}",
-            f"当前位置道韵：{st['gains']['daoyun']} 💎"])
-        return msg, gains
-
-    if kind == "lingshi":
-        xw, xq = calc_rewards(doc, mult, rng)
-        stone = int(5_000 * mult * (0.8 + rng.random() * 0.4))
-        rw = grant_growth(doc, xw, xq, stone_rolls=1)
-        msg = "\n".join([
-            "【探索·源石矿脉】", "",
-            f"{getattr(doc, 'name', '')}挖掘出一处仙古源石矿脉，浓郁源气自裂隙间喷薄而出！", "",
-            f"【获得】源石 +{rw['source_stone']:,}（暂存秘境背包）｜"
-            f"修为 +{rw['xiuwei']:,}｜血气 +{rw['xueqi']:,}"])
-        return msg, gains
-
-    if kind == "item":
-        items = list(_LOCATION_ITEMS.get(location) or _LOCATION_ITEMS["边缘区域"])
-        item = _pick(rng, items)
-        if item.get("trial"):
-            text, extra = _flame_trial(doc, st, now, rng)
-            for k, v in extra.items():
-                gains[k] = gains.get(k, 0) + v
-            return "【探索·奇遇·试炼】" + text, gains
-        bag_add_item(st["bag"], item)
-        gains[item["name"]] = 1
-        xw, xq = calc_rewards(doc, mult, rng)
-        rw = grant_growth(doc, xw, xq)
-        msg = "\n".join([
-            f"【探索·奇遇·{item['rarity']}】", "",
-            f"{getattr(doc, 'name', '')}在{location}深处发现一处隐蔽的遗迹...", "",
-            f"【获得】{item['name']} × 1｜修为 +{rw['xiuwei']:,}｜血气 +{rw['xueqi']:,}",
-            "", f"【物品说明】{item['desc']}"])
-        return msg, gains
-
-    if kind == "fight":
-        if rng.random() < min(0.3, infamy / 500):
-            return "\n".join([
-                "【遭遇·伏击】", "",
-                f"{getattr(doc, 'name', '')}在{location}探索时突感杀意凛然——有修士伏击！", "",
-                f"因凶名过盛（{infamy}），你的行踪已经暴露！",
-                "建议前往核心区域撤离，或循地图反杀猎手。"]), gains
-        zone_factor = {"边缘区域": 0.1, "中层区域": 0.2, "深层区域": 0.4,
-                       "核心区域": 0.6, "火道禁区": 0.8}.get(location, 0.1)
-        if rng.random() < boss_chance:
-            return _explore_boss(doc, st, location, cfg, rng, mult, battle, zone_factor), gains
-        enemy_names = ("仙古遗种", "秘境守卫", "迷途怨灵", "异域修士")
-        name = _pick(rng, list(enemy_names))
-        lv = xg_level_of(doc)
-        enemy = make_enemy(name, max(2, lv - 1), zone_factor, bao=0.03, orb=0.08,
-                           crit=0.03, hp_scale=0.5, atk_scale=0.5, def_scale=0.5)
-        if battle is None:
-            won, log_lines = True, ["（演武：跳过战斗）"]
-        else:
-            won, log_lines = battle(enemy, "xiangu_normal")
-        if won:
-            xw, xq = calc_rewards(doc, mult * 1.5, rng)
-            rw = grant_growth(doc, xw, xq, stone_rolls=1)
-            infamy_gain = int(5 * mult)
-            st["infamy"] = int(st.get("infamy", 0) or 0) + infamy_gain
-            gains["xiongmng"] = infamy_gain
-            drop_txt = ""
-            if should_drop_seed_b(doc, cfg, location, "treasure", rng):
-                seed = draw_seed(cfg, location, None, "treasure", rng=rng)
-                bag_add_seed(st["bag"], seed)
-                drop_txt = (f"\n\n【意外之喜！】击败{name}后发现其体内蕴含道种！\n"
-                            f"◇ {seed['名称']} [{seed['品质']}]｜"
-                            f"融合成功率 {(seed['融合成功率'] * 100):.0f}%")
-            msg = "\n".join([
-                "【探索·遭遇·战斗】", "",
-                f"{getattr(doc, 'name', '')}在{location}遭遇一头{name}！",
-                *log_lines[-4:], "",
-                f"【获得】修为 +{rw['xiuwei']:,}｜血气 +{rw['xueqi']:,}｜"
-                f"源石 +{rw['source_stone']:,}｜凶名 +{infamy_gain}"]) + drop_txt
-            return msg, gains
-        hp_loss = int(_hp_of(doc) * 0.25)
-        _set_hp(doc, max(1, _hp_of(doc) - hp_loss))
-        apply_heavy_injury(st, now)
-        pending = {"npc": name, "expires_at": now + 60_000, "source": "explore"}
-        st["pending_defeat"] = pending
-        msg = "\n".join([
-            "【探索·遭遇·战斗】", "",
-            f"{getattr(doc, 'name', '')}在{location}遭遇一头{name}！",
-            *log_lines[-4:], "",
-            f"{getattr(doc, 'name', '')}力战不敌，重伤倒地！",
-            f"【损失】血量 -{hp_loss:,}｜状态：重伤（30 分钟探索效率 -50%）", "",
-            _defeat_menu(name)])
-        return msg, gains
-
-    # special：惊天发现
-    specials = list(_SPECIAL_ITEMS.get(location) or ())
-    if not specials:
-        return "【探索·无果】四周一片虚无...", gains
-    special = _pick(rng, specials)
-    if special.get("trial"):
-        text, extra = _flame_trial(doc, st, now, rng)
-        for k, v in extra.items():
-            gains[k] = gains.get(k, 0) + v
-        return "【探索·惊天发现·试炼】" + text, gains
-    bag_add_item(st["bag"], special)
-    gains[special["name"]] = 1
-    xw, xq = calc_rewards(doc, mult * 2, rng)
-    rw = grant_growth(doc, xw, xq)
-    msg = "\n".join([
-        f"【探索·惊天发现·{special['rarity']}】", "",
-        f"{getattr(doc, 'name', '')}在{location}深处感应到一股浩瀚的气息...", "",
-        f"【发现】{special['name']}",
-        f"【获得】修为 +{rw['xiuwei']:,}｜血气 +{rw['xueqi']:,}",
-        "", f"【物品说明】{special['desc']}"])
-    return msg, gains
-
-
-def _explore_boss(doc: Any, st: dict, location: str, cfg: Mapping,
-                  rng: Callable[[], float], mult: float,
-                  battle: Callable | None, zone_factor: float) -> str:
-    defs = _BOSS_DEFS.get(location) or _BOSS_DEFS["中层区域"]
-    bdef = _pick(rng, list(defs))
-    boss_lv = {"中层区域": 7, "深层区域": 9, "核心区域": 11, "火道禁区": 13}.get(location, 7)
-    infamy = int(st.get("infamy", 0) or 0)
-    atk_scale = 1.0 + (infamy / 500 if infamy > 100 else 0.0)
-    hp_scale = 1.0 + (infamy / 1000 if infamy > 100 else 0.0)
-    enemy = make_enemy(bdef["name"], boss_lv, zone_factor, bao=0.10, orb=0.15,
-                       skills=tuple(bdef["skills"][:2]), crit=0.1,
-                       hp_scale=hp_scale, atk_scale=atk_scale)
-    if battle is None:
-        won, log_lines = True, ["（演武：跳过战斗）"]
-    else:
-        won, log_lines = battle(enemy, "xiangu_boss")
-    if won:
-        risk_mult = {"深层区域": 2, "核心区域": 3}.get(location, 1)
-        xw, xq = calc_rewards(doc, 3 * risk_mult, rng)
-        rw = grant_growth(doc, xw, xq, stone_rolls=1)
-        infamy_gain = int(20 * risk_mult)
-        st["infamy"] = int(st.get("infamy", 0) or 0) + infamy_gain
-        st.setdefault("gains", {})
-        st["gains"]["daoyun"] = int(st["gains"].get("daoyun", 0) or 0) + int(50 * risk_mult)
-        drops = []
-        for d_name, d_type, d_chance, d_rarity in bdef["drops"]:
-            if rng.random() < d_chance:
-                bag_add_item(st["bag"], {"name": d_name, "type": d_type, "rarity": d_rarity,
-                                         "desc": f"击败{bdef['name']}掉落的战利品"})
-                drops.append(f"{d_name}（{d_rarity}）")
-        seed_txt = ""
-        if should_drop_seed_b(doc, cfg, location, "boss", rng):
-            seed = draw_seed(cfg, location, None, "boss", rng=rng)
-            bag_add_seed(st["bag"], seed)
-            seed_txt = f"\n【Boss 道种掉落】{seed['名称']} [{seed['品质']}]"
-        return "\n".join([
-            f"【Boss遭遇·激战】", "",
-            f"{getattr(doc, 'name', '')}在{location}遭遇了{bdef['name']}！",
-            *log_lines[-4:], "",
-            f"【战斗奖励】",
-            f"修为 +{rw['xiuwei']:,}｜血气 +{rw['xueqi']:,}｜源石 +{rw['source_stone']:,}",
-            f"凶名 +{infamy_gain}｜道韵 +{int(50 * risk_mult)}",
-            *(f"掉落：{d}" for d in drops)]) + seed_txt
-    hp_loss = int(_hp_of(doc) * 0.4)
-    _set_hp(doc, max(1, _hp_of(doc) - hp_loss))
-    apply_heavy_injury(st, time.time())
-    return "\n".join([
-        "【Boss遭遇·惨败】", "",
-        f"{getattr(doc, 'name', '')}在{location}遭遇了{bdef['name']}，拼尽全力仍难以为敌！",
-        *log_lines[-4:], "",
-        f"【损失】血量 -{hp_loss:,}｜状态：重伤（30 分钟探索效率 -50%）"])
-
-
-def _defeat_menu(npc_name: str) -> str:
-    return "\n".join([
-        "【生死抉择·60 秒】",
-        f"「{npc_name}」的兵刃已经架上你的脖颈——",
-        "#求饶　卑辞厚礼，或可苟活（邪恶存在仍可能痛下杀手，道心 -50）",
-        "#任凭鱼肉　不存侥幸，任其处置（失去全部秘境收获，道心 -35）"])
 
 
 # ---------------------------------------------------------------- 移动（XianguRealmMove 移植）
@@ -1933,6 +1616,37 @@ def _boundary(map_st: Mapping, cur: Mapping, nxt: Mapping) -> dict | None:
 
 def _exit_unlocked(map_st: Mapping, x: int, y: int) -> bool:
     return any(e["x"] == x and e["y"] == y for e in revealed_exits(map_st))
+
+
+def _enter_fragment(doc: Any, st: dict, target: str, return_direction: str,
+                    claims: Mapping | None = None) -> tuple[str, dict]:
+    map_st = st["map"]
+    seed = str(st.get("world_seed") or "")
+    previous_id = str(map_st["fragment_id"])
+    snapshot = _snapshot(map_st)
+    if snapshot:
+        st.setdefault("history", {})[previous_id] = snapshot
+    restored = _restore(st.get("history", {}).get(target), target)
+    if restored:
+        st["history"].pop(target, None)
+        map_st.clear()
+        map_st.update(restored)
+    else:
+        connections = bind_return_connection(
+            seed, target, create_connections(seed, target), return_direction, previous_id
+        )
+        map_st.clear()
+        map_st.update(create_fragment_state(seed, target, connections))
+        reveal(map_st, map_st["pos"], 1)
+    if claims is not None:
+        sync_shared_claims(st, claims)
+    map_st["steps"] = int(map_st.get("steps", 0) or 0) + 1
+    st["location"] = FRAGMENTS[target]["zone"]
+    events = {"transition": target, "pending_defeat": False, "hp_loss": 0}
+    if target == "chaos_mosquito":
+        events["hp_loss"] = _mosquito_drain(doc)
+    fragment = FRAGMENTS[target]
+    return (f"【碎片穿越】你穿过出口，踏入「{fragment['name']}」！\n{fragment['desc']}"), events
 
 
 def move(doc: Any, st: dict, key: str, steps: int, cfg: Mapping,
@@ -2006,32 +1720,11 @@ def move(doc: Any, st: dict, key: str, steps: int, cfg: Mapping,
             block = fragment_entry_block(doc, target, bool((st.get("crowned") or "")))
             if block:
                 return block, events
-            seed = str(st.get("world_seed") or "")
-            prev_id = map_st["fragment_id"]
-            snapshot = _snapshot(map_st)
-            if snapshot:
-                st.setdefault("history", {})[prev_id] = snapshot
-            restored = _restore(st.get("history", {}).get(target), target)
-            if restored:
-                st["history"].pop(target, None)
-                map_st.clear()
-                map_st.update(restored)
-            else:
-                connections = bind_return_connection(seed, target,
-                                                     create_connections(seed, target),
-                                                     b["enter_direction"], prev_id)
-                new_state = create_fragment_state(seed, target, connections)
-                map_st.clear()
-                map_st.update(new_state)
-                reveal(map_st, map_st["pos"], 1)
-            if claims is not None:
-                sync_shared_claims(st, claims)
-            map_st["steps"] = int(map_st.get("steps", 0) or 0) + 1
-            st["location"] = FRAGMENTS[target]["zone"]
-            events["transition"] = target
-            if target == "chaos_mosquito":
-                events["hp_loss"] = _mosquito_drain(doc)
-            return f"【碎片穿越】你穿过出口，踏入「{FRAGMENTS[target]['name']}」！\n{FRAGMENTS[target]['desc']}", events
+            message, transition_events = _enter_fragment(
+                doc, st, target, b["enter_direction"], claims
+            )
+            events.update(transition_events)
+            return message, events
         return "【边界受阻】\n向该方向走去，却撞上了一面无形的空间壁垒...此处并非出口。", events
 
     cell = map_st["grid"][nxt["y"]][nxt["x"]]
@@ -2074,6 +1767,104 @@ def move(doc: Any, st: dict, key: str, steps: int, cfg: Mapping,
         if _hp_of(doc) <= _hp_max_of(doc) * 0.1:
             msg += "\n⚠️ 血气过低！速离此地！"
     return msg, events
+
+
+_ZONE_ALIASES = {
+    "边缘": "边缘区域", "边缘区域": "边缘区域", "接引古殿": "边缘区域",
+    "初代营地": "边缘区域", "法则石碑": "边缘区域",
+    "中层": "中层区域", "中层区域": "中层区域", "十凶传承地": "中层区域",
+    "仙药园": "中层区域", "真龙巢穴": "中层区域", "天角蚁埋骨地": "中层区域",
+    "深层": "深层区域", "深层区域": "深层区域", "仙王讲道台": "深层区域",
+    "黑暗牢笼": "深层区域", "折仙咒遗迹": "深层区域",
+    "核心": "核心区域", "核心区域": "核心区域", "仙古花蕾": "核心区域",
+    "仙古花蕾·核心": "核心区域",
+    "火道": "火道禁区", "火道禁区": "火道禁区", "万火深渊": "火道禁区",
+    "擂台": "擂台区域", "擂台区域": "擂台区域", "仙古擂台": "擂台区域",
+    "终极": "终极区域", "终极区域": "终极区域", "终极造化地": "终极区域",
+    "隐藏": "隐藏区域", "隐藏区域": "隐藏区域",
+}
+_EXIT_MOVE_KEYS = {"top": "上", "bottom": "下", "left": "左", "right": "右"}
+
+
+def normalize_zone_name(value: str) -> str | None:
+    return _ZONE_ALIASES.get(str(value or "").strip())
+
+
+def move_to_zone(doc: Any, st: dict, target: str, cfg: Mapping,
+                 rng: Callable[[], float], now: float,
+                 claims: Mapping | None = None) -> tuple[str, dict]:
+    """沿已揭示出口开启跨区旅行；无需先移动到出口格。"""
+    zone = normalize_zone_name(target)
+    no_move = {"transition": None, "no_move": True}
+    if not zone:
+        return (f"【秘境移动·未知区域】未识别区域「{target}」。可用区域："
+                "边缘区域、中层区域、深层区域、火道禁区、擂台区域、核心区域、"
+                "终极区域、隐藏区域。"), no_move
+
+    map_st = st.get("map") or {}
+    if not map_st:
+        return "秘境地图已失效，请重新进入。", no_move
+    current_zone = str(FRAGMENTS.get(map_st.get("fragment_id"), {}).get("zone")
+                       or st.get("location") or "")
+    if current_zone == zone:
+        return f"【秘境移动·原地不动】你当前就在{zone}，无需再次移动。", no_move
+    block = zone_entry_block(doc, zone)
+    if block:
+        return block, no_move
+
+    exits = [exit_ for exit_ in revealed_exits(map_st)
+             if str(FRAGMENTS.get(exit_.get("target"), {}).get("zone") or "") == zone]
+    if not exits:
+        return (f"【秘境移动·出口未探明】尚未发现通往{zone}的已揭示出口。"
+                "请先使用 #秘境探索 揭示周围地图。"), no_move
+
+    exit_ = exits[0]
+    target_id = str(exit_["target"])
+    entry_block = fragment_entry_block(doc, target_id, bool(st.get("crowned")))
+    if entry_block:
+        return entry_block, no_move
+
+    area_levels = {"边缘区域": 1, "中层区域": 2, "深层区域": 3,
+                   "擂台区域": 4, "核心区域": 4, "火道禁区": 5,
+                   "终极区域": 5, "隐藏区域": 5}
+    current_level = area_levels.get(current_zone, 1)
+    target_level = area_levels.get(zone, 5)
+    target_risk = {"边缘区域": 0.1, "中层区域": 0.3, "深层区域": 0.5,
+                   "擂台区域": 0.7, "核心区域": 0.7, "火道禁区": 0.85,
+                   "终极区域": 0.9, "隐藏区域": 0.9}.get(zone, 0.3)
+    encounter_chance = min(1.0, abs(target_level - current_level) * 0.1 + target_risk * 0.5)
+    move_time = abs(target_level - current_level) * 3 + int(rng.random() * 5)
+    encounter = _pick(rng, ["迷路", "伏击", "陷阱", "时空乱流"]) if rng.random() < encounter_chance else None
+    hp_loss = 0
+    travel_lines = [
+        "【秘境移动中】",
+        f"你离开{current_zone}，前往{zone}。",
+        f"移动时间：约{move_time}分钟｜途中遭遇危险概率：{encounter_chance * 100:.1f}%",
+    ]
+    if encounter:
+        if encounter in ("伏击", "时空乱流"):
+            hp_loss = int(_hp_of(doc) * 0.1)
+            _set_hp(doc, max(1, _hp_of(doc) - hp_loss))
+            travel_lines += [f"【移动意外·{encounter}】你在穿越途中受伤，血量 -{hp_loss:,}。"]
+        else:
+            travel_lines += [f"【移动意外·{encounter}】你避开途中险情，继续前行。"]
+
+    return_direction = _OPPOSITE.get(str(exit_.get("direction") or ""), "bottom")
+    arrival, events = _enter_fragment(doc, st, target_id, return_direction, claims)
+    events.update({"no_move": False, "encounter": encounter,
+                   "encounter_chance": encounter_chance, "move_time": move_time,
+                   "hp_loss": hp_loss + int(events.get("hp_loss", 0) or 0)})
+    travel_lines.extend(("", arrival))
+    return "\n".join(travel_lines), events
+
+
+def _defeat_menu(npc_name: str) -> str:
+    return "\n".join([
+        "【生死抉择·60 秒】",
+        f"「{npc_name}」的兵刃已经架上你的脖颈——",
+        "#求饶　卑辞厚礼，或可苟活（邪恶存在仍可能痛下杀手，道心 -50）",
+        "#任凭鱼肉　不存侥幸，任其处置（失去全部秘境收获，道心 -35）",
+    ])
 
 
 def _mosquito_drain(doc: Any) -> int:
@@ -2655,17 +2446,17 @@ def rules_text() -> str:
         f"【生命周期】闭合 → 花蕾现世({LIFE_PREPARE_Y}年) → 绽放({LIFE_OPEN_Y}年) → 闭合，"
         f"每 {LIFE_BLOOM_INTERVAL_Y} 年判定一次，逐次 +10% 开启概率",
         "",
-        "【指令速查】#进入仙古秘境 / #秘境状态 / #秘境地图 / #秘境探索(1/2/3) / "
-        "#上#下#左#右#左上… / #秘境推演 / #秘境背包 / #秘境目标 / #寻找NPC / "
+        "【指令速查】#进入仙古秘境 / #秘境状态 / #秘境地图 / #秘境探索（神识开图，冷却25秒） / "
+        "#上#下#左#右#左上… / #秘境移动 区域名（从已探明出口穿越） / #秘境推演 / "
+        "#秘境背包 / #秘境目标 / #寻找NPC / "
         "#离开仙古秘境 / #紧急撤离 / #确认撤离 / #查看道种 / #查看神火 / #祭炼真我",
     ])
 
 
-# ---------------------------------------------------------------- 探索回合编排（#秘境探索 / 1|2|3）
+# ---------------------------------------------------------------- 神识开图（#秘境探索）
 
 EXPLORE_CD_MS = 25_000
 MOVE_CD_MS = 2_000
-OPTIONS_TTL_MS = 60_000
 
 
 def _cd_ready(st: dict, key: str, now_ms: float) -> tuple[bool, int]:
@@ -2681,37 +2472,45 @@ def _cd_set(st: dict, key: str, until_ms: float) -> None:
 
 def explore_turn(doc: Any, st: dict, rng: Callable[[], float], now_ms: float,
                  claims: Mapping | None = None) -> tuple[str, dict]:
-    """#秘境探索：仙髓池显化 + 揭示 + 出口悟道 + 共鸣/神识反馈 + 三选项。"""
-    events: dict[str, Any] = {"placed_pool": None}
+    """#秘境探索：展开神识，揭示周边并反馈感知到的动静。"""
+    events: dict[str, Any] = {"explored": False, "placed_pool": None}
     map_st = st.get("map")
     if not map_st:
         return "秘境地图已失效，请重新进入。", events
-    ok, remain = _cd_ready(st, "explore", now_ms)
-    if not ok:
-        return (f"【探索冷却中】稍作休整，等待下一次探索...剩余 {remain} 秒。\n"
-                "提示：秘境中不宜频繁探索，以免惊动守护者"), events
+    pending = st.get("pending_defeat")
+    if isinstance(pending, dict):
+        return (f"【身陷绝境】你正被「{pending.get('npc') or '秘境存在'}」压制，"
+                "请先发送 #求饶 或 #任凭鱼肉 做出生死抉择。"), {**events, "pending_defeat": True}
+
+    ready, remain = _cd_ready(st, "explore", now_ms)
+    if not ready:
+        return f"【探索冷却中】请稍等 {remain} 秒再展开神识。", events
+
+    lines: list[str] = []
+    if st.pop("evac", None):
+        lines += ["【撤离中断】你重新展开神识探索，撤离通道随之消散。", ""]
     _cd_set(st, "explore", now_ms + EXPLORE_CD_MS)
     if claims is not None:
         sync_shared_claims(st, claims)
-    cfg = marrow_config()
+    marrow = marrow_config()
     exits_before = len(revealed_exits(map_st))
-    placed = None
-    if rng.random() < cfg["chance"] * explore_efficiency(st, now_ms / 1000):
+    if rng.random() < marrow["chance"] * explore_efficiency(st, now_ms / 1000):
         placed = place_marrow_pool(map_st, rng)
         if placed:
             events["placed_pool"] = placed["pos"]
     reveal(map_st, map_st["pos"], divine_range(doc))
     exit_gain = exit_discovery_daoyun(st, map_st, exits_before, doc)
 
-    lines: list[str] = []
-    if placed:
+    lines += [render_grid(map_st, doc, st.get("gains")), ""]
+    if events["placed_pool"]:
+        pool = events["placed_pool"]
         lines += [f"💧【机缘显化·{MARROW_POOL_NAME}】",
                   "神识扫过时，万道水光忽然冲破迷雾！",
-                  f"宝池坐标：[{placed['pos']['x']}, {placed['pos']['y']}]，可按地图方向前往。", ""]
+                  f"宝池坐标：[{pool['x']}, {pool['y']}]，可按地图方向前往。", ""]
     if exit_gain > 0:
-        lines.append(f"⊕【出口悟道】新出口的空间法则显化，道韵 +{exit_gain}。")
+        lines.append(f"⊕【出口悟道】新探明出口，道韵 +{exit_gain}。")
     if explore_efficiency(st, now_ms / 1000) < 1:
-        lines.append("🩸【重伤】神识运转受阻，本次机缘发现率降低50%。")
+        lines.append("🩸【重伤】神识运转受阻，仙髓池显化率降低50%。")
     for echo in check_echo(map_st):
         lines.append(f"🔥【道韵共鸣】{echo['msg']}")
     perceptions = divine_perception(map_st, doc, rng)
@@ -2720,18 +2519,11 @@ def explore_turn(doc: Any, st: dict, rng: Callable[[], float], now_ms: float,
         lines += [f"· {p}" for p in perceptions[:6]]
     if map_st.get("fragment_id") == "chaos_mosquito":
         loss = _mosquito_drain(doc)
-        lines.append(f"🦟 混沌蚊群疯狂吸血！-{loss:,}...")
-    options = explore_options(str(st.get("location") or FRAGMENTS.get(map_st["fragment_id"], {}).get("zone", "边缘区域")), rng)
-    st["options"] = {"expires_at": now_ms + OPTIONS_TTL_MS,
-                     "list": json.loads(json.dumps(options, ensure_ascii=False))}
-    frag = FRAGMENTS.get(map_st["fragment_id"], {})
-    revealed = sum(1 for row in map_st["revealed"] for c in row if c)
-    lines += ["", render_grid(map_st, doc, st.get("gains")),
-              "", options_text(options),
-              "",
-              f"碎片：{frag.get('name', '未知')}｜探索步数：{map_st.get('steps', 0)}｜"
-              f"揭示进度：{revealed}/{int(map_st['w']) * int(map_st['h'])}格",
-              f"描述：{frag.get('desc', '')}"]
+        lines.append(f"🦟 混沌蚊群疯狂吸血！生命力在流逝（-{loss:,}）...")
+        if _hp_of(doc) <= _hp_max_of(doc) * 0.1:
+            lines.append("⚠️ 血气过低！速离此地！")
+
+    events["explored"] = True
     return "\n".join(lines), events
 
 
@@ -2766,41 +2558,6 @@ def divine_perception(map_st: Mapping, doc: Any, rng: Callable[[], float]) -> li
             if msg and (dir_name not in grouped or grouped[dir_name][0] > dist):
                 grouped[dir_name] = (dist, f"{dir_name}：{msg}")
     return [v[1] for v in grouped.values()]
-
-
-def choose_explore(doc: Any, st: dict, idx: int, cfg: Mapping, rng: Callable[[], float],
-                   now_ms: float, battle: Callable | None = None,
-                   claims: Mapping | None = None) -> tuple[str, dict]:
-    """1/2/3 选项结算：过期作废、战败抉择拦截、收益入账。"""
-    events: dict[str, Any] = {}
-    options = st.get("options") or {}
-    lst = options.get("list") if isinstance(options, dict) else None
-    if not lst or now_ms > float(options.get("expires_at", 0) or 0):
-        st.pop("options", None)
-        return "【选项已消散】机缘稍纵即逝，请重新 #秘境探索。", events
-    if not 1 <= idx <= len(lst):
-        return f"【无效选择】请回复 1-{len(lst)}。", events
-    pending = st.get("pending_defeat")
-    if isinstance(pending, dict):
-        if float(pending.get("expires_at", 0) or 0) < now_ms:
-            text = settle_defeat_choice(doc, st, "slaughter", now_ms)
-            return text, {**events, "defeated": True}
-        return ("【身陷绝境】你正被「" + str(pending.get("npc") or "秘境存在")
-                + "」压制，生死未卜！\n\n请先发送 #求饶 或 #任凭鱼肉 做出抉择。"), events
-    chosen = lst[idx - 1]
-    st.pop("options", None)
-    if claims is not None:
-        sync_shared_claims(st, claims)
-    location = str(st.get("location") or FRAGMENTS.get((st.get("map") or {}).get("fragment_id", ""), {}).get("zone", "边缘区域"))
-    text, gains = perform_explore(doc, st, location, chosen.get("bias"), cfg, rng,
-                                  now_ms / 1000, battle)
-    gains_st = st.setdefault("gains", {})
-    for key, value in gains.items():
-        if key in ("daoyun", "xiongmng"):
-            continue
-        gains_st[key] = int(gains_st.get(key, 0) or 0) + int(value)
-    events["defeated"] = bool(st.get("pending_defeat"))
-    return text, events
 
 
 # ---------------------------------------------------------------- 战败抉择（#求饶 / #任凭鱼肉）

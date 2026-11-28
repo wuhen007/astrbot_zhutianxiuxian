@@ -663,6 +663,8 @@ CMD_STONE_LEDGER = "#源石账本"
 CMD_FACTION_LIST = "#势力列表"
 CMD_FACTION_JOIN = "#加入势力"
 CMD_FACTION_LEAVE = "#退出势力"
+CMD_FACTION_QUIT_CONFIRM = "#确认脱离势力"
+CMD_FACTION_QUIT_CANCEL = "#取消脱离势力"
 CMD_FACTION_CONTRIB = "#势力贡献"
 CMD_FACTION_SALARY = "#势力俸禄"
 CMD_FACTION_STATUS = "#势力状态"
@@ -958,6 +960,7 @@ CMD_XGM_ENTER = "#进入仙古秘境"
 CMD_XGM_STATUS = "#秘境状态"
 CMD_XGM_MAP = "#秘境地图"
 CMD_XGM_EXPLORE = "#秘境探索"
+CMD_XGM_MOVE = "#秘境移动"
 CMD_XGM_BAG = "#秘境背包"
 CMD_XGM_GOAL = "#秘境目标"
 CMD_XGM_FINDNPC = "#寻找NPC"
@@ -1344,7 +1347,7 @@ ITEM_TABLES = (
     PLUGIN_NAME,
     "wuhen",
     "诸天万界修仙（Python 重构版）",
-    "0.1.5",
+    "0.5.1",
     "",
 )
 class ZhutianPlugin(Star):
@@ -2677,7 +2680,8 @@ class ZhutianPlugin(Star):
             {"title": "势力", "lines": [
                 (CMD_FACTION_LIST, "三大势力：等级/成员/基金/门槛"),
                 (f"{CMD_FACTION_JOIN} 名字", "加入（首人自动为宗主，俸禄 ×2）"),
-                (CMD_FACTION_LEAVE, "退出（宗主退出自动传位）"),
+                (CMD_FACTION_LEAVE,
+                 f"退出（按钮不可用时：{CMD_FACTION_QUIT_CONFIRM} / {CMD_FACTION_QUIT_CANCEL}）"),
                 (f"{CMD_FACTION_CONTRIB} 灵石数", "1 灵石 = 2 点贡献；每 20 万贡献升 1 级"),
                 (CMD_FACTION_SALARY, "等级×1200 灵石、宗主 ×2，22 小时一次"),
                 (CMD_FACTION_STATUS, "本势力与你的贡献/俸禄"),
@@ -4036,14 +4040,16 @@ class ZhutianPlugin(Star):
         comps = getattr(getattr(event, "message_obj", None), "message", None) or []
         exclude = {str(event.get_self_id() or ""), "qq_official"}
         for c in comps:
-            ctype = getattr(c, "type", None) or c.__class__.__name__
+            ctype = getattr(c, "type", None)
+            ctype = getattr(ctype, "value", ctype) or c.__class__.__name__
             if str(ctype).lower() != "at":
                 continue
             qq = str(getattr(c, "qq", "") or "")
             if qq and qq not in exclude:
                 return qq
         text = event.message_str or ""
-        for pat in (r'<qqbot-at-user\s+id="([^"]+)"', r"<@!?(\w+)>"):
+        for pat in (r'<qqbot-at-user\s+id="([^"]+)"', r"<@!?(\w+)>",
+                    r"@[^()\r\n]*\(([^()\s]+)\)"):
             m = re.search(pat, text)
             if m and m.group(1) not in exclude:
                 return m.group(1)
@@ -15177,12 +15183,14 @@ class ZhutianPlugin(Star):
             return
         r_ = _uk_row([_uk_btn("faction.quit_yes", "✅确认脱离", uid=doc.uid, style="danger"),
                       _uk_btn("faction.quit_no", "取消", uid=doc.uid)],
-                     fallback="#确认脱离势力", timeout=60)
+                     fallback=f"{CMD_FACTION_QUIT_CONFIRM} / {CMD_FACTION_QUIT_CANCEL}", timeout=60)
         res = self._kb(event, f"**脱离势力确认**\n\n**当前身份：** {fkey} 弟子\n"
-                         "> 脱离后职位归零，晋升消耗不予返还。", r_)
+                         f"> 脱离后职位归零，晋升消耗不予返还。\n"
+                         f"> 按钮不可用时，发送 {CMD_FACTION_QUIT_CONFIRM} 确认，或 {CMD_FACTION_QUIT_CANCEL} 取消。", r_)
         if res:
             yield res
 
+    @filter.command(CMD_FACTION_QUIT_CONFIRM, "确认脱离势力")
     async def handle_faction_quit_yes(self, event: AstrMessageEvent):
         """W33：脱离势力确认（按钮/指令双入口）。"""
         if not self._allowed(event):
@@ -15199,6 +15207,7 @@ class ZhutianPlugin(Star):
         await self.db.save_faction(state)
         yield event.plain_result(msg)
 
+    @filter.command(CMD_FACTION_QUIT_CANCEL, "取消脱离势力")
     async def handle_faction_quit_no(self, event: AstrMessageEvent):
         yield event.plain_result("【势力·已取消】已取消脱离，江湖再见。")
 
@@ -26098,8 +26107,9 @@ class ZhutianPlugin(Star):
             f"{doc.name or '修士'}立于三千州上空🌺——仙古花蕾绽放，霞光万道！",
             "你化作一道仙虹，顺着绽放的花瓣，踏入仙古秘境！", "",
             "【开局】接引营地（边缘区域·安全区）｜神识揭示出生点周围",
-            "【指引】#秘境探索 展开三径择一 → 1/2/3 应答",
-            "#上/#下/#左/#右/#左上… 移动（可带步数如 #左5）",
+            "【指引】#秘境探索 展开神识，揭示周围地图（冷却25秒）",
+            "#上/#下/#左/#右/#左上… 八方向逐格探索（可带步数如 #左5）",
+            "#秘境移动 区域名：从已探明的出口穿越到相连碎片",
             "#秘境推演 花 5 道韵窥探 4 格天机",
             "机缘💎危险⚡修士👤出口🚪裂缝🌀唯一机缘✨", "",
             "【撤离】核心区域 #离开仙古秘境｜任意区域 #紧急撤离（读条后 #确认撤离）",
@@ -26124,7 +26134,7 @@ class ZhutianPlugin(Star):
             yield r
         # W31：状态页快捷按钮
         r_ = _uk_row([_uk_btn("xg.status", "🔄刷新", uid=doc.uid),
-                      _uk_btn("xg.choice", "🧭去探索", a1=0, uid=doc.uid)],
+                      _uk_btn("xg.explore", "🧭探索", uid=doc.uid)],
                      fallback="#秘境状态 / #秘境探索", timeout=300)
         res = self._kb(event, "快捷操作：", r_)
         if res:
@@ -26149,7 +26159,7 @@ class ZhutianPlugin(Star):
         async for r in self._smart(event, text, "秘境地图"):
             yield r
 
-    @filter.command(CMD_XGM_EXPLORE, "秘境探索：神识感知 + 三径择一")
+    @filter.command(CMD_XGM_EXPLORE, "秘境探索：展开神识，揭示周围地图")
     @_serialized_player_command
     async def handle_xgm_explore(self, event: AstrMessageEvent):
         if not self._allowed(event):
@@ -26162,69 +26172,72 @@ class ZhutianPlugin(Star):
         if not st.get("active"):
             yield event.plain_result("【未入秘境·何来探索】使用 #进入仙古秘境 踏入秘境。")
             return
-        if st.get("evac"):
-            yield event.plain_result("【撤离中断】你重新展开神识探索，撤离通道随之消散。")
-            st.pop("evac", None)
         now_ms = time.time() * 1000
-        _hp_cur_xe, _hp_max_xe = self._hp_pair(doc)
-        xgm_mod.set_hp_hint(st, _hp_max_xe)
+        _, hp_max = self._hp_pair(doc)
+        xgm_mod.set_hp_hint(st, hp_max)
         cal, world, _note = await self._xg_world(advance=False)
         rng = random.Random(f"{doc.uid}:xgm:explore:{now_ms}")
-        text, _ev = xgm_mod.explore_turn(doc, st, rng, now_ms, world)
-        eco_lines = xn_mod.ecology_step(doc, st, rng, now_ms, self._xg_battle_fn(doc))
-        if eco_lines:
-            text += "\n\n【秘境动态】\n" + "\n".join(eco_lines)
-        qb = xc_mod.quest_bump(doc, st, "explore")
-        if qb:
-            text += "\n\n" + qb
-        await self._pe_save(doc, {}, cal)
+        text, explore_events = xgm_mod.explore_turn(doc, st, rng, now_ms, world)
+        if explore_events["explored"]:
+            eco_lines = xn_mod.ecology_step(doc, st, rng, now_ms, self._xg_battle_fn(doc))
+            if eco_lines:
+                text += "\n\n【秘境动态】\n" + "\n".join(eco_lines)
+            qb = xc_mod.quest_bump(doc, st, "explore")
+            if qb:
+                text += "\n\n" + qb
+            text += ("\n\n【可用指令】#上 / #下 / #左 / #右 / #左上 / #右上 / #左下 / #右下"
+                     "\n#秘境探索 更新视野｜#秘境推演 消耗道韵侦查｜#秘境移动 区域名 从已探明出口穿越")
+            await self._pe_save(doc, {}, cal)
         async for r in self._smart(event, text, "秘境探索"):
             yield r
-        # W31：探索三径按钮（60 秒对齐选项过期）
-        opts = (st.get("options") or {}).get("list") or []
-        btns = [_uk_btn("xg.choice", o.get("label", "?")[:14], a1=i,
-                        uid=doc.uid, style="primary") for i, o in enumerate(opts, 1)]
-        r_ = _uk_row([b for b in btns if b is not None],
-                     fallback="回复 1/2/3 选择探索方向", timeout=60)
-        res = self._kb(event, "请选择本次探索方向（60 秒内）：", r_)
-        if res:
-            yield res
+        if st.get("pending_defeat"):
+            r_ = _uk_row([_uk_btn("xg.mercy", "🙏求饶", uid=doc.uid),
+                          _uk_btn("xg.slaughter", "🩸任凭鱼肉", uid=doc.uid,
+                                  style="danger")],
+                         fallback="#求饶 或 #任凭鱼肉（60 秒内）", timeout=65)
+            res = self._kb(event, "【生死抉择】点击选择（60 秒内）：", r_)
+            if res:
+                yield res
 
-    @filter.regex(r"^([123])$")
-    @_serialized_player_command
-    async def handle_xgm_choice(self, event: AstrMessageEvent):
-        """秘境探索三径择一（仅在持有未过期选项时响应）。"""
-        if not self._allowed(event):
+    async def _xgm_move_action(self, event: AstrMessageEvent, doc: PlayerDoc, st: dict,
+                               now_ms: float, *, direction: str | None = None,
+                               steps: int = 1, target_zone: str | None = None):
+        if not st.get("active"):
+            yield event.plain_result("【未入秘境·何来移动】使用 #进入仙古秘境 踏入秘境。")
             return
-        doc = await self._find_player(event)
-        if not doc:
-            yield event.plain_result("道友尚未踏入仙途，请发送 #开始 开启修仙之路。")
+        if st.get("pending_defeat"):
+            yield event.plain_result("【生死未决】请先发送 #求饶 或 #任凭鱼肉 做出生死抉择。")
             return
-        st = xgm_mod.state_of(doc)
-        if not st.get("active") or not (st.get("options") or {}).get("list"):
-            yield event.plain_result(
-                "【选项已消散】当前没有待选择的探索方向（超时或已选择）。\n"
-                "请重新发送 #秘境探索 生成新选项，再点击按钮。")
+        if st.get("evac"):
+            st.pop("evac", None)
+            yield event.plain_result("【撤离中断】你离开原位，尚未稳定的撤离通道随之崩散。")
+        _hp_cur_mv, _hp_max_mv = self._hp_pair(doc)
+        xgm_mod.set_hp_hint(st, _hp_max_mv)
+        ready, remain = xgm_mod._cd_ready(st, "move", now_ms)
+        if not ready:
+            yield event.plain_result(f"{doc.name or '修士'}刚移动过，请稍等 {remain} 秒再行动。")
             return
-        try:
-            idx = int(self._msg_of(event).strip())
-        except ValueError:
-            yield event.plain_result("【无效选择】请点击按钮或回复 1/2/3。")
-            return
-        if not 1 <= idx <= 3:
-            yield event.plain_result(f"【无效选择】探索方向只有 1-3（收到 {idx}）。")
-            return
-        now_ms = time.time() * 1000
-        _hp_cur_ch, _hp_max_ch = self._hp_pair(doc)
-        xgm_mod.set_hp_hint(st, _hp_max_ch)
         cal, world, _note = await self._xg_world(advance=False)
-        rng = random.Random(f"{doc.uid}:xgm:choice:{now_ms}")
-        text, _ev = xgm_mod.choose_explore(doc, st, idx, xgm_mod.load_config(), rng, now_ms,
-                                           self._xg_battle_fn(doc), world)
+        rng = random.Random(f"{doc.uid}:xgm:move:{target_zone or direction}:{now_ms}")
+        battle_fn = self._xg_battle_fn(doc)
+        if target_zone:
+            text, move_events = xgm_mod.move_to_zone(
+                doc, st, target_zone, xgm_mod.load_config(), rng, now_ms, world)
+        else:
+            text, move_events = xgm_mod.move(
+                doc, st, direction or "", steps, xgm_mod.load_config(), rng, now_ms,
+                battle_fn, world)
+        if move_events.get("transition"):
+            xn_mod.ensure_bindings(doc, st, rng)
+        if not st.get("pending_defeat") and not move_events.get("no_move"):
+            eco_lines = xn_mod.ecology_step(doc, st, rng, now_ms, battle_fn)
+            if eco_lines:
+                text += "\n\n【秘境动态】\n" + "\n".join(eco_lines)
+        if not move_events.get("no_move"):
+            xgm_mod._cd_set(st, "move", now_ms + xgm_mod.MOVE_CD_MS)
         await self._pe_save(doc, {}, cal)
-        async for r in self._smart(event, text, "秘境探索"):
+        async for r in self._smart(event, text, "秘境移动"):
             yield r
-        # W31：战败生死抉择按钮
         if st.get("pending_defeat"):
             r_ = _uk_row([_uk_btn("xg.mercy", "🙏求饶", uid=doc.uid),
                           _uk_btn("xg.slaughter", "🩸任凭鱼肉", uid=doc.uid,
@@ -26244,47 +26257,41 @@ class ZhutianPlugin(Star):
         if err:
             yield event.plain_result(err)
             return
-        st = xgm_mod.state_of(doc)
-        if not st.get("active"):
-            yield event.plain_result("【未入秘境·何来移动】使用 #进入仙古秘境 踏入秘境。")
-            return
-        match = re.match(r"^#(上|下|左|右|左上|右上|左下|右下)(\d*)$", str(event.message_str).strip())
+        match = re.match(r"^#(上|下|左|右|左上|右上|左下|右下)(\d*)$",
+                         str(event.message_str).strip())
         if not match:
             return
-        key, digits = match.group(1), match.group(2)
-        steps = max(1, min(20, int(digits) if digits else 1))
-        now_ms = time.time() * 1000
-        _hp_cur_mv, _hp_max_mv = self._hp_pair(doc)
-        xgm_mod.set_hp_hint(st, _hp_max_mv)
-        ready, remain = xgm_mod._cd_ready(st, "move", now_ms)
-        if not ready:
-            yield event.plain_result(f"{doc.name or '修士'}刚移动过，请稍等 {remain} 秒再行动。")
+        steps = max(1, min(20, int(match.group(2)) if match.group(2) else 1))
+        async for result in self._xgm_move_action(
+                event, doc, xgm_mod.state_of(doc), time.time() * 1000,
+                direction=match.group(1), steps=steps):
+            yield result
+
+    @filter.command(CMD_XGM_MOVE, "秘境移动 区域名：通过已揭示出口发起旅行")
+    @_serialized_player_command
+    async def handle_xgm_move_area(self, event: AstrMessageEvent, area: str = ""):
+        if not self._allowed(event):
             return
-        if st.get("evac"):
-            st.pop("evac", None)
-            yield event.plain_result("【撤离中断】你离开原位，尚未稳定的撤离通道随之崩散。")
-        cal, world, _note = await self._xg_world(advance=False)
-        rng = random.Random(f"{doc.uid}:xgm:move:{now_ms}")
-        text, _ev = xgm_mod.move(doc, st, key, steps, xgm_mod.load_config(), rng, now_ms,
-                                 self._xg_battle_fn(doc), world)
-        if _ev.get("transition"):
-            xn_mod.ensure_bindings(doc, st, rng)
-        eco_lines = xn_mod.ecology_step(doc, st, rng, now_ms, self._xg_battle_fn(doc))
-        if eco_lines:
-            text += "\n\n【秘境动态】\n" + "\n".join(eco_lines)
-        xgm_mod._cd_set(st, "move", now_ms + xgm_mod.MOVE_CD_MS)
-        await self._pe_save(doc, {}, cal)
-        async for r in self._smart(event, text, "秘境移动"):
-            yield r
-        # W31：战败生死抉择按钮
-        if st.get("pending_defeat"):
-            r_ = _uk_row([_uk_btn("xg.mercy", "🙏求饶", uid=doc.uid),
-                          _uk_btn("xg.slaughter", "🩸任凭鱼肉", uid=doc.uid,
-                                  style="danger")],
-                         fallback="#求饶 或 #任凭鱼肉（60 秒内）", timeout=65)
-            res = self._kb(event, "【生死抉择】点击选择（60 秒内）：", r_)
-            if res:
-                yield res
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        area = (area or "").strip()
+        if not area:
+            yield event.plain_result(
+                "格式：#秘境移动 区域名（边缘区域/中层区域/深层区域/火道禁区/"
+                "擂台区域/核心区域/终极区域/隐藏区域）。\n"
+                "先用 #秘境探索 揭示通往目标区域的出口，再发送此命令发起旅行，无需走到出口格。"
+            )
+            return
+        target_zone = xgm_mod.normalize_zone_name(area)
+        if not target_zone:
+            yield event.plain_result(f"未知区域「{area}」。发送 #秘境地图 或 #仙古秘境规则 查看可用区域。")
+            return
+        async for result in self._xgm_move_action(
+                event, doc, xgm_mod.state_of(doc), time.time() * 1000,
+                target_zone=target_zone):
+            yield result
 
     @filter.command(CMD_XGM_SCAN, "秘境推演：5 道韵窥探 4 格天机")
     async def handle_xgm_scan(self, event: AstrMessageEvent):
@@ -27831,7 +27838,6 @@ class ZhutianPlugin(Star):
             yield event.plain_result("该按钮只属于发起者，请自行进入对应玩法操作。")
             return
         routes = {
-            "xg.choice": ("handle_xgm_choice", f"{a1}"),
             "xg.explore": ("handle_xgm_explore", ""),
             "xg.mercy": ("handle_xgn_mercy", ""),
             "xg.slaughter": ("handle_xgn_fish", ""),

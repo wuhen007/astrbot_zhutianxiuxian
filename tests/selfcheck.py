@@ -9338,60 +9338,15 @@ async def main():
     assert m260["fragment_id"] == "spirit_lake" and st260["location"] == "边缘区域"
     assert st260["history"].get("edge_camp", {}).get("fragment_id") == "edge_camp"
 
-    # —— 探索：bias 道韵 / Boss 战（假战斗回调）
-    d260.realm_index = 20
-    gains260_before = int(st260["gains"].get("daoyun", 0))
-    txt260, g260 = xgm260.perform_explore(d260, st260, "边缘区域", {"daoyun": 1.0},
-                                          xgm260.load_config(), xgm260.seeded_rng("exp-A"),
-                                          0.0, None)
-    assert any(k in txt260 for k in ("道韵", "源石", "奇遇", "遭遇", "惊天", "无果")), txt260[:60]
-    won260 = []
-    def _battle_win(enemy, btype):
-        won260.append(enemy["name"])
-        return True, [f"第1回合：{d260.name} 击溃 {enemy['name']}"]
-    class _Seq260:
-        """按序掷点：0.01 过成功率 → 0.70 落 fight 段 → 0.99 免伏击 → 0.01 中 Boss。"""
-        def __init__(self, vals):
-            self._vals = list(vals)
-        def random(self):
-            return self._vals.pop(0) if len(self._vals) > 1 else self._vals[0]
-        def uniform(self, a, b):
-            return b
-    txt260, g260 = xgm260.perform_explore(d260, st260, "深层区域", {"fight": 0.95},
-                                          xgm260.load_config(), _Seq260([0.01, 0.70, 0.99, 0.01]),
-                                          0.0, _battle_win)
-    assert won260, "fight bias 必触发一场战斗"
-    assert st260["infamy"] > 0, "战斗胜利涨凶名"
-    # 战败 → 战败抉择
-    def _battle_lose(enemy, btype):
-        return False, ["第1回合：不敌"]
-    st260b = dict(st260)
-    st260b["bag"] = xgm260.bag_new()
-    st260b["gains"] = {}
-    txt260, _ = xgm260.perform_explore(d260, st260b, "深层区域", {"fight": 0.95},
-                                       xgm260.load_config(), xgm260.seeded_rng("exp-C"),
-                                       0.0, _battle_lose)
-    assert st260b.get("pending_defeat"), "战败必须挂生死抉择"
-    t260 = xgm260.settle_defeat_choice(d260, st260b, "slaughter", 1000.0)
-    assert "任凭鱼肉" in t260 and xgm260.bag_summary(st260b["bag"])["item_count"] == 0
-
-    # —— 探索回合：三选项生成 + 选择结算
+    # —— 神识开图：#秘境探索揭示周边，不触发旧的三选一结算
     st260c = xgm260.state_of(d260)
     st260c["active"] = True
+    st260c["location"] = "边缘区域"
     st260c["map"] = xgm260.new_run_map("seed-C")
-    txt260, ev260 = xgm260.explore_turn(d260, st260c, xgm260.seeded_rng("turn-260"), 1000.0, {})
-    opts260 = (st260c.get("options") or {}).get("list") or []
-    assert len(opts260) == 3, "三径择一"
-    st260c["options"]["expires_at"] = 1e18
-    for i260 in range(1, 4):
-        st260c["options"] = {"expires_at": 1e18,
-                             "list": xgm260.explore_options("边缘区域", xgm260.seeded_rng(f"o{i260}"))}
-        t260, _ = xgm260.choose_explore(d260, st260c, i260, xgm260.load_config(),
-                                        xgm260.seeded_rng(f"c{i260}"), 2000.0, None, {})
-        assert t260, i260
-    st260c["options"] = {"expires_at": 0, "list": []}
-    t260, _ = xgm260.choose_explore(d260, st260c, 1, xgm260.load_config(), _Lucky60(), 3000.0)
-    assert "消散" in t260, "过期选项作废"
+    txt260, ev260 = xgm260.explore_turn(
+        d260, st260c, xgm260.seeded_rng("turn-260"), 1000.0, {})
+    assert ev260["explored"] and any(any(row) for row in st260c["map"]["revealed"])
+    assert "即时结算" not in txt260 and "1/2/3" not in txt260
 
     # —— 道种掉落：区域品质分层 + 认领幂等
     cfg260 = xgm260.load_config()
@@ -9471,13 +9426,14 @@ async def main():
     # main.py 接线
     src260 = open(PLUGIN / "main.py", encoding="utf-8").read()
     names260w = ["CMD_XGM_RULES", "CMD_XGM_ENTER", "CMD_XGM_STATUS", "CMD_XGM_MAP",
-                 "CMD_XGM_EXPLORE", "CMD_XGM_BAG", "CMD_XGM_GOAL", "CMD_XGM_FINDNPC",
-                 "CMD_XGM_SCAN", "CMD_XGM_LEAVE", "CMD_XGM_EMERGENCY", "CMD_XGM_CONFIRM",
-                 "CMD_XGM_VIEW_SEEDS"]
+                 "CMD_XGM_EXPLORE", "CMD_XGM_MOVE", "CMD_XGM_BAG", "CMD_XGM_GOAL",
+                 "CMD_XGM_FINDNPC", "CMD_XGM_SCAN", "CMD_XGM_LEAVE", "CMD_XGM_EMERGENCY",
+                 "CMD_XGM_CONFIRM", "CMD_XGM_VIEW_SEEDS"]
     miss260 = [c for c in names260w if f"@filter.command({c}" not in src260]
     assert miss260 == [], f"漏注册：{miss260}"
     assert 'regex(r"^#(上|下|左|右|左上|右上|左下|右下)' in src260, "八方向移动未注册"
-    assert 'regex(r"^([123])$")' in src260, "探索选择未注册"
+    assert 'regex(r"^([123])$")' not in src260 and "handle_xgm_choice" not in src260, "裸数字探索入口仍注册"
+    assert "move_to_zone(" in src260 and "CMD_XGM_MOVE" in src260, "区域穿越命令未接线"
     assert "xgm_mod.move(" in src260 and "xgm_mod.explore_turn(" in src260
     assert "xgm_mod.begin_evacuation(" in src260 and "xgm_mod.convert_evacuation_items(" in src260
     help260 = _json60.load(open(PLUGIN / "data/help/help.json", encoding="utf-8"))
@@ -10125,17 +10081,17 @@ async def main():
 
     # —— 降级探测与纯函数
     assert isinstance(uk300.AVAILABLE, bool)
-    d300a = uk300.own({"act": "xg.choice", "a1": 2}, "u300")
-    assert d300a["uid"] == "u300" and d300a["act"] == "xg.choice"
+    d300a = uk300.own({"act": "xg.explore"}, "u300")
+    assert d300a["uid"] == "u300" and d300a["act"] == "xg.explore"
     assert uk300.data_ok(None) == {} and uk300.data_ok("x") == {}
     assert uk300.encode_size_ok({"act": "a"}) and not uk300.encode_size_ok({"k": "x" * 2000})
 
     # —— 组件构造（astrbot 可导入时正路径；否则降级 None）
     if uk300.AVAILABLE:
-        b300 = uk300.btn("xg.choice", "🌊道韵", a1=1, uid="u300", style="primary")
-        assert b300 is not None and b300.label.startswith("🌊") and b300.id.startswith("xg.choice|")
+        b300 = uk300.btn("xg.explore", "🧭探索", uid="u300", style="primary")
+        assert b300 is not None and b300.label.startswith("🧭") and b300.id.startswith("xg.explore|")
         assert b300.action.data["uid"] == "u300"
-        r300 = uk300.row([b300], fallback="回复 1/2/3", timeout=60)
+        r300 = uk300.row([b300], fallback="#秘境探索", timeout=60)
         assert r300 is not None and r300.action_timeout == 60
         assert len(r300.fallback_text) > 0
         assert uk300.row([]) is None, "空按钮行返回 None"
@@ -10146,7 +10102,7 @@ async def main():
     src300 = open(PLUGIN / "main.py", encoding="utf-8").read()
     assert "@filter.button_action()" in src300, "按钮分发器未注册"
     assert "def handle_btn_dispatch" in src300
-    for act300 in ("xg.choice", "xg.explore", "xg.mercy", "xg.slaughter", "xg.evac",
+    for act300 in ("xg.explore", "xg.mercy", "xg.slaughter", "xg.evac",
                    "xg.status", "mg.pick", "mg.keep", "tssy.good", "tssy.holy",
                    "tj.accept", "tj.reject", "xb.t1", "xb.t2", "xb.t3", "xb.t4",
                    "xb.vow", "hb.grab"):
@@ -10154,13 +10110,12 @@ async def main():
     assert 'public = {' in src300 and '"hb.grab"' in src300, "公开按钮白名单"
     assert "uid != me" in src300, "发起者校验"
     assert "def _msg_of" in src300 and "self._msg_of(event)" in src300
-    # 按钮追加点：探索三径/战败/撤离/命签/择院/红包墙/至宝链/状态快捷
-    for frag300 in ("W31：探索三径按钮", "W31：战败生死抉择按钮",
-                    "W33-fix：分布正文+候选按钮合并单条 MD",
+    # 按钮追加点：即时探索、战败/撤离/命签/择院/红包墙/至宝链/状态快捷
+    for frag300 in ("handle_xgm_explore", "handle_xgm_move_area",
+                    "_uk_btn(\"xg.mercy\"", "W33-fix：分布正文+候选按钮合并单条 MD",
                     "W33-fix：入院正文+择院按钮合并单条 MD",
                     "W33-fix：墙正文+抢按钮合并单条 MD"):
-        assert frag300 in src300, f"按钮追加点缺失：{frag300}"
-    assert src300.count('W31：战败生死抉择按钮') == 2, "移动+选择两处战败按钮"
+        assert frag300 in src300, f"按钮或仙古秘境接线缺失：{frag300}"
     assert "_uk_btn(\"xb.t2\"" in src300 and "_uk_btn(\"xb.vow\"" in src300
     print("W30 MD+按钮 UI ok")
 
