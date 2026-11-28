@@ -707,6 +707,14 @@ CMD_EXP_EVAC = "#彼岸撤离"
 CMD_EXP_FORCE = "#彼岸强撤"
 CMD_EXP_FORCE_ALIAS = "#强制撤离"
 CMD_EXP_CLAIM = "#领取彼岸远征战果"
+# 秦门兵字秘传承（原版 bingziLegacy + RealmEvents 兵字秘事件）
+CMD_BZ_INFO = "#秦门兵图"
+CMD_BZ_TRACE = "#追查蔡族"
+CMD_BZ_TRACK = "#跟踪月灵公主"
+CMD_BZ_GUESS = "#辨认石山"
+CMD_BZ_OBSERVE = "#月下观兵"
+CMD_BZ_WEAPON = "#以器证兵"
+CMD_BZ_RANK = "#兵字秘榜"
 CMD_OSW_NEAREST = "#最近星辰"
 # W7-5a：彼岸大道至宝
 CMD_OSF_PANEL = "#彼岸铸宝"
@@ -19354,6 +19362,191 @@ class ZhutianPlugin(Star):
             async with self.db.transaction():
                 await self.db.save_player(doc.model_dump())
         yield event.plain_result(msg)
+
+    # ---- 秦门兵字秘传承（原版 bingziLegacy） ----
+
+    @filter.command(CMD_BZ_INFO, "秦门兵图：兵字秘事件详情/进度")
+    async def handle_bz_info(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import bingzi_legacy as bz_mod
+        world = await self._bz_open(event)
+        changed, tick_msg = bz_mod.maybe_tick(world, time.time())
+        if changed:
+            await self.db.save_calamity(world)
+        st = bz_mod.world_of(world)
+        ev = st["events"][-1] if st["events"] else None
+        if not ev:
+            yield event.plain_result("诸天尚无秦门兵字秘传承记录。")
+            return
+        if ev.get("status") == "settled":
+            winner = ev.get("winner")
+            lines = ["【秦门兵图·显化已终】",
+                     (f"{winner.get('name')}以【{winner.get('weapon')}】承下完整兵字秘。"
+                      if winner else "本次无人走完兵道试炼，完整经文随月华隐去。"),
+                     f"发送 {CMD_BZ_RANK} 查看本次参悟排名。"]
+            yield event.plain_result(chr(10).join(lines))
+            return
+        p = (ev.get("participants") or {}).get(str(doc.uid)) or {}
+        minutes = max(1, int((float(ev.get("expires_at") or 0) - time.time()) // 60))
+        progress = [
+            "蔡族线索已明" if p.get("traced") else "尚未追查蔡族",
+            "已跟踪月灵公主" if p.get("tracked") else "尚未锁定九山",
+            "已找到真山" if p.get("found") else f"辨山{len(p.get('guesses') or [])}/3",
+            "已观完整兵图" if p.get("observed") else "尚未月下观兵",
+            (f"已以{p.get('weapon')}证兵" if p.get("weapon") else "尚未以器证兵"),
+        ]
+        lines = ["【秦门兵图·兵字秘传承进行中】",
+                 f"剩余 {minutes // 60} 时 {minutes % 60} 分｜目标：九座石山中寻得兵字秘真迹",
+                 "你的进度：" + "｜".join(progress),
+                 "动作：#追查蔡族 → #跟踪月灵公主 → #辨认石山*N → #月下观兵 → #以器证兵 武器名",
+                 "事件结束时按完成度、参悟分和完成时间择主；其余参与者获得兵字秘残卷。"]
+        async for r in self._smart(event, chr(10).join(lines), "秦门兵图"):
+            yield r
+
+    async def _bz_open(self, event: AstrMessageEvent):
+        """取兵字秘世界状态（calamity_state["bingzi_legacy"]）。"""
+        from .core import calamity as cal_mod
+        return cal_mod.ensure(await self.db.get_calamity())
+
+    @filter.command(CMD_BZ_TRACE, "追查蔡族（兵字秘第一步）")
+    @_serialized_player_command
+    async def handle_bz_trace(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import bingzi_legacy as bz_mod
+        world = await self._bz_open(event)
+        changed, _t = bz_mod.maybe_tick(world, time.time())
+        ok, msg = bz_mod.trace_cai_clan(world, doc.uid, doc.name)
+        if ok or changed:
+            await self.db.save_calamity(world)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_BZ_TRACK, "跟踪月灵公主（取真山线索）")
+    @_serialized_player_command
+    async def handle_bz_track(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import bingzi_legacy as bz_mod
+        world = await self._bz_open(event)
+        ok, msg = bz_mod.track_moon_princess(world, doc.uid)
+        if ok:
+            await self.db.save_calamity(world)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_BZ_GUESS, "辨认石山*N（3 次机会）")
+    @_serialized_player_command
+    async def handle_bz_guess(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import bingzi_legacy as bz_mod
+        m = re.match(r"^[＊*xX×]?\\s*([1-9])$", (arg or "").strip())
+        if not m:
+            yield event.plain_result(f"格式：{CMD_BZ_GUESS}*3（石山序号 1-9）")
+            return
+        world = await self._bz_open(event)
+        ok, msg = bz_mod.identify_mountain(world, doc.uid, int(m.group(1)))
+        if ok or "余韵" in msg:
+            await self.db.save_calamity(world)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_BZ_OBSERVE, "月下观兵（悟性加成）")
+    @_serialized_player_command
+    async def handle_bz_observe(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import bingzi_legacy as bz_mod
+        world = await self._bz_open(event)
+        insight = int(doc.ext.get("insight", 0) or 0)
+        ok, msg = bz_mod.observe_diagram(world, doc.uid, insight)
+        if ok:
+            await self.db.save_calamity(world)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_BZ_WEAPON, "以器证兵 武器名（帝兵/至宝加成）")
+    @_serialized_player_command
+    async def handle_bz_weapon(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import bingzi_legacy as bz_mod, dibing as db_mod
+        weapon = (arg or "").strip()
+        if not weapon:
+            yield event.plain_result(f"格式：{CMD_BZ_WEAPON} 武器名")
+            return
+        w = db_mod.system_of(doc)
+        emperor_names = [t.get("name") for t in (self.content.table("item/先天至宝") or [])
+                         if isinstance(t, dict)]
+        is_emperor = bool(w and weapon == w.get("name")) or weapon in emperor_names
+        world = await self._bz_open(event)
+        ok, msg = bz_mod.declare_weapon(world, doc.uid, weapon, is_emperor=is_emperor)
+        if ok:
+            await self.db.save_calamity(world)
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_BZ_RANK, "兵字秘榜（含结算后奖励领取）")
+    async def handle_bz_rank(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import bingzi_legacy as bz_mod
+        world = await self._bz_open(event)
+        changed, tick_msg = bz_mod.maybe_tick(world, time.time())
+        if changed:
+            await self.db.save_calamity(world)
+        winner, ranks = bz_mod.rankings(world)
+        if not ranks:
+            await self.db.save_calamity(world)
+            yield event.plain_result("诸天尚无秦门兵字秘传承记录。")
+            return
+        lines = ["--- 兵字秘榜 ---"]
+        for i, p in enumerate(ranks[:10], 1):
+            mark = "魁首" if winner and p.get("uid") == winner.get("uid") else str(i)
+            done = "✓证兵" if p.get("completed_at") else ("寻得真山" if p.get("found") else "参悟中")
+            lines.append(f"{mark}. {p.get('name')}｜参悟分 {p.get('score', 0)}｜{done}"
+                         + (f"｜器：{p.get('weapon')}" if p.get("weapon") else ""))
+        if winner:
+            lines.append(f"魁首：{winner.get('name')}以【{winner.get('weapon')}】承下完整兵字秘。")
+        ok, msg, items, learns = bz_mod.claim_rewards(world, doc.uid, doc.name)
+        if ok:
+            async with self.db.transaction():
+                await self.db.save_player(doc.model_dump())
+                if items:
+                    await self.db.add_items(doc.uid, items)
+                if learns:
+                    doc.ext["gongfa"] = sorted(
+                        set(str(x) for x in (doc.ext.get("gongfa") or [])) | {"兵字秘"})
+                    await self.db.save_player(doc.model_dump())
+            lines.append(msg)
+        await self.db.save_calamity(world)
+        async for r in self._smart(event, chr(10).join(lines), "兵字秘榜"):
+            yield r
 
     @filter.command(CMD_TW_ENTER, "进入真世界（完成大星≥7 解锁）")
     @_serialized_player_command
