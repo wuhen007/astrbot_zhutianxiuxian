@@ -389,18 +389,21 @@ def fight(w: dict[str, Any], doc: Any, stats: Any, cur_hp: int, hp_max: int,
     bao = float(getattr(stats, "bao", 0.0) or 0.0)
     a = Fighter.from_unit(battle.Unit(
         name=str(getattr(doc, "name", "") or str(doc.uid)[:8]),
-        atk=atk, defense=defense, hp=max(1, int(cur_hp)), bao=bao))
+        atk=atk, defense=defense, hp=max(1, int(cur_hp)), bao=bao,
+        speed=int(getattr(stats, "speed", 100)),
+        crit_damage=getattr(stats, "crit_damage", None),
+        action_bar=int(getattr(stats, "action_bar", 0))))
     # 原版幻影三维各自独立 ×(0.8 + 0.6×rand)，不读怪物表
     b = Fighter.from_unit(battle.Unit(
         name=PHANTOM,
         atk=max(1, int(atk * (0.8 + 0.6 * rng.random()))),
         defense=max(1, int(defense * (0.8 + 0.6 * rng.random()))),
         hp=max(1, int(hp_cap * (0.8 + 0.6 * rng.random()))),
-        bao=bao))
-    res = run_1v1(a, b, rng, max_rounds=30)
+        bao=bao, speed=int(getattr(stats, "speed", 100))))
+    res = run_1v1(a, b, rng)
     win = res.winner == 0
     fixed = int(int(team["hp_max"]) * (WIN_FIXED if win else LOSE_FIXED))
-    harm, _crit = battle.harm(int(atk * 0.85), b.defense, rng)
+    harm, _crit = battle.harm(atk * 0.85, b.defense, rng)
     total = int(fixed + harm * (WIN_HARM_MULT if win else LOSE_HARM_MULT))
 
     ev = rng.random()

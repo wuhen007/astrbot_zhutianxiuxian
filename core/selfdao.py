@@ -66,7 +66,8 @@ EXT_REALM_NAMES_DEFAULT = ("我道一", "我道二", "我道三", "我道四", "
 def _defaults() -> dict[str, Any]:
     return {"layers": 0, "system_name": "", "realms": [], "unlocked": False,
             "vow": "", "life": 0, "ash": 0, "last_life_at": 0.0,
-            "death_until": 0.0, "hongchen": False, "title": ""}
+            "death_until": 0.0, "hongchen": False, "title": "",
+            "terror_triggered": False}
 
 
 def save(doc: Any, st: Mapping[str, Any]) -> None:
@@ -83,13 +84,23 @@ def state_of(doc: Any) -> dict[str, Any]:
         st.update(raw)
     for k in ("layers", "life", "ash"):
         st[k] = int(st.get(k, 0) or 0)
-    for k in ("unlocked", "hongchen"):
+    for k in ("unlocked", "hongchen", "terror_triggered"):
         st[k] = bool(st.get(k))
     st["realms"] = list(st.get("realms") or [])
     st["last_life_at"] = float(st.get("last_life_at", 0) or 0)
     st["death_until"] = float(st.get("death_until", 0) or 0)
     save(doc, st)
     return st
+
+
+def claim_final_terror(doc: Any) -> bool:
+    """Claim the one-time calamity triggered by first reaching selfdao layer 20."""
+    st = state_of(doc)
+    if st["layers"] != LAYERS or st["terror_triggered"]:
+        return False
+    st["terror_triggered"] = True
+    save(doc, st)
+    return True
 
 
 def _reached(doc: Any) -> bool:
@@ -168,7 +179,8 @@ def deduce(doc: PlayerDoc, now: float | None = None,
         pass
     ext = getattr(doc, "ext", {})
     ext["potential"] = pot - LAYER_COST["potential"]
-    ext["shouyuan"] = shouyuan - LAYER_COST["shouyuan"]
+    from .lifespan import spend as spend_lifespan
+    spend_lifespan(doc, LAYER_COST["shouyuan"])
     doc.exp = int(getattr(doc, "exp", 0) or 0) - LAYER_COST["exp"]
     _set_xueqi(doc, _xueqi(doc) - LAYER_COST["exp"])
 
@@ -236,6 +248,13 @@ def hedao(doc: PlayerDoc, name: str, now: float | None = None,
     if not (1 <= len(name) <= 5):
         return False, "用法：#合道 体系名（1~5 字，例：#合道 岁月剑河）。", {}
     st["system_name"] = name
+    try:
+        from . import extra_cultivation
+        route = extra_cultivation.selected_track(doc)
+        if route:
+            st["route"] = route
+    except (ImportError, AttributeError, ValueError):
+        pass
     save(doc, st)
     try:
         from . import zhengdao as _dz
@@ -358,7 +377,8 @@ def live(doc: PlayerDoc, era: Mapping[str, Any] | None, now: float | None = None
         pass
     ext = getattr(doc, "ext", {})
     ext["potential"] = pot - n
-    ext["shouyuan"] = shouyuan - sy_cost
+    from .lifespan import spend as spend_lifespan
+    spend_lifespan(doc, sy_cost)
     doc.exp = int(getattr(doc, "exp", 0) or 0) - cost
     _set_xueqi(doc, _xueqi(doc) - cost)
 

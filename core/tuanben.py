@@ -22,7 +22,7 @@
   B7 原有的 12h/1h 结算 CD 不改动，24h CD 口径只在帝尊/魔君周常线生效。
 - 原版 Boss 属性是 `系数 × Math.floor(rand × 1e11)` 的随机天文数字，
   本移植按全队均攻定标（沿用 B7 `raid.boss_stats` 的模型），避免必败。
-- 原版 100 回合 / 5 分钟行动条，本移植 30 回合、按速度降序固定出手序。
+- 原版 100 大回合 / 5 分钟行动条，本移植按5000点行动条推进就绪单位。
 - 数值折算：原版魔君每轮每人 4 项各 +1000 万，本移植改 1 万灵石/轮 + 随机奖励。
 """
 
@@ -47,7 +47,7 @@ BATCH_LIMIT = 999             # 原版 batch > 999 拒绝
 CD_DURATION = 24 * 3600       # 原版 CD_DURATION（勿信奖励文案里的 16 小时）
 DEFEAT_SLEEP = 2 * 3600       # 原版 EMPEROR_DEFEAT_SLEEP_MS
 TEAM_TTL = 24 * 3600
-RAID_ROUNDS = 30
+RAID_ROUNDS = 100
 PHASE_MULT = 1.3              # 帝尊者字秘·极尽：满血复活且三维 ×1.3
 MOJUN_STONES = 10_000         # 原版每轮 1000 万，本移植折算
 
@@ -296,7 +296,7 @@ def boss_fighter(avg_atk: int, member_count: int, rng: random.Random) -> Fighter
     f = Fighter(
         name=EMPEROR, atk=max(1, int(avg * 1.05 * jitter)),
         defense=max(1, int(avg * 0.42 * jitter)), hp=hp, hp_max=hp, bao=0.35,
-        tags={"key": "boss", "speed": 1500, "aoe": True,
+        speed=1500, tags={"key": "boss", "speed": 1500, "aoe": True,
               "phase_revive": 1, "phase_mult": PHASE_MULT,
               "phase_name": "者字秘·极尽"},
     )
@@ -313,7 +313,7 @@ def player_fighter(
     f = Fighter(
         name=name or uid[:8], atk=max(1, int(atk)), defense=max(1, int(defense)),
         hp=max(1, int(hp)), hp_max=max(1, int(hp_max)), bao=float(bao or 0.0),
-        tags={"key": str(uid), "speed": int(speed), "revives": max(0, int(zhezi)),
+        speed=max(1, int(speed)), tags={"key": str(uid), "speed": int(speed), "revives": max(0, int(zhezi)),
               "revive_ratio": 0.55 if int(zhezi) > 1 else 1.0},
     )
     return f
@@ -523,7 +523,7 @@ def rules_text() -> str:
         f"· 门槛：大帝权柄 {EMPEROR_GATE_21} 档；感知 reclaim 可直接开，confront 需遮天位面未毁。",
         f"· 队伍上限 {MAX_MEMBERS} 人、下限 1 人；队伍码 6 位数字，{TEAM_TTL // 3600}h 逾期自动解散。",
         "· 帝尊线：不计奖励、不占 24h CD；败则道伤 +5 并沉眠 2h，胜则帝尊感知归寂（唯一回滚 #复苏帝尊）。",
-        f"· 战斗：真实多人回合（速度降序出手、Boss 按仇恨点名、每 5 回合群体秘术），上限 {RAID_ROUNDS} 回合。",
+        f"· 战斗：真实多人行动条（Boss 按仇恨点名、每 5 大回合群体秘术），上限 {RAID_ROUNDS} 回合。",
         f"· 二阶段：者字秘·极尽，Boss 首次被打空时满血复活且三维 ×{PHASE_MULT:g}。",
         "· 者字秘：玩家致死复活，次数取团本档 zhezi（2 次时第二次仅回 55%）。",
         "· 伤害榜：原版 tuanben 不落伤害账本，本移植补 DPS 账本 + 战报（借鉴 TeamBoss 的 GardenRecord）。",

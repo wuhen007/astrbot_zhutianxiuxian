@@ -260,6 +260,7 @@ def breakthrough(
     cost_reduction: float = 1.0,
     potential_bonus: int = 0,
     luck: bool = False,
+    plane_level: int = 10,
 ) -> tuple[bool, str, PlayerDoc]:
     """练气突破：成功扣除修为与潜力；失败消耗修为并承受额外损失。
 
@@ -274,6 +275,11 @@ def breakthrough(
         return False, "道友已臻化境，此界再无更高境界。", doc
 
     nxt = level_table[i]
+    from . import plane
+    target_level = int(nxt.get("level_id", i + 1) or i + 1)
+    world_gate = plane.world_level_gate_message("qi", target_level, plane_level)
+    if world_gate:
+        return False, world_gate, doc
     # 语义：境界表当前条目的 exp = 从该境界突破到下一境所需的累计修为
     base_req = int(level_table[doc.realm_index].get("exp", 0))
     talent_cost, talent_rate = physique_breakthrough_bonus(doc)
@@ -398,6 +404,7 @@ def body_breakthrough(
     potential_cost: int | None = None,
     cost_reduction: float | None = None,
     one_key: bool = False,
+    plane_level: int = 10,
 ) -> tuple[bool, str, int]:
     """炼体突破（原版 Level.js 炼体支线直译，量级按 cost_scale 缩放）。
 
@@ -410,6 +417,11 @@ def body_breakthrough(
     if idx >= len(table) - 1:
         return False, f"肉身已至【{table[-1]['level']}】，天地再无进境之路。", 0
     row, nxt = table[idx], table[idx + 1]
+    from . import plane
+    target_level = int(nxt.get("level_id", idx + 2) or idx + 2)
+    world_gate = plane.world_level_gate_message("body", target_level, plane_level)
+    if world_gate:
+        return False, world_gate, 0
     factor = max(0.05, float(cost_factor))
     talent_cost, talent_rate = physique_breakthrough_bonus(doc)
     if cost_reduction is not None:
@@ -481,6 +493,7 @@ def one_key_break(
     rate_bonus: float = 0.0,
     era_note: str = "",
     potential_bonus: float = 0.0,
+    plane_level: int = 10,
 ) -> tuple[str, PlayerDoc, int]:
     """一键突破（原版 OneKeyLevelUp 直译）。
 
@@ -502,7 +515,8 @@ def one_key_break(
             break
         allowed, msg, nd = breakthrough(d, level_table, success_rate, fail_penalty, rng,
                                         cost_factor=cost_factor, rate_bonus=rate_bonus,
-                                        luck=luck, potential_bonus=potential_bonus)
+                                        luck=luck, potential_bonus=potential_bonus,
+                                        plane_level=plane_level)
         if not allowed:
             reason = msg.split("\n")[0]
             break
@@ -535,6 +549,7 @@ def one_key_body(
     rate_bonus: float = 0.0,
     success_bonus: float = 0.0,
     era_note: str = "",
+    plane_level: int = 10,
 ) -> tuple[str, PlayerDoc, int]:
     """一键破体（原版 OneKeyMaxUp 直译）。返回 (文案, 新档案, 幸运草消耗)。
 
@@ -549,6 +564,12 @@ def one_key_body(
         idx = int(d.physique_index)
         if idx >= len(table) - 1:
             reason = "肉身已至顶点"
+            break
+        from . import plane
+        target_level = int(table[idx + 1].get("level_id", idx + 2) or idx + 2)
+        world_gate = plane.world_level_gate_message("body", target_level, plane_level)
+        if world_gate:
+            reason = world_gate
             break
         if luck and used >= grass:
             reason = "幸运草用尽"
@@ -568,7 +589,7 @@ def one_key_body(
         good, _msg, cost = body_breakthrough(
             d, table, xueqi, rng, luck=luck, cost_scale=cost_scale,
             cost_factor=cost_factor, rate_bonus=rate_bonus,
-            success_bonus=success_bonus, one_key=True)
+            success_bonus=success_bonus, one_key=True, plane_level=plane_level)
         if cost:
             d.ext["xueqi"] = max(0.0, xueqi - cost)
         if int(d.physique_index) > idx:

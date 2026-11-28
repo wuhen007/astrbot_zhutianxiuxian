@@ -43,6 +43,9 @@ def extra_levels(doc: Any) -> list[int]:
             out.append(max(0, min(MAX_LEVEL, int(fn(doc)))))
         except Exception:
             out.append(0)
+    from . import extra_cultivation
+    out.extend(extra_cultivation.authority_level(doc, track)
+               for track in extra_cultivation.TRACKS)
     return out
 
 

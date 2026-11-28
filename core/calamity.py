@@ -22,7 +22,7 @@ import random
 from collections.abc import Mapping
 from typing import Any
 
-from .battle import Unit, spar_full
+from .battle import Unit, spar_full, speed_of, initial_action_bar
 
 MAX_ACTIVE = 100
 PAGE_REQUIREMENT = 10
@@ -92,7 +92,13 @@ def default_state() -> dict[str, Any]:
         "next_spawn": OVERLORD_BASE_KILLS,
         "overlord": None,
         "report": None,
-        "destroyed_planes": {},      # W7-5b：全服位面毁灭记录 {位面: {source, at}}
+        "destroyed_planes": {},      # W7-5b：全服位面毁灭记录 {位面: {source, at, world_year}}
+        "plane_damage": {},          # 位面损伤独立记录，不等于毁灭封锁
+        "cosmic_essence_loss": 0,
+        "causal_plane_impact": {"cursor": 0, "processed_units": 0,
+                                 "pending_units": 0, "history": []},
+        "plane_world": {"level": 5, "bearing": 9_999_999, "last_repair_world_year": 0},
+        "plane_destruction": {},
         "era": {
             "index": 0,
             "years": 0,
@@ -171,6 +177,27 @@ def ensure(value: Mapping | None) -> dict[str, Any]:
         state["calamities"] = []
     if not isinstance(state.get("destroyed_planes"), dict):
         state["destroyed_planes"] = {}
+    if not isinstance(state.get("plane_destruction"), dict):
+        state["plane_destruction"] = {}
+    state["plane_damage"] = dict(state.get("plane_damage") or {})
+    try:
+        state["cosmic_essence_loss"] = max(0, int(state.get("cosmic_essence_loss", 0) or 0))
+    except (TypeError, ValueError, OverflowError):
+        state["cosmic_essence_loss"] = 0
+    if not isinstance(state.get("causal_plane_impact"), dict):
+        state["causal_plane_impact"] = dict(base["causal_plane_impact"])
+    impact = state["causal_plane_impact"]
+    for key in ("cursor", "processed_units", "pending_units"):
+        try:
+            impact[key] = max(0, int(impact.get(key, 0) or 0))
+        except (TypeError, ValueError, OverflowError):
+            impact[key] = 0
+    impact["history"] = list(impact.get("history") or [])[-100:]
+    if not isinstance(state.get("plane_world"), dict):
+        state["plane_world"] = dict(base["plane_world"])
+    else:
+        for key, value in base["plane_world"].items():
+            state["plane_world"].setdefault(key, value)
     if not isinstance(state.get("era"), dict):
         state["era"] = base["era"]
     era = state["era"]
@@ -185,13 +212,15 @@ def average_stats(players: list[Mapping]) -> dict[str, float]:
     """全服玩家均值；无有效样本时用保底（对应原版 FALLBACK_AVERAGE）。"""
     valid = [p for p in players if float(p.get("atk") or 0) > 0 and float(p.get("hp") or 0) > 0]
     if not valid:
-        return {"atk": 5_000, "defense": 5_000, "hp": 15_000, "bao": 0.2, "samples": 0}
+        return {"atk": 5_000, "defense": 5_000, "hp": 15_000, "bao": 0.2,
+                "life_source": 100.0, "samples": 0}
     n = len(valid)
     return {
         "atk": sum(float(p.get("atk") or 0) for p in valid) / n,
         "defense": sum(float(p.get("defense") or 0) for p in valid) / n,
         "hp": sum(float(p.get("hp") or 0) for p in valid) / n,
         "bao": sum(float(p.get("bao") or 0) for p in valid) / n,
+        "life_source": sum(float(p.get("life_source") or 100) for p in valid) / n,
         "samples": n,
     }
 
@@ -227,6 +256,7 @@ def spawn_wave(state: dict, world_year: int, count: int, avg: Mapping,
             "hp": hp,
             "max_hp": hp,
             "bao": max(0.0, min(0.95, float(avg["bao"]) * swing)),
+            "life_source": max(1, int(float(avg.get("life_source", 100) or 100) * mult["hp"] * swing)),
             "status": "active",
             "spawned_at": float(year) + len(made) * 0.001,
         }
@@ -295,9 +325,14 @@ def battle_calamity(doc: Any, entity: dict, stats: Mapping,
                     rng: random.Random, now: float) -> dict:
     """玩家与一尊灾厄单挑。胜则伏诛；败则留伤并保留实体气血。"""
     me = Unit(str(getattr(doc, "name", "") or "道友"), int(stats["atk"]),
-              int(stats["defense"]), max(1, int(stats["hp"])), float(stats.get("bao") or 0))
+              int(stats["defense"]), max(1, int(stats["hp"])), float(stats.get("bao") or 0),
+              speed=int(stats.get("speed", speed_of(doc))),
+              crit_damage=stats.get("crit_damage"),
+              action_bar=int(stats.get("action_bar", initial_action_bar(doc))))
     foe = Unit(entity["name"], int(entity["atk"]), int(entity["defense"]),
-               max(1, int(entity["hp"])), float(entity.get("bao") or 0))
+               max(1, int(entity["hp"])), float(entity.get("bao") or 0),
+               speed=int(entity.get("speed", entity.get("速度", 100))),
+               crit_damage=entity.get("crit_damage", entity.get("暴击伤害")))
     winner, log, a_hp, b_hp = spar_full(me, foe, rng)
     won = winner == 0
     before = int(entity["hp"])
@@ -336,6 +371,7 @@ def maybe_spawn_overlord(state: dict, avg: Mapping, rng: random.Random, now: flo
         "max_hp": hp,
         "atk": max(1, int(base * 1.2)),
         "defense": max(1, int(base * 0.8)),
+        "life_source": 16,
         "status": "active",
         "spawned_at": float(now),
         "contributions": {},
@@ -357,8 +393,13 @@ def battle_overlord(state: dict, doc: Any, stats: Mapping,
     if not isinstance(ov, Mapping) or ov.get("status") != "active":
         return {"error": "当前没有灾厄魔主降临。"}
     me = Unit(str(getattr(doc, "name", "") or "道友"), int(stats["atk"]),
-              int(stats["defense"]), max(1, int(stats["hp"])), float(stats.get("bao") or 0))
-    boss = Unit(ov["name"], int(ov["atk"]), int(ov["defense"]), max(1, int(ov["hp"])), 1.0)
+              int(stats["defense"]), max(1, int(stats["hp"])), float(stats.get("bao") or 0),
+              speed=int(stats.get("speed", speed_of(doc))),
+              crit_damage=stats.get("crit_damage"),
+              action_bar=int(stats.get("action_bar", initial_action_bar(doc))))
+    boss = Unit(ov["name"], int(ov["atk"]), int(ov["defense"]), max(1, int(ov["hp"])), 1.0,
+                speed=int(ov.get("speed", ov.get("速度", 100))),
+                crit_damage=ov.get("crit_damage", ov.get("暴击伤害")))
     winner, log, a_hp, b_hp = spar_full(me, boss, rng)
     before = int(ov["hp"])
     after = max(0, int(b_hp or 0))
@@ -465,12 +506,17 @@ def rift_memory(doc: Any, boss_id: str) -> dict:
 
 # ---------------------------------------------------------------- 炼化 / 纪元
 
-def grant_refine(doc: Any, entity: Mapping, now: float) -> None:
-    doc.ext["calamity_refine"] = {
+def grant_refine(doc: Any, entity: Mapping, now: float,
+                 weight: float = 0.1) -> dict[str, Any]:
+    pending = {
         "entity_id": entity.get("id"),
         "name": entity.get("name"),
+        "source_life_source": max(1, int(float(entity.get("life_source", 100) or 100))),
+        "weight": max(0.0, float(weight)),
         "expires_at": float(now) + REFINE_WINDOW_SECONDS,
     }
+    doc.ext["calamity_refine"] = pending
+    return pending
 
 
 def take_refine(doc: Any, now: float) -> dict | None:

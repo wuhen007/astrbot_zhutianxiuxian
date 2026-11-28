@@ -100,7 +100,7 @@ def batch_heal(doc: Any, inv: Mapping[str, int], item_lookup: Callable[[str], di
             last_msg = msg
     total = sum(used.values())
     if total == 0:
-        return False, "气血已满（或丹药均已失效），无需回血。", {}
+        return False, last_msg or "气血已满（或丹药均已失效），无需回血。", {}
     detail = "、".join(f"{n}×{q}" for n, q in used.items())
     hp_now = int(float((getattr(doc, "ext", {}) or {}).get("hp", 0) or 0))
     return True, (f"【一键回血】消耗 {detail}。\n{last_msg}\n当前气血 {hp_now:,}/{max_hp:,}"), used

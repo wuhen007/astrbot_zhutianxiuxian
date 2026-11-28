@@ -6,7 +6,7 @@
   量级：未登仙（realm<41）固定 10 / 登仙后 100 / realm≥50 折半（原版 100/1000/500 同比 ÷100）；
   体质减免直译：圆环之理 ×0.1、圣体道胎/大成圣体/混沌体 ×0.5、小成圣体/大道体 ×0.6、
   圣体 ×0.7、神体/转生/魔头 ×0.8。
-- 寿元 ≤0 → 轮回往生（原版 24h 救援窗口+执掌者，shortcut 未复刻）：境界归 1、修为血气清零、
+- 寿元 ≤0 → 轮回往生（原版 5 分钟救援窗口+执掌者，shortcut 未复刻）：境界归 1、修为血气清零、
   灵石折半、轮回次数 +1、寿元重置 500。
 - 增补：渡劫成功 +5000、登仙 +10000（原版 Add_寿元 通道，无对应物品表）。
 """
@@ -67,33 +67,45 @@ def decay_amount(doc: PlayerDoc) -> int:
     return base
 
 
-def daily_decay(doc: PlayerDoc, now: float, decay: bool = True) -> tuple[int, bool]:
-    """签到时调用：自然日一次流逝。返回 (本次流逝, 是否触发轮回)。
-
-    `decay=False`（W8-F1 诸天难度「简单」）只盖章当天日期、不扣寿元。
-    """
+def daily_decay(doc: PlayerDoc, now: float, decay: bool = True,
+                era_index: int | None = None) -> tuple[int, bool]:
+    """签到时调用：自然日一次流逝。隐藏寿元与绝灵压制显示同步扣减。"""
     day = day_key(now)
     if doc.ext.get("shouyuan_day") == day:
         return 0, False
     doc.ext["shouyuan_day"] = day
     if not decay:
         return 0, False
-    cur = shouyuan_of(doc)
-    left = max(0, cur - decay_amount(doc))
-    doc.ext["shouyuan"] = left
-    return cur - left, left <= 0
+    if era_index is not None:
+        from . import era as era_mod
+        era_mod.sync_jueling_lifespan(doc, era_index)
+    hidden_key = "jueling_suppressed_lifespan"
+    if hidden_key in doc.ext:
+        cur = max(0, int(doc.ext.get(hidden_key, 0) or 0))
+        left = max(0, cur - decay_amount(doc))
+        doc.ext[hidden_key] = left
+        doc.ext["shouyuan"] = min(left, 9_999)
+    else:
+        cur = shouyuan_of(doc)
+        left = max(0, cur - decay_amount(doc))
+        doc.ext["shouyuan"] = left
+    return cur - left, cur > 0 and left <= 0
 
 
 # ---------------------------------------------------------------- 濒死救援（W7-4）
 
-RESCUE_SECONDS = 24 * 3600      # 原版 24 小时救援窗口
+RESCUE_SECONDS = 5 * 60        # 固定上游寿元耗尽任务：5 分钟后进入往生裁定
 RESCUE_LIFESPAN = 1000          # 救回后寿元重续
 RESCUE_COST = 5_000_000         # 救人者代为续命的代价（灵石）
 
 
+TRAVEL_AMBUSH_REBIRTH = "travel_ambush_rebirth"
+
+
 def pending(doc: PlayerDoc) -> bool:
     """真灵离体、等待救援或转世。"""
-    return bool(doc.ext.get("awaiting_rescue")) and int(shouyuan_of(doc)) <= 0
+    return bool(doc.ext.get("awaiting_rescue")) and (
+        bool(doc.ext.get(TRAVEL_AMBUSH_REBIRTH)) or int(shouyuan_of(doc)) <= 0)
 
 
 def rescue_left(doc: PlayerDoc, now: float) -> int:
@@ -107,35 +119,75 @@ def rescue_left(doc: PlayerDoc, now: float) -> int:
 
 
 def mark_death(doc: PlayerDoc, now: float) -> str:
-    """寿元耗尽 → 进入 24 小时救援窗口（不立即转世）。"""
+    """困难难度寿元耗尽 → 进入五分钟救援窗口。"""
     doc.ext["awaiting_rescue"] = True
     doc.ext["rescue_deadline"] = float(now) + RESCUE_SECONDS
+    if "jueling_suppressed_lifespan" in doc.ext:
+        doc.ext["jueling_suppressed_lifespan"] = 0
     doc.ext["shouyuan"] = 0
     return (f"【真灵离体】寿元已尽，你的真灵被天地拘入轮回路。\n"
-            f"24 小时内若有道友发「#轮回救人 @你」（耗 {RESCUE_COST:,} 灵石），"
-            f"可把你从轮回路上拉回来；逾期则自动转世。")
+            f"5 分钟内可由额外体系权柄达到 {11}/24 的道友发「#轮回救人 @你」接引；"
+            f"期满后由轮回路执掌者裁定；无人执掌时自动往生。")
 
 
-def rescue(doc: PlayerDoc, now: float) -> tuple[bool, str]:
-    """#轮回救人：把濒死修士拉回人间。"""
+def mark_travel_ambush_death(doc: PlayerDoc, now: float) -> str:
+    """位面旅行被天骄伏杀：五分钟救援窗，到期强制往生但不扣寿元。"""
+    doc.ext[TRAVEL_AMBUSH_REBIRTH] = True
+    doc.ext["awaiting_rescue"] = True
+    doc.ext["rescue_deadline"] = float(now) + RESCUE_SECONDS
+    doc.ext["hp"] = max(1, int(float(doc.ext.get("hp", 0) or 0)))
+    return ("【伏杀陨落·真灵离体】天骄伏击令你身死道消，真灵坠入轮回路。\n"
+            "5 分钟内可由额外体系权柄达到 11/24 的道友发送「#轮回救人 @你」接引；"
+            "期满后按轮回路执掌者裁定，或无人执掌时自动往生。")
+
+
+
+def restore_expired_rescue(doc: PlayerDoc) -> bool:
+    """难度改为不强制往生或执掌者驳回后恢复阳世。"""
     if not pending(doc):
-        return False, "此人真灵尚未离体，无需救援。"
+        return False
+    travel_ambush = bool(doc.ext.pop(TRAVEL_AMBUSH_REBIRTH, None))
     doc.ext.pop("awaiting_rescue", None)
     doc.ext.pop("rescue_deadline", None)
+    doc.ext.pop("reincarnation_phase", None)
+    if not travel_ambush:
+        doc.ext["shouyuan"] = RESCUE_LIFESPAN
+        if "jueling_suppressed_lifespan" in doc.ext:
+            doc.ext["jueling_suppressed_lifespan"] = RESCUE_LIFESPAN
+    if int(doc.ext.get("hp", 0) or 0) <= 0:
+        doc.ext["hp"] = 1
+    return True
+
+def rescue(doc: PlayerDoc, now: float, controller_pending: bool = False) -> tuple[bool, str]:
+    """#轮回救人：权柄足够者在救援期或裁定期将真灵拉回。"""
+    if not pending(doc):
+        return False, "此人真灵尚未离体，无需救援。"
+    if rescue_left(doc, now) <= 0 and not controller_pending:
+        return False, "五分钟救援期已过，只有轮回路执掌者可裁定是否往生。"
+    travel_ambush = bool(doc.ext.pop(TRAVEL_AMBUSH_REBIRTH, None))
+    doc.ext.pop("awaiting_rescue", None)
+    doc.ext.pop("rescue_deadline", None)
+    doc.ext.pop("reincarnation_phase", None)
+    if travel_ambush:
+        if int(doc.ext.get("hp", 0) or 0) <= 0:
+            doc.ext["hp"] = 1
+        return True, f"真灵归位！{doc.name or doc.uid} 被道友从伏杀轮回路中接回，原有寿元保留。"
     doc.ext["shouyuan"] = RESCUE_LIFESPAN
+    if "jueling_suppressed_lifespan" in doc.ext:
+        doc.ext["jueling_suppressed_lifespan"] = RESCUE_LIFESPAN
     doc.ext["rescued_count"] = int(doc.ext.get("rescued_count", 0) or 0) + 1
     return True, f"真灵归位！{doc.name or doc.uid} 自轮回路被拉回，寿元重续 {RESCUE_LIFESPAN} 年。"
 
 
 def resolve_if_due(doc: PlayerDoc, now: float, forced: bool = True) -> str | None:
-    """读时惰性结算：过期的救援窗口 → 转世。返回转世文案或 None。
-
-    `forced=False`（W8-F1 诸天难度「简单/普通」）不强制轮回，真灵会一直
-    停在救援窗口里，等道友救回。
-    """
+    """无执掌者时惰性结算已到期的强制轮回状态；化身仍在时暂缓处理。"""
     if not pending(doc):
         return None
-    if not forced:
+    zt = doc.ext.get("zhutian")
+    stage = "travel_avatar" if isinstance(zt, dict) and bool(zt.get("current")) else ""
+    if stage == "travel_avatar":
+        return None
+    if not forced and not doc.ext.get(TRAVEL_AMBUSH_REBIRTH):
         return None
     try:
         deadline = float(doc.ext.get("rescue_deadline") or 0)
@@ -145,6 +197,8 @@ def resolve_if_due(doc: PlayerDoc, now: float, forced: bool = True) -> str | Non
         return None
     doc.ext.pop("awaiting_rescue", None)
     doc.ext.pop("rescue_deadline", None)
+    doc.ext.pop("reincarnation_phase", None)
+    doc.ext.pop(TRAVEL_AMBUSH_REBIRTH, None)
     return rebirth(doc)
 
 
@@ -159,24 +213,48 @@ def rebirth(doc: PlayerDoc) -> str:
     doc.ext["hp"] = 0
     doc.ext["xueqi"] = 0.0
     doc.ext["shouyuan"] = REBIRTH_LIFESPAN
+    if "jueling_suppressed_lifespan" in doc.ext:
+        doc.ext["jueling_suppressed_lifespan"] = REBIRTH_LIFESPAN
     doc.ext.pop("shouyuan_day", None)
     doc.ext.pop("power", None)
+    doc.ext.pop("awaiting_rescue", None)
+    doc.ext.pop("rescue_deadline", None)
+    doc.ext.pop("reincarnation_phase", None)
+    doc.ext.pop(TRAVEL_AMBUSH_REBIRTH, None)
     doc.state = "空闲"
     return (f"【轮回往生】寿元已尽，真灵入轮回路——第 {count} 世开启。\n"
             f"境界与修为尽归尘土，灵石折半随身，寿元重续 {REBIRTH_LIFESPAN}。\n"
             f"前尘记忆不灭，道友重头再来。")
 
 
-def grant(doc: PlayerDoc, amount: int) -> int:
-    """增寿（渡劫/登仙等）。返回新值。"""
-    try:
-        from .mingge import signed_bonus
-        amount = int(amount) + int(signed_bonus(doc, "寿元额外"))
-    except (TypeError, ValueError):
-        amount = int(amount)
-    cur = shouyuan_of(doc)
-    doc.ext["shouyuan"] = cur + max(0, int(amount))
-    return doc.ext["shouyuan"]
+def grant(doc: PlayerDoc, amount: int, era_index: int | None = None) -> int:
+    """增寿（渡劫/登仙等），同步绝灵期间的隐藏真实寿元。"""
+    amount = int(amount)
+    amount = max(0, int(amount))
+    if era_index is not None or "jueling_suppressed_lifespan" in doc.ext:
+        from . import era as era_mod
+        use_index = (era_index if era_index is not None else era_mod.JUELING_ERA_INDEX)
+        era_mod.add_jueling_aware_lifespan(doc, amount, use_index)
+    else:
+        doc.ext["shouyuan"] = shouyuan_of(doc) + amount
+    return int(doc.ext["shouyuan"])
+
+
+def spend(doc: PlayerDoc, amount: int) -> int:
+    """支付寿元；若在绝灵压制中，同时扣除隐藏真实值。返回实际支付量。"""
+    cost = max(0, int(amount))
+    hidden_key = "jueling_suppressed_lifespan"
+    if hidden_key in doc.ext:
+        current = max(0, int(doc.ext.get(hidden_key, 0) or 0))
+        paid = min(current, cost)
+        left = current - paid
+        doc.ext[hidden_key] = left
+        doc.ext["shouyuan"] = min(left, 9_999)
+        return paid
+    current = shouyuan_of(doc)
+    paid = min(current, cost)
+    doc.ext["shouyuan"] = current - paid
+    return paid
 
 
 # W7-0：丹药表的 shouyuan 字段此前零消费（寿命丹服下不增寿），补上真实结算。

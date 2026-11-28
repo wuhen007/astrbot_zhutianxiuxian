@@ -11,8 +11,8 @@
 - 原版按「位面」判定邂逅；本插件秘境只有 4 个地点，改为按地点映射位面
 - 原版柳神需「石村 + 搬血极境」，本插件无极境体系，改为青冥山第 3 层初遇
 - 原版黑皇在「副本通关」3% 触发，本插件无副本，改为太古战场第 5 层
-- 原版护道人在战斗中直接秒杀来敌；本插件在秘境战败瞬间出手，保你不死、不损收益
-- 原版位面传送阵给「位面传送次数」；本插件无位面旅行，改为秘境战败自动脱身
+- 秘境保留即时护道救援，位面天骄伏击则由护道人与残血天骄实际交战
+- 位面旅行与传送阵已移植；旧档中的玩家护道人信息可在旅行伏击中参与接战
 """
 
 from __future__ import annotations
@@ -52,6 +52,53 @@ HEI_TIERS = [
 # 好感门槛（护道之约，原版三人皆 480）
 PROTECTOR_FAVOR = 480
 PROTECTOR_CD = 24 * 3600
+
+# 原版 model/npcProtector.js：旅行伏击时护道人会与剩余气血的天骄实际交战。
+TRAVEL_PROTECTORS: dict[str, dict[str, Any]] = {
+    "苏灵": {
+        "intro": "命运轮盘跨越诸天降临，万千败亡之果同时消散。苏灵自星辉中走出，挡在你身前。",
+        "combatant": {
+            "名号": "苏灵·命运至尊帝", "攻击": 40_000_000_000_000_000,
+            "防御": 40_000_000_000_000_000, "当前血量": 40_000_000_000_000_000,
+            "血量上限": 40_000_000_000_000_000, "暴击率": 1, "暴击伤害": 4,
+            "速度": 1200,
+            "灵根": {"name": "命运神道体", "type": "命运", "法球倍率": 4,
+                     "攻击": 10, "防御": 10, "生命": 10},
+            "法球倍率": 4,
+            "学习的功法": ["命运终章·移劫夺运", "命运轮盘·万果归一", "命运神道体"],
+        },
+    },
+    "柳神": {
+        "intro": "一根翠绿柳枝贯穿虚空，三千神国在枝叶间明灭。柳神的法相挡在你身前。",
+        "combatant": {
+            "名号": "柳神·祖祭灵法相", "攻击": 800_000_000_000,
+            "防御": 950_000_000_000, "当前血量": 1_400_000_000_000,
+            "血量上限": 1_400_000_000_000, "暴击率": 0.9, "暴击伤害": 3,
+            "速度": 100,
+            "灵根": {"name": "仙古祖祭灵", "type": "仙王巨头", "法球倍率": 3,
+                     "攻击": 6, "防御": 7, "生命": 9},
+            "法球倍率": 3,
+            "学习的功法": ["柳神法·万灵归墟", "原始真解终极篇", "柳神法"],
+        },
+    },
+    "狠人大帝": {
+        "intro": "青铜面具自时间长河尽头浮现，万千仙葩同时绽放。狠人大帝一步落在你身前。",
+        "combatant": {
+            "名号": "狠人大帝·红尘仙身", "攻击": 1_500_000_000_000_000_000_000,
+            "防御": 1_500_000_000_000_000_000_000,
+            "当前血量": 1_500_000_000_000_000_000_000,
+            "血量上限": 1_500_000_000_000_000_000_000,
+            "暴击率": 1, "暴击伤害": 3.5, "速度": 1800,
+            "灵根": {"name": "混沌吞天仙体", "type": "红尘仙体", "法球倍率": 3.2,
+                     "攻击": 8, "防御": 5.5, "生命": 7},
+            "法球倍率": 3.2,
+            "学习的功法": ["不灭天功", "万化圣诀", "吞天魔功", "飞仙", "飞仙诀", "一念花开，君临天下"],
+            "功法熟练度": {"不灭天功": 1000, "万化圣诀": 1000, "吞天魔功": 1000,
+                         "飞仙": 1000, "飞仙诀": 1000, "一念花开，君临天下": 1000},
+        },
+    },
+}
+
 
 # 黑皇
 HEI_TEACH_FAVOR = 80
@@ -640,6 +687,44 @@ def try_protect(s: dict, now: float) -> tuple[str, str] | None:
     return name, msg
 
 
+def begin_travel_protector(doc: Any, s: dict, now: float) -> dict | None:
+    """Consume one 24-hour NPC protector intervention and return its combat data."""
+    legacy = _ext(doc).get("legacy_source")
+    legacy = legacy if isinstance(legacy, Mapping) else {}
+    name = protector_of(s)
+    if not name:
+        try:
+            legacy_enabled = int(legacy.get("大帝庇护", 0) or 0) == 1
+        except (TypeError, ValueError):
+            legacy_enabled = False
+        if legacy_enabled:
+            name = str(legacy.get("护道人") or "")
+    if name not in TRAVEL_PROTECTORS:
+        return None
+
+    try:
+        cooldown = float(s.get("protector_cd", 0) or 0)
+    except (TypeError, ValueError):
+        cooldown = 0.0
+    if cooldown <= 0 and legacy.get("护道人") == name:
+        try:
+            legacy_cooldown = float(legacy.get("护道人下次出手时间", 0) or 0)
+        except (TypeError, ValueError):
+            legacy_cooldown = 0.0
+        cooldown = legacy_cooldown / 1000 if legacy_cooldown > 1_000_000_000_000 else legacy_cooldown
+    if cooldown > float(now):
+        return None
+
+    s["protector"] = name
+    s["protector_cd"] = float(now) + PROTECTOR_CD
+    try:
+        uses = int(s.get("protector_uses", 0) or 0)
+    except (TypeError, ValueError):
+        uses = 0
+    s["protector_uses"] = uses + 1
+    return {"name": name, **copy.deepcopy(TRAVEL_PROTECTORS[name])}
+
+
 def protect_status(s: dict, now: float) -> str:
     name = protector_of(s)
     if not name:
@@ -794,6 +879,25 @@ def consume_tribulation(s: dict) -> bool:
         return False
     s["trib_pending"] = False
     return True
+
+
+def resolve_tribulation_formation(s: dict, rng) -> dict[str, Any]:
+    """Resolve the original Black Emperor deception formation for Three Thousand Dao Fire."""
+    if not consume_tribulation(s):
+        return {"consumed": False, "success": False, "range_shift": 0,
+                "damage_multiplier": 1.0, "message": ""}
+    success = float(rng.random()) < 0.25
+    shift = min(30, max(0, int(float(rng.random()) * 31))) - 15 if success else 0
+    if success:
+        message = (f"【欺天阵纹·天机偏正】阵纹遮蔽天机，本场雷劫伤害降低 25%，"
+                   f"随机区间偏移 {shift:+d} 点。")
+    else:
+        message = "【欺天阵纹·天机未蔽】阵纹未能瞒过天劫，悄然化入雷海。"
+    character = (s.get("chars") or {}).get("黑皇")
+    if isinstance(character, dict):
+        _event(character, f"渡劫激活欺天阵纹（{'偏移 ' + str(shift) if success else '失败'}）")
+    return {"consumed": True, "success": success, "range_shift": shift,
+            "damage_multiplier": 0.75 if success else 1.0, "message": message}
 
 
 def formations_text(s: dict, stones: int) -> str:

@@ -20,8 +20,9 @@ from __future__ import annotations
 
 import hashlib
 import math
+import random
 import time
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from . import authority, zhengdao
 
@@ -363,7 +364,8 @@ def _tier_line(st: Mapping[str, Any]) -> str:
 # ---------------------------------------------------------------- 支取结算
 
 def settle_withdraw(doc: Any, st: dict, picks: Sequence[int], unit_weight: int,
-                    now: float, max_hp: int = 0, rng: Any = None) -> tuple[bool, str, dict[str, int]]:
+                    now: float, max_hp: int = 0, rng: Any = None,
+                    debt_results: list[dict] | None = None) -> tuple[bool, str, dict[str, int]]:
     """确认支取：入包清单 + 逐线登记 claim + 加因果债。"""
     sess = session_of(st, now)
     if not sess:
@@ -383,6 +385,8 @@ def settle_withdraw(doc: Any, st: dict, picks: Sequence[int], unit_weight: int,
     st["session"] = None
     weight = max(1, int(unit_weight or 1))
     res = add_debt(doc, st, weight * total, f"支取「{name}」×{total}", now, max_hp, rng)
+    if debt_results is not None:
+        debt_results.append(res)
     lines = [f"【时间线·支取】时间线支取成功：「{name}」×{total} 已落入纳戒。",
              "挪用自：" + "、".join(f"{o['label']}(×{o['qty']})" for o in chosen),
              f"因果债计价：{weight} × {total} = {weight * total} 点。"]
@@ -436,7 +440,8 @@ def parse_item_spec(arg: str) -> tuple[str | None, str]:
 
 def strike(attacker: Any, atk_st: dict, target: Any, tgt_st: dict,
            ftype: str, name: str, now: float,
-           max_hp: int = 0, rng: Any = None) -> tuple[bool, str, dict | None]:
+           max_hp: int = 0, rng: Any = None,
+           debt_results: list[dict] | None = None) -> tuple[bool, str, dict | None]:
     """古史打击：改写目标的既定事实。
 
     返回 (ok, msg, plan)；plan = {"erase_item": name} 时由调用方做全服抹除。
@@ -456,6 +461,8 @@ def strike(attacker: Any, atk_st: dict, target: Any, tgt_st: dict,
             return False, (f"权柄不足：古史打击需 {GATE_WITHDRAW} 档"
                            f"（当前 {cmp['atk']}）。"), None
         res = add_debt(attacker, atk_st, debt_amount, reason, now, max_hp, rng)
+        if debt_results is not None:
+            debt_results.append(res)
         if cmp["reason"] == "same_level":
             lines = [f"古史反噬：目标权柄与你同为 {cmp['tgt']} 档，两股道果相撞，"
                      f"既定事实纹丝不动。"]
@@ -492,11 +499,74 @@ def strike(attacker: Any, atk_st: dict, target: Any, tgt_st: dict,
     multiplier = 1.5 if tgt_level >= GATE_TARGET else 1.0
     res = add_debt(attacker, atk_st, int(math.ceil(weight * multiplier)),
                    f"改写{ftype}既定事实", now, max_hp, rng)
+    if debt_results is not None:
+        debt_results.append(res)
     lines.append(f"因果债计价：{ftype} 权重 {weight}"
                  + (f" ×1.5（目标 {tgt_level} 档道果）" if multiplier > 1 else "") + "。")
     lines += debt_lines(res)
     return True, "\n".join(lines), plan
 
+
+
+def collapse_past_artifacts(doc: Any, rng: random.Random,
+                            item_lookup: Callable[[str], Mapping | None]) -> dict[str, Any]:
+    """原版过去身被抹杀时，有 35% 概率摧毁一件未锁定的帝兵/至宝。"""
+    ext = getattr(doc, "ext", {}) or {}
+    equipment = ext.get("equipment") if isinstance(ext.get("equipment"), dict) else {}
+    candidates = []
+    for slot in ("至宝", "帝兵"):
+        raw = equipment.get(slot)
+        name = str(raw.get("name") or "") if isinstance(raw, Mapping) else str(raw or "")
+        if not name:
+            continue
+        item = item_lookup(name) or (raw if isinstance(raw, Mapping) else {})
+        if item.get("islockd") or item.get("锁定") or item.get("大道至宝本体"):
+            continue
+        candidates.append((slot, name))
+    if not candidates or rng.random() >= 0.35:
+        return {"destroyed": False, "candidates": len(candidates)}
+    slot, name = candidates[min(len(candidates) - 1, int(rng.random() * len(candidates)))]
+    equipment.pop(slot, None)
+    if slot == "至宝":
+        treasure = ext.get("xtzb")
+        if isinstance(treasure, dict) and treasure.get("current") == name:
+            treasure["current"] = ""
+    return {"destroyed": True, "slot": slot, "name": name,
+            "reason": "过去时间线被厄土仙帝打灭，道果锚点松动"}
+
+
+def destroy_past(doc: Any, source: str, now: float) -> dict[str, Any]:
+    """记录过去时间线毁灭及其对准仙帝/以下现世道果的创伤。"""
+    ext = getattr(doc, "ext", None)
+    if not isinstance(ext, dict):
+        ext = {}
+        if hasattr(doc, "ext"):
+            doc.ext = ext
+    try:
+        from . import suiyun
+        if bool(suiyun.effects(doc).get("absoluteSpiritImmune")):
+            return {"protected": True, "line_id": "", "present_effect": "protected"}
+    except (AttributeError, TypeError, ValueError):
+        pass
+    state = state_of(doc)
+    line_id = f"{source}:{int(float(now) * 1000)}"
+    destroyed = list(state.get("destroyed_lines") or [])
+    if line_id not in destroyed:
+        destroyed.append(line_id)
+    state["destroyed_lines"] = destroyed[-MAX_HISTORY:]
+    tier = authority.authority_21(doc)
+    if tier == 20:
+        ext["dao_flaw"] = int(ext.get("dao_flaw") or 0) + 1
+        ext["ancient_wound"] = int(ext.get("ancient_wound") or 0) + 1
+        present_effect = "quasi_emperor_flaw"
+    elif tier < 20:
+        ext["ancient_wound"] = int(ext.get("ancient_wound") or 0) + 1
+        present_effect = "causal_wound"
+    else:
+        present_effect = "none"
+    _log(state, "时间线毁灭", now, line_id=line_id, source=source,
+         present_effect=present_effect)
+    return {"protected": False, "line_id": line_id, "present_effect": present_effect}
 
 def _push_destroyed(st: dict, line_id: str, now: float) -> None:
     dead = list(st.get("destroyed") or [])
@@ -633,6 +703,9 @@ def rebuild_form(target: Any, healer_name: str, now: float,
     if isinstance(target.ext, dict):
         target.ext["hp"] = hp
         target.ext["soul_hurt"] = max(0, int(target.ext.get("soul_hurt") or 0) - 1)
+    if getattr(target, "state", "") == "形神俱灭":
+        target.state = "空闲"
+        target.state_start = 0.0
     _log(st, "重塑形神", now, by=str(healer_name))
     return True, (f"{healer_name} 以大道之力重塑 "
                   f"{getattr(target, 'name', target.uid)} 的形神"

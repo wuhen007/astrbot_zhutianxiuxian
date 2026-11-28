@@ -183,7 +183,8 @@ def reincarnate(doc: PlayerDoc, now: float | None = None,
     n = st["samsara"] + 1
     if rng.random() >= SAMSARA_CHANCE:
         ext = getattr(doc, "ext", {})
-        ext["shouyuan"] = shouyuan - 500
+        from .lifespan import spend as spend_lifespan
+        spend_lifespan(doc, 500)
         st["points"] = int(st["points"]) - 1
         save(doc, st)
         try:

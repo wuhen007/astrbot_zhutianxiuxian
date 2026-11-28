@@ -776,6 +776,167 @@ def render_grid(map_st: Mapping, doc: Any, gains: Mapping | None = None) -> str:
 
 # ---------------------------------------------------------------- 玩家态（ext["xiangu"]）
 
+def _reachable_cells(grid: list[list[int]], start: Mapping) -> set[tuple[int, int]]:
+    if not grid or not isinstance(grid[0], list):
+        return set()
+    h, w = len(grid), len(grid[0])
+    if w < 3 or h < 3 or any(not isinstance(row, list) or len(row) != w for row in grid):
+        return set()
+    x, y = start.get("x"), start.get("y")
+    if type(x) is not int or type(y) is not int or not (0 <= x < w and 0 <= y < h):
+        return set()
+    if grid[y][x] == CELL_WALL:
+        return set()
+    seen = {(x, y)}
+    queue = [(x, y)]
+    for cx, cy in queue:
+        for dx, dy in ((-1, -1), (0, -1), (1, -1), (-1, 0),
+                       (1, 0), (-1, 1), (0, 1), (1, 1)):
+            nx, ny = cx + dx, cy + dy
+            if (0 <= nx < w and 0 <= ny < h and (nx, ny) not in seen
+                    and grid[ny][nx] != CELL_WALL):
+                seen.add((nx, ny))
+                queue.append((nx, ny))
+    return seen
+
+
+def _repair_saved_map(st: dict) -> bool:
+    """修补旧图拓扑：清理自环/重复路，补出口并仅为断路开墙。"""
+    map_st = st.get("map")
+    if not isinstance(map_st, dict):
+        return False
+    fragment_id = str(map_st.get("fragment_id") or "")
+    if fragment_id not in FRAGMENTS:
+        return False
+    grid = map_st.get("grid")
+    if (not isinstance(grid, list) or not grid or not isinstance(grid[0], list)
+            or not grid[0]):
+        return False
+    h, w = len(grid), len(grid[0])
+    if h < 3 or w < 3 or any(not isinstance(row, list) or len(row) != w for row in grid):
+        return False
+    pos = map_st.get("pos")
+    if not isinstance(pos, Mapping):
+        return False
+    px, py = pos.get("x"), pos.get("y")
+    if type(px) is not int or type(py) is not int or not (0 <= px < w and 0 <= py < h):
+        return False
+    if grid[py][px] == CELL_WALL:
+        return False
+
+    seed = str(st.get("world_seed") or "legacy")
+    current = map_st.get("connections")
+    current = current if isinstance(current, Mapping) else {}
+    known = {d: (current.get(d) if isinstance(current.get(d), str)
+                 and current.get(d) in FRAGMENTS else None) for d in _REQUIRED_DIRS}
+    required = _required_targets(seed, fragment_id)
+    repaired = _ensure_required(
+        fragment_id,
+        _sanitize_special(fragment_id, known),
+        required,
+        seeded_rng(f"{seed}:{fragment_id}:repair"),
+        _exit_direction(pos, w, h),
+    )
+    player_direction = _exit_direction(pos, w, h)
+    if player_direction and not repaired.get(player_direction):
+        rescue = next((target for target in required if target not in repaired.values()), None)
+        if rescue:
+            for direction in _REQUIRED_DIRS:
+                if repaired[direction] == rescue:
+                    repaired[direction] = None
+            repaired[player_direction] = rescue
+
+    changed = (not isinstance(map_st.get("connections"), Mapping)
+               or any(current.get(d) != repaired.get(d) for d in _REQUIRED_DIRS))
+    if map_st.get("w") != w or map_st.get("h") != h:
+        map_st["w"], map_st["h"] = w, h
+        changed = True
+
+    old_positions = map_st.get("exit_positions")
+    old_positions = old_positions if isinstance(old_positions, list) else []
+    kept: list[dict[str, int]] = []
+    seen: set[tuple[int, int]] = set()
+    for point in old_positions:
+        if not isinstance(point, Mapping):
+            changed = True
+            continue
+        x, y = point.get("x"), point.get("y")
+        if type(x) is not int or type(y) is not int or not (0 <= x < w and 0 <= y < h):
+            changed = True
+            continue
+        direction = _exit_direction(point, w, h)
+        key = (x, y)
+        valid = (direction and repaired.get(direction) and key not in seen
+                 and grid[y][x] == CELL_EXIT)
+        if not valid:
+            if grid[y][x] == CELL_EXIT and key != (px, py):
+                grid[y][x] = CELL_WALL
+            changed = True
+            continue
+        seen.add(key)
+        kept.append({"x": x, "y": y})
+
+    for direction in _REQUIRED_DIRS:
+        if not repaired.get(direction):
+            continue
+        position = _find_exit_position({**map_st, "exit_positions": kept}, direction)
+        if position is None:
+            generated = _exit_positions(
+                w, h, {direction: repaired[direction]},
+                seeded_rng(f"{seed}:{fragment_id}:repair-exit:{direction}"),
+            )
+            if not generated:
+                continue
+            base = generated[0]
+            if direction in ("top", "bottom"):
+                candidates = [{"x": x, "y": 0 if direction == "top" else h - 1}
+                              for x in range(1, w - 1)]
+            else:
+                candidates = [{"x": 0 if direction == "left" else w - 1, "y": y}
+                              for y in range(1, h - 1)]
+            start_index = next((i for i, p in enumerate(candidates)
+                                if p["x"] == base["x"] and p["y"] == base["y"]), 0)
+            candidates = candidates[start_index:] + candidates[:start_index]
+            position = next((p for p in candidates
+                             if grid[p["y"]][p["x"]] == CELL_WALL
+                             and (p["x"], p["y"]) != (px, py)), None)
+            if position is None:
+                continue
+            grid[position["y"]][position["x"]] = CELL_EXIT
+            kept.append(position)
+            changed = True
+        elif not any(p["x"] == position["x"] and p["y"] == position["y"] for p in kept):
+            kept.append(position)
+            changed = True
+
+    valid_positions = {(p["x"], p["y"]) for p in kept}
+    for y in (0, h - 1):
+        for x in range(w):
+            if (grid[y][x] == CELL_EXIT and (x, y) not in valid_positions
+                    and (x, y) != (px, py)):
+                grid[y][x] = CELL_WALL
+                changed = True
+    for x in (0, w - 1):
+        for y in range(1, h - 1):
+            if (grid[y][x] == CELL_EXIT and (x, y) not in valid_positions
+                    and (x, y) != (px, py)):
+                grid[y][x] = CELL_WALL
+                changed = True
+
+    reachable = _reachable_cells(grid, pos)
+    blocked = [p for p in kept if (p["x"], p["y"]) not in reachable]
+    if blocked:
+        before = [row[:] for row in grid]
+        _ensure_exit_connectivity(grid, pos, blocked)
+        if grid != before:
+            changed = True
+
+    if changed:
+        map_st["connections"] = repaired
+        map_st["exit_positions"] = kept
+    return changed
+
+
 def state_of(doc: Any) -> dict[str, Any]:
     ext = getattr(doc, "ext", None)
     if not isinstance(ext, dict):
@@ -797,6 +958,7 @@ def state_of(doc: Any) -> dict[str, Any]:
     st.setdefault("kills", 0)
     st.setdefault("cd", {})
     st.setdefault("heavy_until", 0.0)
+    _repair_saved_map(st)
     return st
 
 

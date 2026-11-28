@@ -1,5 +1,7 @@
 import random
 import unittest
+
+from core import mingge
 import json
 from pathlib import Path
 
@@ -61,6 +63,7 @@ class RemainingConsistencyTests(unittest.TestCase):
                 "修复道伤代价减少": 0.2, "寿元额外": -20,
             }},
         })
+        mingge.apply_initial(doc)
         self.assertEqual(yuanshen.heart_max(doc), 40)
         self.assertEqual(yuanshen.heart_cost(doc, 10), 7)
         self.assertLess(zhengdao.repair_cost(doc, 0, 1),

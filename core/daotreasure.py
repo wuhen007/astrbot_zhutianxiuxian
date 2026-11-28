@@ -479,13 +479,16 @@ def tribulation(doc: Any, w: dict[str, Any], years_total: int, stats: Any,
         return _no("你已击破本纪元的大道化身，无需重复渡劫。")
     auth = auth_mod.authority_of(doc)
     me = battle.Unit(doc.name or doc.uid[:8], int(stats.atk), int(stats.defense),
-                     int(stats.hp), float(stats.bao))
+                     int(stats.hp), float(stats.bao), speed=int(getattr(stats, "speed", 100)),
+                     crit_damage=getattr(stats, "crit_damage", None),
+                     action_bar=int(getattr(stats, "action_bar", 0)))
     foe = battle.Unit(
         f"大道化身·{p.get('name')}",
         max(1, int(stats.atk * (1.05 + auth * 0.005))),
         max(1, int(stats.defense * 0.9)),
         max(1, int(stats.hp * 1.25)),
-        float(stats.bao),
+        float(stats.bao), speed=int(getattr(stats, "speed", 100)),
+        crit_damage=getattr(stats, "crit_damage", None),
     )
     winner, _log, _hp, _ = battle.spar_full(me, foe, rng)
     if winner != 0:

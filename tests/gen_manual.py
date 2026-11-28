@@ -70,7 +70,7 @@ def main() -> int:
         ("位面中转", ("handle_pr_jy", "handle_pr_jy_yes", "handle_pr_jy_no",
                    "handle_pr_song", "handle_pr_portal", "handle_pr_wuxi")),
         ("天骄处置", ("handle_tj_accept", "handle_tj_reject", "handle_tj_soul",
-                   "handle_tj_slay")),
+                   "handle_tj_refine", "handle_tj_slay")),
         ("自动化·彩蛋", ("handle_at_on", "handle_at_off", "handle_at_status",
                       "handle_at_record", "handle_redeem_list", "handle_redeem",
                       "handle_eg_zhuang", "handle_eg_yihong", "handle_eg_steal",

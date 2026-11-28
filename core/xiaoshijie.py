@@ -2,7 +2,7 @@
 
 - 开辟：成仙（境界 ≥42）+ 世界石×1；演化 1-5 级（材料表对齐 WORLD_LEVELS）。
 - 挂机：#将分身化入小世界（100 万修为）→ #收获 按 96 现实小时封顶 × 时间流速。
-- 种植：神药种子 → 收获神药；生长有效秒 = (灵气需求/1000)×4h ÷ 时间流速。
+- 种植：神药种子 → 收获神药；按原版有效生长速率 `世界灵气/种子需求 × 时间流速` 推进实际成熟时间。
 - 浇灌：普通浇灌 -30 分钟生长，6 小时冷却。
 - W8-D1 深化：环境创造（8 道具→8 环境，高阶神药门槛）/ 败天神殿（源石+感悟挂机）/
   浇灌道具（草木精华露·岁月流金沙·掌天灵液·乾坤造化瓶）/ 野外仙兽驯服（封灵符三档）/
@@ -14,8 +14,11 @@
 
 from __future__ import annotations
 
+import math
 import random
 import time
+from copy import deepcopy
+from . import pet as pet_rules
 from collections.abc import Mapping
 from typing import Any
 
@@ -72,11 +75,6 @@ WORKSHOPS: dict[str, dict[str, Any]] = {
 }
 WORKSHOP_NAME = "世界石"
 
-GUARD_MAX = 5
-GUARD_BASE_COST = 4_000_000
-GUARD_BLOCK_PER_LEVEL = 0.15   # 每级守卫 -15% 偷菜成功率
-STEAL_BASE_RATE = 0.65
-STEAL_FAIL_PENALTY = 2_000_000  # 被抓罚灵石
 
 RIPEN_COST = 8_000_000         # 每株催熟灵石
 RIPEN_HOURS = 24.0             # 每株催熟推进的现实小时
@@ -84,9 +82,16 @@ RIPEN_HOURS = 24.0             # 每株催熟推进的现实小时
 
 def _defaults(world: Mapping[str, Any]) -> dict[str, Any]:
     w = dict(world)
+    if not isinstance(w.get("fields"), list):
+        legacy_fields = w.get("药田")
+        if isinstance(legacy_fields, list):
+            w["fields"] = [dict(field) for field in legacy_fields if isinstance(field, Mapping)]
     ws = w.get("workshops")
     w["workshops"] = dict(ws) if isinstance(ws, Mapping) else {}
     w["guard"] = int(w.get("guard") or 0)
+    steal_state = w.get("steal_state")
+    w["steal_state"] = dict(steal_state) if isinstance(steal_state, Mapping) else {"last_steal_time": 0}
+    w["last_stolen_time"] = w.get("last_stolen_time", 0)
     # W8-D1 新子键（老档缺省归一，不改动既有键）
     env = w.get("env")
     w["env"] = [str(x) for x in env] if isinstance(env, (list, tuple)) else []
@@ -138,34 +143,86 @@ def workshop_text(world: Mapping[str, Any]) -> str:
         lv = workshop_level(w, kind)
         nxt = "已满级" if lv >= WORKSHOP_MAX else f"升级需灵石 {workshop_cost(kind, lv)} + {WORKSHOP_NAME}×{lv + 1}"
         lines.append(f"· {kind} {lv}/{WORKSHOP_MAX}（{cfg['desc']}）— {nxt}")
-    lines.append(f"· 守卫 {int(w.get('guard') or 0)}/{GUARD_MAX}（每级偷菜成功率 -{int(GUARD_BLOCK_PER_LEVEL * 100)}%）")
     return "\n".join(lines)
 
 
-def guard_upgrade(world: Mapping[str, Any], stones: int,
-                  world_stones: int) -> tuple[bool, str, dict[str, Any], int]:
-    w = _defaults(world)
-    lv = int(w["guard"])
-    if lv >= GUARD_MAX:
-        return False, f"守卫已至 {GUARD_MAX} 级。", w, 0
-    cost = GUARD_BASE_COST * (lv + 1) * (lv + 1)
-    need_ws = lv + 1
-    if int(stones) < cost:
-        return False, f"募请守卫需灵石 {cost}，道友当前 {int(stones)}。", w, 0
-    if int(world_stones) < need_ws:
-        return False, f"募请守卫还需{WORKSHOP_NAME}×{need_ws}。", w, 0
-    w["guard"] = lv + 1
-    return True, f"小世界守卫扩至 {lv + 1} 级，偷菜成功率再降 {int(GUARD_BLOCK_PER_LEVEL * 100)}%。", w, cost
+def _crop_growth_rate(world: Mapping[str, Any], crop: Mapping[str, Any]) -> float:
+    seed = str(crop.get("seed") or crop.get("种子") or "")
+    required_aura = max(1.0, float((SEEDS.get(seed) or ("", 1000))[1]))
+    attributes = world.get("attributes") or world.get("attrs") or {}
+    aura = max(0.0, _safe_float(
+        attributes.get("灵气浓度") if isinstance(attributes, Mapping) else None,
+        WORLD_LEVELS[int(world.get("level", 1))]["aura"]))
+    multiplier = _safe_float(crop.get("growth_rate_multiplier"), 1.0)
+    return max(0.0, aura / required_aura * ratio_of(world) * multiplier)
 
 
-def ripe_crops(world: Mapping[str, Any]) -> int:
-    return sum(1 for f in (world.get("fields") or []) if float(f.get("remaining", 0)) <= 0)
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        result = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return result if math.isfinite(result) else default
+
+
+def _original_crop_remaining_hours(crop: Mapping[str, Any], world: Mapping[str, Any], now_ms: float) -> float | None:
+    seed = str(crop.get("seed") or crop.get("种子") or "")
+    seed_row = SEEDS.get(seed)
+    if seed_row is None or not (crop.get("种植时间") or crop.get("阶段开始时间")):
+        return None
+    legacy_multiplier = _safe_float(crop.get("记忆生长倍率"), 1.0)
+    rate = max(1e-9, _crop_growth_rate(world, {
+        "seed": seed, "growth_rate_multiplier": legacy_multiplier}))
+    attributes = {"灵气浓度": WORLD_LEVELS[int(world.get("level", 1))]["aura"],
+                  "时间流速": f"1:{ratio_of(world)}"}
+    state = pet_rules.calculate_crop_growth_state(
+        crop, {"requirements": {"灵气浓度": seed_row[1]}}, {"attributes": attributes}, now=now_ms)
+    if not state.get("valid"):
+        return None
+    return max(0.0, float(state["remaining_seconds"]) / (3600 * rate))
+
+
+def advance_crop(crop: Mapping[str, Any], world: Mapping[str, Any], now: float) -> dict[str, Any]:
+    """按原版灵气/时间流速惰性推进药田作物成熟度。"""
+    field = dict(crop)
+    now_ms = pet_rules.normalize_epoch_milliseconds(now)
+    now_seconds = now_ms / 1000.0
+    if "growth_updated_at" not in field:
+        original_remaining = _original_crop_remaining_hours(field, world, now_ms)
+        if original_remaining is not None:
+            field["remaining"] = round(original_remaining, 6)
+            field["growth_rate_multiplier"] = 1.0
+        else:
+            # Earlier port stores a real-hour countdown but no planting timestamp.
+            # Resume it from first access instead of using the unrelated idle-harvest clock.
+            base_rate = max(1e-9, _crop_growth_rate(world, field))
+            field["growth_rate_multiplier"] = 1.0 / base_rate
+        field["growth_updated_at"] = now_seconds
+        return field
+    checkpoint_ms = pet_rules.normalize_epoch_milliseconds(field.get("growth_updated_at"))
+    if checkpoint_ms <= 0:
+        checkpoint_ms = now_ms
+    elapsed_hours = max(0.0, (now_ms - checkpoint_ms) / 3_600_000.0)
+    field["remaining"] = round(max(0.0, _safe_float(field.get("remaining"))
+                                      - elapsed_hours * _crop_growth_rate(world, field)), 6)
+    field["growth_updated_at"] = now_seconds
+    return field
+
+
+def advance_crops(world: Mapping[str, Any], now: float) -> list[dict[str, Any]]:
+    return [advance_crop(field, world, now) for field in (world.get("fields") or [])]
+
+
+def ripe_crops(world: Mapping[str, Any], now: float | None = None) -> int:
+    stamp = time.time() if now is None else float(now)
+    return sum(1 for f in advance_crops(world, stamp) if f["remaining"] <= 0)
 
 
 def ripen(world: Mapping[str, Any], stones: int) -> tuple[bool, str, dict[str, Any], int]:
     """催熟：把未成熟作物整体推进 24 小时，按株计费。"""
     w = _defaults(world)
-    fields = [dict(f) for f in (w.get("fields") or [])]
+    now = time.time()
+    fields = advance_crops(w, now)
     growing = [f for f in fields if float(f.get("remaining", 0)) > 0]
     if not growing:
         return False, "药田里没有在生长的作物。", w, 0
@@ -179,39 +236,95 @@ def ripen(world: Mapping[str, Any], stones: int) -> tuple[bool, str, dict[str, A
     return True, f"灵雨催熟 {len(growing)} 株（每株 -{int(RIPEN_HOURS)} 小时），耗灵石 {cost}；已成熟 {done} 株。", w, cost
 
 
-def steal_rate(world: Mapping[str, Any]) -> float:
-    """偷菜成功率：守卫阵等级 + 守卫宠数量同轨扣减（W8-D1 起含守卫宠）。"""
-    w = _defaults(world)
-    n = int(w.get("guard") or 0) + sum(1 for p in w.get("pets") or [] if p.get("guard"))
-    return max(0.05, STEAL_BASE_RATE - n * GUARD_BLOCK_PER_LEVEL)
+def stealable_fields(world: Mapping[str, Any], now: float | None = None) -> list[dict[str, Any]]:
+    """Mature crops whose one-time companion yield has not already been stolen."""
+    stamp = time.time() if now is None else float(now)
+    return [field for field in advance_crops(world, stamp)
+            if float(field.get("remaining", 0) or 0) <= 0
+            and not (field.get("偷菜记录", field.get("steal_records", [])) or [])]
 
 
-def steal(target: Mapping[str, Any], thief_exp: int,
-          rng: Any) -> tuple[bool, str, dict[str, Any], str, int]:
-    """偷菜。返回 (成功?, 文案, 新目标世界, 偷到的东西, 罚款)。"""
+def steal(target: Mapping[str, Any], thief_exp: int, rng: Any,
+          thief_id: str = "", now: float | None = None
+          ) -> tuple[bool, str, dict[str, Any], str, int]:
+    """Take one mature crop's companion yield; source leaves the crop itself in place."""
     w = _defaults(target)
-    fields = [dict(f) for f in (w.get("fields") or [])]
-    mature = [f for f in fields if float(f.get("remaining", 0)) <= 0]
+    fields = advance_crops(w, time.time() if now is None else float(now))
+    mature = [field for field in fields
+              if float(field.get("remaining", 0) or 0) <= 0
+              and not (field.get("偷菜记录", field.get("steal_records", [])) or [])]
     if not mature:
-        return False, f"「{w.get('name')}」药田里没有成熟的作物。", dict(target), "", 0
+        return False, f"「{w.get('name')}」药田里没有可偷取的成熟作物。", dict(target), "", 0
     if int(thief_exp) < AVATAR_COST:
         return False, "修为太浅（需 100 万修为），潜不进去。", dict(target), "", 0
-    rate = steal_rate(w)
-    if rng.random() >= rate:
-        return False, (
-            f"你潜入「{w.get('name')}」，被守卫察觉（成功率 {int(rate * 100)}%），"
-            f"仓皇退回并掉落灵石 {STEAL_FAIL_PENALTY}。"
-        ), dict(target), "", STEAL_FAIL_PENALTY
-    pick = mature[0]
-    seed = str(pick.get("seed", ""))
+    pick = mature[min(len(mature) - 1, int(rng.random() * len(mature)))]
+    seed = str(pick.get("seed", pick.get("种子", "")))
     item = SEEDS.get(seed, ("?", 0))[0]
-    fields.remove(pick)
-    w["fields"] = fields
+    stamp = time.time() * 1000 if now is None else pet_rules.normalize_epoch_milliseconds(now)
+    recorded = pet_rules.record_crop_steal(pick, thief_id or "unknown", stamp)
+    w["fields"] = [recorded if field is pick else field for field in fields]
     return True, (
-        f"你趁夜摸进「{w.get('name')}」，摘走了一株{item}（守卫 {int(w.get('guard') or 0)} 级，"
-        f"成功率 {int(rate * 100)}%）。"
+        f"你潜入「{w.get('name')}」，从成熟的作物旁摘走一份【{item}】伴生产出；"
+        "原主的基础收成不受影响。"
     ), w, item, 0
 
+
+def steal_with_state(target: Mapping[str, Any], thief_world: Mapping[str, Any], thief_exp: int,
+                     rng: Any, now: float | None = None, thief_id: str = "",
+                     guard_limit: int | None = None
+                     ) -> tuple[bool, str, dict[str, Any], dict[str, Any], str, int, bool]:
+    """Original cooldown/protection/guardian flow over the current fields and pet schemas.
+
+    Returns success, message, target world, thief world, item, fine, and whether a valid
+    attempt started. A valid attempt consumes cooldown even when a guard catches the thief.
+    """
+    w, thief = _defaults(target), _defaults(thief_world)
+    now_ms = pet_rules.normalize_epoch_milliseconds(now) if now is not None else time.time() * 1000
+    remaining = pet_rules.get_steal_cooldown_remaining(
+        (thief.get("steal_state") or {}).get("last_steal_time"), now_ms)
+    if remaining > 0:
+        minutes = int((remaining + 59_999) // 60_000)
+        return False, f"分身正在避风头，距离下次偷菜还有{minutes // 60}小时{minutes % 60}分钟。", dict(target), dict(thief_world), "", 0, False
+    if not thief.get("avatar"):
+        return False, "请先将分身化入小世界，分身才能潜入其他世界。", dict(target), dict(thief_world), "", 0, False
+    if pet_rules.is_world_steal_protected(w.get("last_stolen_time"), now_ms):
+        return False, "对方的小世界正受法则保护，请稍后再来；本次不进入冷却。", dict(target), dict(thief_world), "", 0, False
+    fields = advance_crops(w, now_ms)
+    mature = stealable_fields(dict(w, fields=fields), now_ms / 1000.0)
+    if not mature:
+        return False, f"「{w.get('name')}」没有可偷取的成熟作物，本次不进入冷却。", dict(target), dict(thief_world), "", 0, False
+    if int(thief_exp) < AVATAR_COST:
+        return False, "修为太浅（需 100 万修为），潜不进去。", dict(target), dict(thief_world), "", 0, False
+
+    thief["steal_state"]["last_steal_time"] = now_ms
+    w["fields"] = fields
+    w["last_stolen_time"] = now_ms
+    residents = w.get("pets", [])
+    if guard_limit is not None:
+        residents = residents[:max(0, int(guard_limit))]
+    guard = next((p for p in residents
+                  if p.get("guard", p.get("守卫", False))
+                  and not p.get("exhausted", p.get("累倒", False))
+                  and not p.get("workshop", p.get("工坊"))
+                  and float(p.get("energy", p.get("精力", 100))) > 0), None)
+    if guard:
+        chance = pet_rules.calculate_guard_intercept_chance(guard)
+        updated_guard = pet_rules.consume_guard_energy(guard, pet_rules.SMALL_WORLD_GUARD_ENERGY_COST)
+        w["pets"] = [updated_guard if p is guard else p for p in w["pets"]]
+        left = float(updated_guard.get("energy", updated_guard.get("精力", 0)))
+        maximum = updated_guard.get("max_energy", updated_guard.get("最大精力", 100))
+        exhausted = "；守卫精力耗尽，已自动撤下" if left <= 0 else ""
+        if rng.random() < chance:
+            return False, (f"潜入失败！分身被【{guard['name']}】发现并赶走（拦截率 {int(chance * 100)}%，"
+                           f"守卫剩余精力 {left:g}/{maximum}{exhausted}；偷菜冷却 12 小时）。"), w, thief, "", 0, True
+        guard_note = f"成功避开守卫【{guard['name']}】（拦截率 {int(chance * 100)}%，剩余精力 {left:g}）{exhausted}。"
+    else:
+        guard_note = ""
+
+    ok, msg, nw, item, fine = steal(w, thief_exp, rng, thief_id=thief_id, now=now_ms)
+    nw = _defaults(nw)
+    nw["last_stolen_time"] = now_ms
+    return ok, msg + (f"\n{guard_note}" if guard_note else ""), nw, thief, item, fine, True
 
 def create_world(name: str, realm_id: int, inv: Mapping[str, int]) -> tuple[bool, str, dict[str, Any]]:
     """开辟小世界。返回 (ok, 提示, world)。"""
@@ -223,6 +336,7 @@ def create_world(name: str, realm_id: int, inv: Mapping[str, int]) -> tuple[bool
     world = {
         "name": name, "level": 1, "avatar": False,
         "last_harvest": time.time(), "fields": [], "water_ts": 0.0,
+        "steal_state": {"last_steal_time": 0}, "last_stolen_time": 0,
     }
     return True, f"小世界「{name}」开辟成功！（{WORLD_LEVELS[1]['name']}，灵气 1000，药田 1 块）", world
 
@@ -271,8 +385,11 @@ def harvest(world: Mapping[str, Any]) -> tuple[bool, str, dict[str, Any], dict[s
     real_hours = min(ACCUM_HOURS_CAP, max(0.0, (now - float(w.get("last_harvest", now))) / 3600))
     ratio = WORLD_LEVELS[int(w.get("level", 1))]["ratio"]
     eff_hours = real_hours * ratio
+    w["fields"] = advance_crops(w, now)
     w["last_harvest"] = now
-    if eff_hours < 0.02:
+    mature_fields = any(float(field.get("remaining", 0) or 0) <= 0
+                        for field in (w.get("fields") or []))
+    if eff_hours < 0.02 and not mature_fields:
         return False, "距离上次收获时间太短，暂无资源可收获。", w, {}
     lv = int(w.get("level", 1))
     out: dict[str, int] = {}
@@ -285,7 +402,7 @@ def harvest(world: Mapping[str, Any]) -> tuple[bool, str, dict[str, Any], dict[s
             out[k] = out.get(k, 0) + n
     # 成熟作物收获（灵田每级 +8%，小数部分按概率进位）
     field_lv = workshop_level(w, "灵田")
-    fields = [dict(f) for f in (w.get("fields") or [])]
+    fields = advance_crops(w, now)
     kept: list[dict[str, Any]] = []
     grown: dict[str, int] = {}
     for f in fields:
@@ -315,7 +432,7 @@ def plant(world: Mapping[str, Any], seed: str) -> tuple[bool, str, dict[str, Any
     w = _defaults(world)
     lv = int(w.get("level", 1))
     cap = WORLD_LEVELS[lv]["fields"]
-    fields = list(w.get("fields") or [])
+    fields = advance_crops(w, time.time())
     if len(fields) >= cap:
         return False, f"药田已满（{len(fields)}/{cap}），演化小世界可扩田。", dict(world)
     if seed not in SEEDS:
@@ -333,10 +450,12 @@ def plant(world: Mapping[str, Any], seed: str) -> tuple[bool, str, dict[str, Any
     aura = WORLD_LEVELS[lv]["aura"]
     if aura < aura_need:
         return False, f"{seed} 需要 {aura_need} 灵气，当前世界灵气 {aura}。", dict(world)
-    grow_hours = (aura_need / 1000) * 4 / ratio_of(w)  # 有效小时 → 现实小时
-    if "时间碎片" in w["env"]:
-        grow_hours *= 0.75
-    fields.append({"seed": seed, "remaining": round(grow_hours, 2)})
+    now = time.time()
+    growth_multiplier = 1 / 0.75 if "时间碎片" in w["env"] else 1.0
+    rate = aura / max(1, aura_need) * ratio_of(w) * growth_multiplier
+    grow_hours = (aura_need / 1000) * 4 / max(rate, 1e-9)  # 按原版当前灵气/流速计算现实小时
+    fields.append({"seed": seed, "remaining": round(grow_hours, 6),
+                   "growth_updated_at": now, "growth_rate_multiplier": growth_multiplier})
     w["fields"] = fields
     return True, f"【药园·栽种】已栽种 {seed}（{len(fields)}/{cap} 田），预计 {grow_hours:.1f} 现实小时后成熟。", w
 
@@ -348,7 +467,7 @@ def water(world: Mapping[str, Any]) -> tuple[bool, str, dict[str, Any]]:
     if now - float(w.get("water_ts", 0) or 0) < WATER_CD_HOURS * 3600:
         left = int(WATER_CD_HOURS * 3600 - (now - float(w.get("water_ts", 0))))
         return False, f"甘霖未聚（冷却中，剩 {left // 3600} 小时 {left % 3600 // 60} 分）。", {}
-    fields = [dict(f) for f in (w.get("fields") or [])]
+    fields = advance_crops(w, now)
     if not fields:
         return False, "药田空空如也，先 #小世界栽种。", {}
     w["water_ts"] = now
@@ -359,15 +478,25 @@ def water(world: Mapping[str, Any]) -> tuple[bool, str, dict[str, Any]]:
     return True, f"普降甘霖，全部作物生长时间 -30 分钟（已成熟 {mature} 株，收获时一并结算）。", w
 
 
-def ratio_of(world: Mapping[str, Any]) -> int:
-    return WORLD_LEVELS[int(world.get("level", 1))]["ratio"]
+def ratio_of(world: Mapping[str, Any]) -> float:
+    attributes = world.get("attributes") or world.get("attrs") or {}
+    flow = attributes.get("时间流速") if isinstance(attributes, Mapping) else None
+    if flow:
+        try:
+            source, target = (float(part) for part in str(flow).split(":", 1))
+            if source > 0 and target > 0:
+                return target / source
+        except (TypeError, ValueError):
+            pass
+    return float(WORLD_LEVELS[int(world.get("level", 1))]["ratio"])
 
 
-def view(world: Mapping[str, Any], exp: int, shanhe_bonus: bool = False) -> str:
+def view(world: Mapping[str, Any], exp: int, shanhe_bonus: bool = False,
+         now: float | None = None) -> str:
     w = _defaults(world)
     lv = int(w.get("level", 1))
     cfg = WORLD_LEVELS[lv]
-    fields = w.get("fields") or []
+    fields = advance_crops(w, time.time() if now is None else now)
     lines = [
         f"「{w.get('name')}」{cfg['name']} {lv} 级",
         f"灵气 {cfg['aura']}｜时间流速 1:{cfg['ratio']}｜药田 {len(fields)}/{cfg['fields']}"
@@ -460,7 +589,7 @@ def stage_of(world: Mapping[str, Any], field: Mapping[str, Any]) -> int:
     if aura_need <= 0:
         return 1
     total = (aura_need / 1000) * 4 / ratio_of(world) or 1.0
-    pct = max(0.0, min(1.0, float(field.get("remaining", 0)) / total))
+    pct = max(0.0, min(1.0, _safe_float(field.get("remaining"), 0.0) / total))
     if pct <= 0.2:
         return 5
     if pct <= 0.4:
@@ -556,7 +685,8 @@ def water_item(world: Mapping[str, Any], index: int,
     pct = WATER_ITEMS.get(item)
     if not pct:
         return False, f"没有「{item}」这种浇灌道具（草木精华露/岁月流金沙/掌天灵液）。", dict(world)
-    fields = [dict(f) for f in (w.get("fields") or [])]
+    now = time.time()
+    fields = advance_crops(w, now)
     if not fields:
         return False, "药田空空如也，先 #小世界栽种。", dict(world)
     if not (1 <= index <= len(fields)):
@@ -580,7 +710,7 @@ def batch_water_item(world: Mapping[str, Any],
     hours = WATER_ITEM_BATCH_HOURS.get(item)
     if not hours:
         return False, f"没有「{item}」这种浇灌道具。", dict(world)
-    fields = [dict(f) for f in (w.get("fields") or [])]
+    fields = advance_crops(w, time.time())
     growing = [f for f in fields if float(f.get("remaining", 0)) > 0]
     if not growing:
         return False, "药田里没有在生长的作物。", dict(world)
@@ -594,7 +724,7 @@ def batch_water_item(world: Mapping[str, Any],
 def force_ripen_all(world: Mapping[str, Any]) -> tuple[bool, str, dict[str, Any]]:
     """#浇灌小世界作物：消耗乾坤造化瓶 ×1，全部作物剩余时间 -25%。"""
     w = _defaults(world)
-    fields = [dict(f) for f in (w.get("fields") or [])]
+    fields = advance_crops(w, time.time())
     growing = [f for f in fields if float(f.get("remaining", 0)) > 0]
     if not growing:
         return False, "药田里没有在生长的作物。", dict(world)
@@ -645,40 +775,17 @@ def _tame_event_chance(elapsed_hours: float) -> float:
 
 def maybe_wild_beast(world: Mapping[str, Any], real_hours: float, rng: Any,
                      now: float | None = None) -> tuple[dict[str, Any], str]:
-    """收获后掷野外仙兽事件。返回 (world, 文案|空串)。"""
-    w = _defaults(world)
-    if w["tame"] and w["tame"].get("expires", 0) > (now if now is not None else time.time()):
-        return w, ""   # 已有仙兽出没未处理，不叠加
-    if rng.random() >= _tame_event_chance(real_hours):
+    """Generate the original 8%-per-24h wild-pet encounter during harvest."""
+    current_time = now if now is not None else time.time()
+    w, beast = pet_rules.maybe_wild_encounter(world, real_hours, rng, current_time)
+    if not beast:
         return w, ""
-    roll = rng.random() * sum(BEAST_QUALITY_WEIGHTS)
-    qidx = 0
-    for i, wt in enumerate(BEAST_QUALITY_WEIGHTS):
-        roll -= wt
-        if roll <= 0:
-            qidx = i
-            break
-    trait_names = list(PET_TRAITS)
-    rng.shuffle(trait_names)
-    traits = trait_names[: 2 if rng.random() < 0.3 else 1]
-    beast = {
-        "name": WILD_BEAST_NAMES[int(rng.random() * len(WILD_BEAST_NAMES))],
-        "type": BEAST_TYPES[int(rng.random() * len(BEAST_TYPES))],
-        "quality": BEAST_QUALITIES[qidx],
-        "traits": traits,
-    }
-    w["tame"] = {
-        "beast": beast,
-        "expires": (now if now is not None else time.time()) + TAME_VALID_MINUTES * 60,
-    }
+    traits = beast.get("traits") or []
+    traits_text = "【" + "】【".join(traits) + "】" if traits else "无"
     return w, (
-        f"【野外仙兽出没！】\n"
-        f"一只 {beast['quality']} 级「{beast['name']}」（类型：{beast['type']}）出现在了小世界中！\n"
-        f"特性：{'【' + '】【'.join(beast['traits']) + '】' if traits else '无'}\n"
-        f"使用 #驯服仙兽 消耗封灵符尝试驯服它！"
-        f"（{TAME_VALID_MINUTES} 分钟内有效；普通/上品/极品封灵符成功率 50%/70%/90%）"
+        f"【野外仙兽出没！】\n一只 {beast['quality']} 级「{beast['name']}」（类型：{beast['type']}）出现在了小世界中！\n"
+        f"特性：{traits_text}\n使用 #驯服仙兽 消耗封灵符尝试驯服它！（30 分钟内有效；普通/上品/极品封灵符成功率 50%/70%/90%）"
     )
-
 
 def pick_talisman(inv: Mapping[str, int]) -> tuple[str, float] | None:
     """按纳戒库存选最高档封灵符。返回 (符名, 成功率) 或 None。"""
@@ -718,6 +825,13 @@ def tame(world: Mapping[str, Any], talisman: str, rng: Any,
         f"可用 #分配仙宠{beast['name']}到灵田/丹房/器阁/符台/矿脉 安排工作。"
     ), w
 
+
+def tame_to_inventory(world: Mapping[str, Any], talisman: str, rng: Any,
+                      now: float | None = None, item_lookup=None,
+                      now_ms: int = 0) -> tuple[dict[str, Any], dict[str, Any]]:
+    """结算野外驯服；成功奖励作为完整仙宠实例进入纳戒。"""
+    return pet_rules.capture_wild_encounter(
+        world, talisman, rng, now, item_lookup, now_ms)
 
 # ---- 仙宠岗位（原版栖息地 / smallWorldWorkshop.js 产出） ----
 
@@ -765,8 +879,9 @@ def _ensure_supplies(w: dict[str, Any]) -> dict[str, int]:
 
 def place_pet(world: Mapping[str, Any], name: str, pet_type: str, quality: str,
               traits: list[str] | None = None,
-              shanhe_bonus: bool = False) -> tuple[bool, str, dict[str, Any]]:
-    """安置仙宠入驻栖息地（纳戒仙宠/出战宠由 main 定来源，core 只管名册）。"""
+              shanhe_bonus: bool = False,
+              pet_instance: Mapping[str, Any] | None = None) -> tuple[bool, str, dict[str, Any]]:
+    """安置单只契约宠物或纳戒图鉴宠物，保留完整原实例供召回恢复。"""
     w = _defaults(world)
     name = (name or "").strip()
     if not name:
@@ -776,13 +891,42 @@ def place_pet(world: Mapping[str, Any], name: str, pet_type: str, quality: str,
     cap = habitat_capacity(w, shanhe_bonus)
     if len(w["pets"]) >= cap:
         return False, f"栖息地已满（{len(w['pets'])}/{cap}），演化小世界或执掌「山河社稷图」可扩位。", dict(world)
-    w["pets"].append({
-        "name": name, "type": pet_type, "quality": quality,
-        "traits": list(traits or []), "energy": 100, "max_energy": 100,
-        "workshop": None, "guard": False, "cycle": 0.0,
-    })
+    source = deepcopy(dict(pet_instance or {}))
+    inventory_source = str(source.pop("_inventory_source", "stack"))
+    if not source:
+        source = {"name": name, "class": "仙宠", "type": pet_type, "品级": quality,
+                  "等级": 1, "特性": list(traits or [])}
+    source["name"] = name
+    habitat = pet_rules.create_habitat_pet_data(source)
+    legacy = "纳戒数据" in habitat
+    resident = {
+        "name": name,
+        "type": source.get("type", pet_type),
+        "quality": source.get("品级", source.get("quality", quality)),
+        "level": source.get("等级", source.get("level", 1)),
+        "max_level": source.get("等级上限", source.get("max_level")),
+        "traits": list(source.get("特性", source.get("traits", traits or [])) or []),
+        "energy": habitat.get("精力", habitat.get("energy", 100)),
+        "max_energy": habitat.get("最大精力", habitat.get("max_energy", 100)),
+        "workshop": None, "guard": False,
+        "cycle": float(source.get("cycle", 0) or 0),
+        "inventory_snapshot": habitat.get("纳戒数据", habitat.get("inventory_snapshot", source)),
+        "inventory_source": inventory_source,
+    }
+    w["pets"].append(resident)
     return True, f"「{name}」入驻栖息地（{len(w['pets'])}/{cap}），可 #分配仙宠{name}到工坊 安排工作。", w
 
+
+def recall_pet_to_session(world: Mapping[str, Any], name: str,
+                          base_pets=()) -> tuple[bool, str, dict[str, Any], dict | None]:
+    """从栖息地召回契约栏；会保留完整快照与旧档可恢复属性。"""
+    w = _defaults(world)
+    index = next((i for i, pet in enumerate(w["pets"]) if pet.get("name") == name), -1)
+    if index < 0:
+        return False, f"栖息地里没有「{name}」。", w, None
+    resident = w["pets"].pop(index)
+    session = pet_rules.habitat_pet_session(resident, base_pets)
+    return True, f"「{name}」已从栖息地召回至仙宠契约栏。", w, session
 
 def assign_pet(world: Mapping[str, Any], name: str,
                workshop: str) -> tuple[bool, str, dict[str, Any]]:
@@ -818,29 +962,55 @@ def recall_pet(world: Mapping[str, Any], name: str) -> tuple[bool, str, dict[str
     return True, f"「{name}」已从{ws}召回，在栖息地休息恢复精力。", w
 
 
-def set_guard(world: Mapping[str, Any], name: str) -> tuple[bool, str, dict[str, Any]]:
-    """设置仙宠守卫（每只守卫宠偷菜成功率 -15%，与守卫等级同轨）。"""
+def set_guard(world: Mapping[str, Any], name: str, guard_limit: int | None = None
+              ) -> tuple[bool, str, dict[str, Any]]:
+    """Set the sole original small-world pet guard from an active habitat slot."""
     w = _defaults(world)
-    pet = next((p for p in w["pets"] if p.get("name") == name), None)
-    if not pet:
-        return False, f"栖息地里没有「{name}」（#安置仙宠 先入驻）。", dict(world)
-    if pet.get("guard"):
-        return False, f"「{name}」已经是守卫了。", dict(world)
-    if pet.get("workshop"):
-        return False, f"「{name}」正在{pet['workshop']}工作，先召回再守卫。", dict(world)
-    pet["guard"] = True
-    n = sum(1 for p in w["pets"] if p.get("guard"))
-    return True, f"「{name}」担任仙宠守卫（守卫宠 {n} 只+守卫阵 {int(w['guard'])} 级，偷菜成功率再降）。", w
+    residents = w["pets"][:max(0, int(guard_limit))] if guard_limit is not None else w["pets"]
+    index = next((i for i, pet in enumerate(residents) if pet.get("name") == name), -1)
+    if index < 0:
+        return False, f"栖息地有效位置中没有「{name}」（#安置仙宠 先入驻）。", dict(world)
+    pet = residents[index]
+    energy = max(0.0, _safe_float(pet.get("energy", pet.get("精力", 100)), 100))
+    if pet.get("exhausted", pet.get("累倒", False)):
+        return False, f"「{name}」正在休养，暂时不能担任守卫。", dict(world)
+    if energy <= 0:
+        return False, f"「{name}」精力不足，请先让它在栖息地恢复。", dict(world)
+    old_workshop = pet.get("workshop", pet.get("工坊"))
+    for resident in w["pets"]:
+        if pet_rules._legacy_pet_schema(resident):
+            resident["守卫"] = False
+        else:
+            resident["guard"] = False
+    target = w["pets"][index]
+    if pet_rules._legacy_pet_schema(target):
+        target["守卫"], target["工坊"] = True, None
+    else:
+        target["guard"], target["workshop"] = True, None
+    chance = round(pet_rules.calculate_guard_intercept_chance(target) * 100)
+    quality = pet_rules._pet_value(target, "quality", "品级", "仙胎")
+    level = int(_safe_float(pet_rules._pet_value(target, "level", "等级", 1), 1))
+    maximum = _safe_float(pet_rules._pet_value(target, "max_energy", "最大精力", 100), 100)
+    workshop_note = f"，已从【{old_workshop}】调离" if old_workshop else ""
+    return True, (f"【{name}】已成为小世界守卫{workshop_note}\n类型/品级/等级："
+                  f"{target.get('type', '?')} / {quality} / Lv.{level}\n"
+                  f"精力：{energy:g}/{maximum:g}｜当前拦截率：{chance}%\n"
+                  f"每次遭遇消耗：{int(pet_rules.SMALL_WORLD_GUARD_ENERGY_COST)}点精力"), w
 
 
-def unset_guard(world: Mapping[str, Any]) -> tuple[bool, str, dict[str, Any]]:
-    """撤下全部仙宠守卫（原版一次撤一只，此处名册通常只 1-2 只，取最早一只）。"""
+def unset_guard(world: Mapping[str, Any], guard_limit: int | None = None
+                ) -> tuple[bool, str, dict[str, Any]]:
+    """Remove the first active-slot guard pet, matching the one-guardian source rule."""
     w = _defaults(world)
-    pet = next((p for p in w["pets"] if p.get("guard")), None)
+    residents = w["pets"][:max(0, int(guard_limit))] if guard_limit is not None else w["pets"]
+    pet = next((p for p in residents if p.get("guard", p.get("守卫", False))), None)
     if not pet:
-        return False, "当前没有仙宠守卫。", dict(world)
-    pet["guard"] = False
-    return True, f"【药园·守卫】已撤下仙宠守卫「{pet['name']}」，它回栖息地休息。", w
+        return False, "当前没有有效栖息位中的仙宠守卫。", dict(world)
+    if pet_rules._legacy_pet_schema(pet):
+        pet["守卫"] = False
+    else:
+        pet["guard"] = False
+    return True, f"已撤下仙宠守卫【{pet['name']}】，它会留在栖息地休息。", w
 
 
 def energy_period(energy: float, max_energy: float, hours: float,
@@ -1098,8 +1268,11 @@ def harvest_full(world: Mapping[str, Any], now: float | None = None,
     real_hours = min(ACCUM_HOURS_CAP, max(0.0, (now - float(w.get("last_harvest", now))) / 3600))
     ratio = WORLD_LEVELS[int(w.get("level", 1))]["ratio"]
     eff_hours = real_hours * ratio
+    w["fields"] = advance_crops(w, now)
     w["last_harvest"] = now
-    if eff_hours < 0.02:
+    mature_fields = any(float(field.get("remaining", 0) or 0) <= 0
+                        for field in (w.get("fields") or []))
+    if eff_hours < 0.02 and not mature_fields:
         return False, "距离上次收获时间太短，暂无资源可收获。", w, {}, {}
     lv = int(w.get("level", 1))
     out: dict[str, int] = {}
@@ -1119,7 +1292,7 @@ def harvest_full(world: Mapping[str, Any], now: float | None = None,
             out[k] = out.get(k, 0) + n
     # 成熟作物收获（灵田每级 +8%，小数部分按概率进位）
     field_lv = workshop_level(w, "灵田")
-    fields = [dict(f) for f in (w.get("fields") or [])]
+    fields = advance_crops(w, now)
     kept: list[dict[str, Any]] = []
     grown: dict[str, int] = {}
     for f in fields:

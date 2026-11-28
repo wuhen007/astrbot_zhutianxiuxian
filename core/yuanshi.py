@@ -617,3 +617,35 @@ def exchange(n_source: int, y: dict) -> tuple[bool, str, dict]:
     y["amount"] = int(y.get("amount", 0)) - n_source
     gain = n_source * 10
     return True, f"源石 {n_source:,} 兑换灵石 {gain:,}（汇率 10）。", y
+
+
+# 神城兑换（原版 apps/User/zhengdaotixi.js:148）：纳戒源石道具 → 源石余额（正向）。
+SOURCE_STONE_EXCHANGE_RATES: dict[str, int] = {
+    "下品源石": 10, "中品源石": 50, "上品源石": 100, "超品源石": 300,
+    "神源石": 5000, "上品神源石": 7000, "超品神源石": 12500,
+}
+
+
+def quote_exchange(name: str, amount: int) -> tuple[bool, int, str]:
+    """神城兑换报价：返回 (是否有效, 源石值, 错误文案)。"""
+    rate = SOURCE_STONE_EXCHANGE_RATES.get(str(name or "").strip())
+    if not rate:
+        return False, 0, (f"未知的源石类型：{name}（可选："
+                          f"{'、'.join(SOURCE_STONE_EXCHANGE_RATES)}）")
+    amount = max(1, int(amount or 1))
+    return True, rate * amount, ""
+
+
+def exchange_from_items(y: dict, name: str, amount: int,
+                        held: int) -> tuple[bool, str, dict, int]:
+    """神城兑换入账：校验持有量并累加源石；返回 (ok, 文案, 新状态, 实兑数量)。"""
+    ok, value, err = quote_exchange(name, amount)
+    if not ok:
+        return False, err, y, 0
+    amount = max(1, int(amount or 1))
+    if int(held or 0) < amount:
+        return False, (f"源石不足！你拥有【{name}】×{int(held or 0)}，"
+                       f"试图兑换数量：{amount}。"), y, 0
+    y["amount"] = int(y.get("amount", 0) or 0) + value
+    return True, (f"【神城兑换·源石】【{name}】×{amount} → 源石 +{value:,}"
+                  f"（当前 {int(y['amount']):,} 斤）"), y, amount

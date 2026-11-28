@@ -15,7 +15,7 @@
 shortcut（本移植折算，写在模块头便于回溯）：
 - 原版「极境含 2(搬血)/3(洞天)」本移植无极境数组 → 用 `realm_index ≥12 / physique_index ≥12` 代理。
 - 原版「纪元积累 ≥100」→ 直接复用 `fashan.era_of(doc)`（上限 1000）。
-- 原版「mijinglevel_id / xiangulevel_id ≥6」→ 用 `realm_index ≥5`（第 6 境）。
+- 原版「mijinglevel_id / xiangulevel_id ≥6」→ 读取独立额外境界轨。
 - 原版 `生命本源 = 100 + 灵根.生命本源` → 存 `ext["supreme"]["life"]`（原始点数，
   **不**乘 `linggen.ORIGIN_SCALE`；进战斗的扁平气血仍由灵根快照 origin 负责）。
 - 原版至尊骨由搬血极境自动显化、材料靠大荒峡谷掉落；本移植补一条入口 `#至尊传承`
@@ -79,14 +79,9 @@ def stage_of(doc: Any) -> int:
 
 
 def life_max(doc: Any) -> int:
-    """100 + 灵根.生命本源（原版 xiuxian.js:14193-14204）。"""
-    snap = getattr(doc, "ext", {}).get("linggen") if isinstance(getattr(doc, "ext", None), Mapping) else None
-    if not isinstance(snap, Mapping):
-        return 100
-    try:
-        return 100 + int(float(snap.get("origin", 0) or 0))
-    except (TypeError, ValueError):
-        return 100
+    """至尊路线沿用玩家通用生命本源上限，不再与当前值分离副本。"""
+    from . import life_source
+    return int(life_source.maximum(doc))
 
 
 def state_of(doc: Any) -> dict[str, Any]:
@@ -103,12 +98,8 @@ def state_of(doc: Any) -> dict[str, Any]:
     st.setdefault("title", "")
     if not isinstance(st["arts"], list):
         st["arts"] = list(st["arts"]) if isinstance(st["arts"], (tuple, set)) else []
-    try:
-        st["life"] = max(0, int(st["life"] or 0))
-    except (TypeError, ValueError):
-        st["life"] = 0
-    if st["life"] <= 0 and stage_of(doc) > 0:
-        st["life"] = life_max(doc)
+    from . import life_source
+    st["life"] = int(life_source.current(doc))
     tr = st.get("trial")
     if isinstance(tr, Mapping):
         kind = str(tr.get("kind") or "")
@@ -122,6 +113,9 @@ def state_of(doc: Any) -> dict[str, Any]:
 
 def set_state(doc: Any, st: Mapping[str, Any]) -> None:
     doc.ext["supreme"] = dict(st)
+    if "life" in st:
+        from . import life_source
+        life_source.set_current(doc, st["life"])
 
 
 def title_of(doc: Any, st: Mapping[str, Any] | None = None) -> str:
@@ -274,10 +268,15 @@ def trial(doc: Any, stats: Any, table: Sequence[Mapping],
     hp = max(1, int(getattr(stats, "hp", 0) or 0))
     bao = float(getattr(stats, "bao", 0) or 0)
     # 原版临时改「凡血之躯」只换法球/技能，**三维不打折**；难度由敌方 enemyScale 单独承担
-    me = battle.Unit(name, atk, defense, hp, bao)
+    me = battle.Unit(name, atk, defense, hp, bao,
+                     speed=int(getattr(stats, "speed", battle.speed_of(doc))),
+                     crit_damage=getattr(stats, "crit_damage", None),
+                     action_bar=int(getattr(stats, "action_bar", battle.initial_action_bar(doc))))
     foe = battle.Unit(str(spec["enemy"]), int(atk * float(spec["scale"])),
-                      int(defense * float(spec["scale"])), int(hp * float(spec["scale"])), 0.05)
-    won, log, hp_left, _ = battle.spar_full(me, foe, rng, max_rounds=20)
+                      int(defense * float(spec["scale"])), int(hp * float(spec["scale"])), 0.05,
+                      speed=max(1, int(getattr(stats, "speed", battle.speed_of(doc))
+                                       * float(spec["scale"]))))
+    won, log, hp_left, _ = battle.spar_full(me, foe, rng)
     brief = "｜".join(str(x) for x in (log or [])[-2:])[:160]
     if won != 0:
         set_state(doc, st)
@@ -380,7 +379,9 @@ def double_pupil(doc: Any, inv: Mapping[str, Any] | None) -> tuple[bool, str, di
     st = state_of(doc)
     if st["pupil"]:
         return _no("重瞳已开，无需再启。")
-    if int(getattr(doc, "realm_index", 0) or 0) < PUPIL_REALM:
+    from . import extra_cultivation
+    tracks = extra_cultivation.levels_of(doc)
+    if max(tracks["mijing"], tracks["xiangu"]) < PUPIL_REALM + 1:
         return _no(f"重瞳开天需第 {PUPIL_REALM + 1} 境以上（原版遮天/仙古第六境）。")
     if not _has(inv, PUPIL_COST):
         return _no("重瞳开天需【重瞳本源】×1（秘境「大荒重瞳者」遭遇产出）。")

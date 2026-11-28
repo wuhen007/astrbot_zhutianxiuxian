@@ -7,3 +7,6 @@ panels/
 data/cmd_config.json
 data/t2i_templates/
 tests/_sc.log
+
+# parity 分诊中间产物
+tools/parity/triage_raw.csv

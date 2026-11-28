@@ -93,22 +93,22 @@ CAPS: dict[str, float] = {
     "速度加成": 0.25,
 }
 
-# 本移植落点与权重
-FIELD_MAP: dict[str, tuple[str, float]] = {
-    "暴击率": ("bao", 1.0),
-    "暴击伤害": ("bao", 0.5),
-    "近战伤害加成": ("dealt", 1.0),
-    "神通伤害加成": ("dealt", 1.0),
-    "全伤害类型加成": ("dealt", 1.0),
-    "穿透": ("dealt", 0.5),
-    "近战伤害减免": ("taken", 1.0),
-    "神通伤害减免": ("taken", 1.0),
-    "全类型减免": ("taken", 1.0),
-    "闪避率": ("taken", 0.5),
-    "速度加成": ("taken", 0.25),
-    "治疗效果加成": ("lifesteal", 0.5),
-    "吸血率": ("lifesteal", 1.0),
-    "开战护盾率": ("shield", 1.0),
+# 本移植落点与权重（第三项为攻击类型：非空则只对该类型生效，空则通用）
+FIELD_MAP: dict[str, tuple[str, float, str | None]] = {
+    "暴击率": ("bao", 1.0, None),
+    "暴击伤害": ("bao", 0.5, None),
+    "近战伤害加成": ("dealt", 1.0, "近战"),
+    "神通伤害加成": ("dealt", 1.0, "神通"),
+    "全伤害类型加成": ("dealt", 1.0, None),
+    "穿透": ("dealt", 0.5, None),
+    "近战伤害减免": ("taken", 1.0, "近战"),
+    "神通伤害减免": ("taken", 1.0, "神通"),
+    "全类型减免": ("taken", 1.0, None),
+    "闪避率": ("taken", 0.5, None),
+    "速度加成": ("taken", 0.25, None),
+    "治疗效果加成": ("lifesteal", 0.5, None),
+    "吸血率": ("lifesteal", 1.0, None),
+    "开战护盾率": ("shield", 1.0, None),
 }
 
 # 落点上限（按原版caps折算）
@@ -390,18 +390,32 @@ def effects(st: Mapping[str, Any]) -> tuple[dict[str, float], list[str]]:
     return out, reso
 
 
-def combat(st: Mapping[str, Any]) -> dict[str, float]:
-    """→ {bao, dealt, taken, lifesteal, shield}，供 build_fighter 注入。"""
+def combat(st: Mapping[str, Any]) -> dict[str, Any]:
+    """→ {bao, dealt, taken, lifesteal, shield, dealt_by_type, taken_by_type}。
+
+    近战/神通类加成只对同类型技能生效（原版类型桶），全类型/穿透仍为通用乘区。
+    """
     eff, _ = effects(st)
-    acc = {"bao": 0.0, "dealt": 0.0, "taken": 0.0, "lifesteal": 0.0, "shield": 0.0}
+    acc: dict[str, Any] = {"bao": 0.0, "dealt": 0.0, "taken": 0.0,
+                           "lifesteal": 0.0, "shield": 0.0,
+                           "dealt_by_type": {}, "taken_by_type": {}}
     for field, value in eff.items():
         target = FIELD_MAP.get(field)
         if not target:
             continue
-        slot, weight = target
-        acc[slot] += float(value) * weight
+        slot, weight, kind = target
+        v = float(value) * weight
+        if kind:
+            bucket = acc["dealt_by_type" if slot == "dealt" else "taken_by_type"]
+            bucket[kind] = bucket.get(kind, 0.0) + v
+        else:
+            acc[slot] += v
     for key, cap in CAP_TOTAL.items():
         acc[key] = round(min(cap, max(0.0, acc[key])), 4)
+    for bucket, cap in (("dealt_by_type", CAP_TOTAL["dealt"]),
+                        ("taken_by_type", CAP_TOTAL["taken"])):
+        acc[bucket] = {k: round(min(cap, max(0.0, v)), 4)
+                       for k, v in acc[bucket].items() if v > 0}
     return acc
 
 

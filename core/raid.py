@@ -103,7 +103,7 @@ def shadow_of(team: Mapping, round_no: int = 1) -> tuple[str, int, int, int]:
 def hit_damage(won: bool, atk: int, boss_def: int, hp_max: int, rng: random.Random) -> int:
     """对 Boss 本体伤害：胜 4% 上限 + 2×Harm；负 2% + 1.2×Harm（保底产出）。"""
     base = int(hp_max * (0.04 if won else 0.02))
-    raw, _ = harm(max(1, int(atk * 0.9)), max(1, int(boss_def)), rng)
+    raw = harm(max(1, atk * 0.9), max(1, int(boss_def)), rng)[0]
     return int(base + raw * (2.0 if won else 1.2))
 
 

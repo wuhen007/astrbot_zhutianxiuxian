@@ -25,6 +25,8 @@ def _score(board: str, doc: PlayerDoc, level_table: list[dict],
            player_stats: Stats | None) -> tuple[int, str] | None:
     ext = doc.ext if isinstance(doc.ext, Mapping) else {}
     legacy = ext.get("legacy_source") if isinstance(ext.get("legacy_source"), Mapping) else {}
+    from . import extra_cultivation
+    tracks = extra_cultivation.levels_of(doc)
     if board == "强化榜":
         fields = ("攻击加成", "防御加成", "生命加成")
         if not any(key in legacy for key in fields):
@@ -81,7 +83,7 @@ def _score(board: str, doc: PlayerDoc, level_table: list[dict],
     if board == "封神榜" and level_id < 42:
         return None
     if board == "遮天榜":
-        secret_level = int(float(legacy.get("mijinglevel_id", max(0, doc.realm_index // 2)) or 0))
+        secret_level = tracks["mijing"]
         if secret_level < 2:
             return None
         if player_stats is None:
@@ -120,8 +122,8 @@ def board_text(board: str, players: Sequence[PlayerDoc | Mapping], uid: str,
         if board == "完美世界榜":
             realm = xiangu.realm_name(xiangu.xg_level_of(doc))
         elif board == "遮天榜":
-            legacy = doc.ext.get("legacy_source") if isinstance(doc.ext.get("legacy_source"), Mapping) else {}
-            realm = f"人体秘境 {int(float(legacy.get('mijinglevel_id', max(0, doc.realm_index // 2)) or 0))}"
+            from . import extra_cultivation
+            realm = f"人体秘境 {extra_cultivation.level_of(doc, 'mijing')}"
         elif board in {"天榜", "封神榜", "至尊榜"}:
             level = min(_level_id(doc) - 1, len(table) - 1) if table else 0
             realm = str(table[level].get("level", "未知境")) if table else "未知境"

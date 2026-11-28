@@ -177,8 +177,10 @@ def enemy_units(entry: dict[str, Any], stats: Any) -> list[battle.Unit]:
     atk = max(100, int(getattr(stats, "atk", 0) or 0))
     defense = max(50, int(getattr(stats, "defense", 0) or 0))
     return [
-        battle.Unit(entry["opposition"][0], int(atk * 0.95), int(defense * 0.9), int(hp * 0.85), 0.15),
-        battle.Unit(entry["opposition"][1], int(atk * 0.8), int(defense * 1.1), int(hp * 0.75), 0.1),
+        battle.Unit(entry["opposition"][0], int(atk * 0.95), int(defense * 0.9), int(hp * 0.85), 0.15,
+                    speed=int(getattr(stats, "speed", 100) * 0.95)),
+        battle.Unit(entry["opposition"][1], int(atk * 0.8), int(defense * 1.1), int(hp * 0.75), 0.1,
+                    speed=int(getattr(stats, "speed", 100) * 0.8)),
     ]
 
 
@@ -199,6 +201,9 @@ def fight_chapter(entry: dict[str, Any], stats: Any, rng: Any) -> dict[str, Any]
             int(getattr(stats, "defense", 0)),
             full_hp,
             float(getattr(stats, "bao", 0.0) or 0.0),
+            speed=int(getattr(stats, "speed", 100)),
+            crit_damage=getattr(stats, "crit_damage", None),
+            action_bar=int(getattr(stats, "action_bar", 0)),
         )
         winner, log, a_hp, _b_hp = battle.spar_full(me, unit, rng)
         if isinstance(log, (list, tuple)):

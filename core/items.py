@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import math
 import time
 from typing import Any
@@ -10,6 +11,31 @@ from typing import Any
 DAOXIN_CAP = 500
 RARITY_LABELS = {1: "凡", 2: "凡", 3: "玄", 4: "玄", 5: "灵",
                  6: "灵", 7: "仙", 8: "圣", 9: "圣", 10: "帝"}
+_HIGH_REALM_CONSUMABLE_TYPES = frozenset(("修为", "血气", "神药"))
+_HIGH_REALM_CONSUMABLE_MESSAGE = "「自荒古岁月至今...」\n「本座早已不需要这等外物了」"
+
+def consumable_use_restriction(doc, item: dict[str, Any]) -> str | None:
+    """Return the original high-realm refusal for restricted pill types, else None.
+
+    Only cultivation, blood-qi, and divine medicines are restricted. Evaluate
+    extra-track state on a copy because its migration helper initializes state.
+    """
+    if (item.get("class") != "丹药"
+            or str(item.get("type") or "") not in _HIGH_REALM_CONSUMABLE_TYPES):
+        return None
+
+    try:
+        from . import extra_cultivation
+
+        snapshot = copy.deepcopy(doc)
+        levels = extra_cultivation.legacy_fields(snapshot)
+        flower_authority = extra_cultivation.authority_level(snapshot, "huafen") + 1
+        restricted = (int(levels.get("mijinglevel_id") or 0) > 19
+                      or int(levels.get("xiangulevel_id") or 0) > 19
+                      or flower_authority > 19)
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return None
+    return _HIGH_REALM_CONSUMABLE_MESSAGE if restricted else None
 
 
 def rarity_of(item: dict[str, Any]) -> int:
@@ -107,6 +133,10 @@ def buy(
 
 def sell(doc, item: dict[str, Any], qty: int) -> tuple[bool, str, Any]:
     """出售给系统：按出售价回收。"""
+    from .custom_items import is_private_item
+
+    if is_private_item(item):
+        return False, f"「{item.get('name') or '该装备'}」为绑定私有装备，不可出售。", doc
     if qty < 1:
         return False, "至少出售 1 件。", doc
     try:
@@ -149,6 +179,10 @@ def use_item(
 
     if item.get("class") == "装备":
         return False, f"「{name}」是装备，请使用「#装备 {name}」穿戴。", doc, False
+
+    restriction = consumable_use_restriction(doc, item)
+    if restriction:
+        return False, restriction, doc, False
 
     # deep=True：ext 是嵌套 dict，浅拷贝会与原 doc 共享同一 dict，
     # 写 ext["xueqi"]/["hp"] 会污染调用方档案（纯函数性）。

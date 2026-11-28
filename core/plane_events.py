@@ -1,7 +1,7 @@
 """位面大事件：帝关 / 圣地大战 / 游商（W17-F1）——原版
 `apps/tasks/ForeignImperialPass.js` + `model/foreignImperialPass.js`（帝关）、
 `apps/SecretPlace/SecretPlace.js` L416-520（圣地大战/战功商店/游商）的纯函数移植。
-先天至宝本体争夺已在 xtzb（单人守护灵挑战）；污损/求饶已在 tianjiao/战斗链。
+先天至宝 24 小时择主竞赛状态挂在 realm_event.active[*].contest，由 xtzb_birth 结算；单人守护灵挑战仍保留为备用入口。污损/求饶已在 tianjiao/战斗链。
 
 本移植（shortcut）：
 - 帝关：触发折算为玩家 #驰援帝关 直接触发（原 0.25 概率位面事件）；

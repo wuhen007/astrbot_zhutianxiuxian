@@ -1,14 +1,14 @@
-"""宗门深层补全：召唤神兽 / 神兽赐福 / 药园（W23-F1）——原版
+"""宗门深层补全：召唤神兽 / 神兽赐福 / 药园（W23-F1）——原版, fund
 `apps/Association/Association.js` 中 beast/herb 系列指令的纯函数移植。
 
 原版语义：
-- #召唤神兽：宗门等级 ≥5 且宗门基金 ≥50,000 → 随机获得一只护山神兽
+- #召唤神兽：宗门等级 ≥8、建设等级 ≥50、有驻地且基金 ≥2,000,000
   （青龙/白虎/朱雀/玄武/麒麟），每位成员按北京时间自然日各可领取一次赐福。
-- #神兽赐福：消耗宗门基金 10,000 → 随机 buff（三维加成/修为/灵石/洗根水）。
+- #神兽赐福：每日一次；默认 30% 掉落，神赐丹按剩余次数提高掉落概率。
 - #药园：宗门药园种植草药，成员可收获；#拔苗助长 偷拔加速成熟。
 
 本移植（shortcut）：
-- 神兽为宗门级共享（全服唯一 per 宗门），无独立成长线。
+- 神兽为宗门级共享（全服唯一 per 宗门），无独立成长线；原版自动日常仍需主入口调度接线，赐福领域函数手动/自动共用。
 - 药园简化为 6 块地、4 种种子、按小时成熟；#拔苗助长 有 30% 品质惩罚。
 """
 
@@ -22,21 +22,12 @@ from .player import PlayerDoc
 from .clock import day_key
 
 BEASTS = ("青龙", "白虎", "朱雀", "玄武", "麒麟")
-BEAST_COST = 50_000
-BEAST_LEVEL = 5
-BLESS_COST = 10_000
-BLESS_POOL = (
-    ("三维加成", "全属性 +5%（24h）"),
-    ("修为暴涨", "修为 +50,000"),
-    ("灵石雨", "灵石 +20,000"),
-    ("洗根水", "洗根水 ×2"),
-    ("幸运草", "幸运草 ×3"),
-)
+BEAST_COST = 2_000_000
+BEAST_LEVEL = 8
+BEAST_BUILD = 50
 HERB_SLOTS = 6
 HERBS = ("万年凝血草", "万年何首乌", "万年血精草", "万年清心草")
 GROW_HOURS = 8
-
-
 def beast_of(s: Mapping[str, Any]) -> str:
     return str(s.get("beast") or "")
 
@@ -50,54 +41,94 @@ def beast_cd_left(doc: PlayerDoc, now: float) -> float:
 def summon_beast(doc: PlayerDoc, s: dict[str, Any], fund: int, level: int,
                  now: float, rng: random.Random,
                  ) -> tuple[bool, str, int]:
-    """#召唤神兽：宗门等级 ≥5 + 基金 50,000 → 随机神兽。返回 (ok,msg,新基金)。"""
+    """召唤神兽：宗门等级 8、建设 50、有驻地、基金 200 万。"""
     if level < BEAST_LEVEL:
         return False, f"召唤神兽需宗门等级 ≥{BEAST_LEVEL}（当前 {level}）。", fund
+    if int(s.get("build") or 0) < BEAST_BUILD:
+        return False, f"召唤神兽需建设等级 ≥{BEAST_BUILD}（当前 {int(s.get('build') or 0)}）。", fund
+    if str(s.get("place") or "").strip() in ("", "0"):
+        return False, "召唤神兽需先建立宗门驻地。", fund
     if fund < BEAST_COST:
-        return False, f"召唤神兽需宗门基金 {BEAST_COST:,}（当前 {fund:,}）。"
+        return False, f"召唤神兽需宗门基金 {BEAST_COST:,}（当前 {fund:,}）。", fund
     if s.get("beast"):
         return False, f"本宗已有护山神兽【{s['beast']}】。", fund
-    bl = list(BEASTS)
-    s["beast"] = bl[int(rng.random() * len(bl)) % len(bl)]
+    roll = rng.random()
+    s["beast"] = ("麒麟" if roll > 0.8 else "青龙" if roll > 0.6 else
+                  "玄武" if roll > 0.4 else "朱雀" if roll > 0.2 else "白虎")
     s["beast_bless_ts"] = 0.0
     new_fund = fund - BEAST_COST
-    return True, (f"≡≡≡ 神兽降世 ≡≡≡\n"
-                  f"{doc.name or doc.uid[:8]} 以宗门气运为引，"
-                  f"【{s['beast']}】自虚空中降临，俯首于山门！\n"
-                  f"消耗基金 {BEAST_COST:,}。每日 #神兽赐福 一次。"), new_fund
+    return True, (f"召唤成功，神兽{s['beast']}投下一道分身，开始守护宗门；绑定后不可更换。"
+                  f"宗门基金 −{BEAST_COST:,}。"), new_fund
+
+def _beast_reward_pool(beast: str, preferred: bool,
+                       pools: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    if beast == "麒麟":
+        rows = pools.get("qilin") if preferred else pools.get("danyao")
+        max_rarity = 4
+    elif beast == "青龙":
+        rows = pools.get("qinglong") if preferred else pools.get("gongfa")
+        max_rarity = 4
+    elif beast in {"玄武", "朱雀", "白虎"}:
+        rows = pools.get("xuanwu") if preferred else pools.get("equipment")
+        max_rarity = None
+    else:
+        return []
+    result = []
+    for item in rows if isinstance(rows, list) else []:
+        if not isinstance(item, Mapping) or not item.get("name") or not item.get("class"):
+            continue
+        if beast in {"麒麟", "青龙"}:
+            try:
+                if int(item.get("稀有度")) > max_rarity:
+                    continue
+            except (TypeError, ValueError):
+                continue
+        elif item.get("name") == "大罗剑胎":
+            continue
+        result.append(item)
+    return result
 
 
 def beast_bless(doc: PlayerDoc, s: dict[str, Any], fund: int, now: float,
-                rng: random.Random,
+                rng: random.Random, reward_pools: Mapping[str, Any] | None = None,
                 ) -> tuple[bool, str, dict[str, int], int]:
-    """#神兽赐福：每日一次，基金 10,000 → 随机奖励。"""
-    if not s.get("beast"):
+    """每日赐福；按原版机缘 buff 决定掉落，并从对应神兽物品池取 1 件。"""
+    beast = str(s.get("beast") or "")
+    if not beast:
         return False, "本宗尚无护山神兽——#召唤神兽 先。", {}, fund
     left = beast_cd_left(doc, now)
     if left > 0:
-        return False, f"【{s['beast']}】尚在沉睡，{int(left // 3600)} 小时后方可赐福。", {}, fund
-    if fund < BLESS_COST:
-        return False, f"神兽赐福需基金 {BLESS_COST:,}（当前 {fund:,}）。", {}, fund
-    bp = list(BLESS_POOL)
-    name, desc = bp[int(rng.random() * len(bp)) % len(bp)]
-    delta: dict[str, int] = {}
-    detail = ""
-    if name == "修为暴涨":
-        doc.exp = int(getattr(doc, "exp", 0) or 0) + 50_000
-        detail = "修为 +50,000"
-    elif name == "灵石雨":
-        doc.stones = int(getattr(doc, "stones", 0) or 0) + 20_000
-        detail = "灵石 +20,000"
-    elif name == "三维加成":
-        s["beast_buff_until"] = now + 86400
-        detail = "全属性 +5%（24h）"
-    else:
-        delta[name] = 2
-        detail = f"{name} ×2"
-    doc.ext["beast_bless_day"] = day_key(now)
-    new_fund = fund - BLESS_COST
-    return True, (f"【{s['beast']}·赐福】{desc}——{detail}"), delta, new_fund
+        return False, f"【{beast}】尚在沉睡，{int(left // 3600)} 小时后方可赐福。", {}, fund
 
+    buffs = dict(doc.ext.get("buffs") or {})
+    favor = dict(buffs.get("shenci") or {})
+    uses = max(0, int(float(favor.get("times", 0) or 0)))
+    bonus = float(favor.get("bonus", 0) or 0) if uses else 0.0
+    if uses:
+        uses -= 1
+        favor.update({"times": uses, "bonus": bonus if uses else 0.0})
+        buffs["shenci"] = favor
+
+    if rng.random() + bonus <= 0.7:
+        doc.ext["beast_bless_day"] = day_key(now)
+        if buffs:
+            doc.ext["buffs"] = buffs
+        return True, f"{beast}今日无意赐下宝物，明日再来。", {}, fund
+
+    preferred = rng.random() > 0.9
+    pool = _beast_reward_pool(beast, preferred, reward_pools or {})
+    if not pool and preferred:
+        pool = _beast_reward_pool(beast, False, reward_pools or {})
+        preferred = False
+    if not pool:
+        return False, f"{beast}的赐福物品池暂不可用，本次未消耗每日次数。", {}, fund
+    item = pool[min(len(pool) - 1, int(rng.random() * len(pool)))]
+
+    doc.ext["beast_bless_day"] = day_key(now)
+    if buffs:
+        doc.ext["buffs"] = buffs
+    label = "仔细挑选" if preferred else "随手赐下"
+    return True, f"【{beast}赐福】{label}「{item['name']}」×1。", {str(item["name"]): 1}, fund
 
 # ---------------------------------------------------------------- 药园
 

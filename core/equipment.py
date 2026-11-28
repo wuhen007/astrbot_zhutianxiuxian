@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .player import PlayerDoc, realm_entry
+from . import battle as battle_mod
 
 SLOTS = ("武器", "护具", "法宝", "帝兵", "至宝")
 
@@ -30,6 +31,9 @@ class Stats:
     hp: int
     bao: float
     set_lines: tuple[str, ...] = ()
+    speed: int = 100
+    crit_damage: float = 1.5
+    action_bar: int = 0
 
 
 def _split(value: Any) -> tuple[float, float]:
@@ -52,13 +56,22 @@ def slot_of(item: Mapping[str, Any] | None) -> str | None:
 
 
 def wear(doc: PlayerDoc, item: Mapping[str, Any]) -> tuple[bool, str, str | None]:
-    """穿戴装备。返回 (ok, msg, 换下的旧物品名)。"""
+    """穿戴普通装备。先天至宝须由独立执掌指令穿戴。"""
+    from . import xtzb
+    xtzb.state_of(doc)
     slot = slot_of(item)
     if not slot:
         return False, "该物品不是可穿戴的装备。", None
+    if xtzb.is_innate_item(item):
+        return False, f"先天至宝不使用普通装备指令，请发送 #执掌先天至宝 {item.get('name') or item.get('先天至宝本体')}。", None
     name = str(item.get("name", ""))
     cur = doc.ext.setdefault("equipment", {})
     old = cur.get(slot)
+    if isinstance(old, Mapping):
+        old = str(old.get("name") or "")
+    if slot == "至宝" and xtzb.is_innate_item_name(old):
+        xtzb.clear_equipped_slot(doc, old)
+        cur = doc.ext.setdefault("equipment", {})
     if old == name:
         return False, f"「{name}」已在{slot}位上。", None
     cur[slot] = name
@@ -72,8 +85,15 @@ def unequip(doc: PlayerDoc, slot: str) -> tuple[bool, str, str | None]:
     """卸下指定槽位。返回 (ok, msg, 卸下的物品名)。"""
     if slot not in SLOTS:
         return False, f"部位只能是：{' / '.join(SLOTS)}。", None
+    from . import xtzb
+    xtzb.state_of(doc)
     cur = doc.ext.setdefault("equipment", {})
-    old = cur.pop(slot, None)
+    equipped = cur.get(slot)
+    name = str(equipped.get("name") or "") if isinstance(equipped, Mapping) else str(equipped or "")
+    if slot == "至宝" and xtzb.is_innate_item_name(name):
+        old = xtzb.clear_equipped_slot(doc, name)
+    else:
+        old = cur.pop(slot, None)
     if not old:
         return False, f"{slot}位本来就没有装备。", None
     return True, f"【装备·卸下】已卸下{slot}位的「{old}」，回到纳戒。", old
@@ -100,13 +120,22 @@ def aggregate(
     enhance: Mapping[str, int] | None = None,
     imperial: set[str] | None = None,
     physique_table: list[dict] | None = None,
+    flower_table: list[dict] | None = None,
+    shengxu_state: Mapping[str, Any] | None = None,
 ) -> Stats:
     """基础属性（练气 + 炼体双轨，对齐原版四体系求和；秘境/仙古/花粉未开为 0）
     + 已装备加成（× 强化乘数；认主帝兵再 ×2）→ 总属性。"""
+    from . import xtzb
+    xtzb.state_of(doc)
     entry = realm_entry(doc, level_table)
     base_atk = float(entry.get("基础攻击", 0) or 0)
     base_def = float(entry.get("基础防御", 0) or 0)
     base_hp = float(entry.get("基础血量", 0) or 0)
+    trib_bonus = doc.ext.get("tribulation_bonus")
+    if isinstance(trib_bonus, Mapping):
+        base_atk += max(0.0, float(trib_bonus.get("atk", 0) or 0))
+        base_def += max(0.0, float(trib_bonus.get("defense", 0) or 0))
+        base_hp += max(0.0, float(trib_bonus.get("hp", 0) or 0))
     bao = float(entry.get("基础暴击", 0) or 0)   # 原版：暴击率 = 练气 + 炼体 + 命格
     if physique_table:
         # 原版：四体系基础 = 练气 + 炼体 + 秘境 + 仙古 + 花粉×倍率；本移植后三轨未开放
@@ -115,10 +144,34 @@ def aggregate(
         base_def += float(prow.get("基础防御", 0) or 0)
         base_hp += float(prow.get("基础血量", 0) or 0)
         bao += float(prow.get("基础暴击", 0) or 0)
+    # Original ordinary Xiangu Shenhuo adds 30% of the fixed level-table stat delta.
+    xiangu_state = doc.ext.get("xiangu")
+    shenhuo = xiangu_state.get("shenhuo") if isinstance(xiangu_state, Mapping) else None
+    shenhuo_bonus = shenhuo.get("属性加成") if isinstance(shenhuo, Mapping) else None
+    if isinstance(shenhuo_bonus, Mapping):
+        base_atk += max(0.0, float(shenhuo_bonus.get("攻击", 0) or 0))
+        base_def += max(0.0, float(shenhuo_bonus.get("防御", 0) or 0))
+        base_hp += max(0.0, float(shenhuo_bonus.get("血气", 0) or 0))
+    if flower_table:
+        from . import flower as flower_mod, shengxu as shengxu_mod, zhengdao
+        flower_state = flower_mod.state_of(doc)
+        level = max(1, min(len(flower_table), int(flower_state.get("level", 1) or 1)))
+        flower_row = flower_table[level - 1]
+        path_multiplier = 0.9 if int(flower_state.get("pollution", 0) or 0) >= flower_mod.POLLUTED_THRESHOLD else 1.0
+        path_multiplier *= zhengdao.effects(doc).get("attr_multiplier", 1.0)
+        field_bonus = shengxu_mod.field_attribute_bonus(
+            flower_row, int((shengxu_state or {}).get("field_stage", 0) or 0),
+            path_multiplier)
+        base_atk += field_bonus["atk"]
+        base_def += field_bonus["defense"]
+        base_hp += field_bonus["hp"]
     try:
-        from .mingge import signed_bonus
         from .linggen import ORIGIN_SCALE
-        base_hp += max(0.0, signed_bonus(doc, "生命本源额外")) * ORIGIN_SCALE
+        stored_origin = doc.ext.get("mingge_origin")
+        if stored_origin is None:
+            from .mingge import signed_bonus
+            stored_origin = max(0.0, signed_bonus(doc, "生命本源额外"))
+        base_hp += max(0.0, float(stored_origin or 0)) * ORIGIN_SCALE
     except (TypeError, ValueError):
         pass
 
@@ -127,6 +180,8 @@ def aggregate(
     flat = {"atk": 0.0, "def": 0.0, "hp": 0.0}
     ratio = {"atk": 0.0, "def": 0.0, "hp": 0.0}
     for slot, name in (doc.ext.get("equipment") or {}).items():
+        if xtzb.is_innate_item_name(name):
+            continue
         item = item_lookup(name)
         if not item:
             continue
@@ -300,10 +355,18 @@ def aggregate(
         dz_mult = _dz.effects(doc)["attr_multiplier"]
     except Exception:
         pass
+    try:
+        from . import pet as _pet
+        pet_crit_damage = _pet.ability_bonus(doc.ext.get("pet"), "暴伤")
+    except (TypeError, ValueError):
+        pet_crit_damage = 0.0
     return Stats(
         atk=int((base_atk * (1 + ratio["atk"] + av_atk + lg_atk + dt_all) + flat["atk"]) * set_mult * pet_mult * dz_mult) + int(sy_lotus),
         defense=int((base_def * (1 + ratio["def"] + av_def + lg_def + dt_all) + flat["def"]) * set_mult * pet_mult * dz_mult) + int(sy_lotus),
         hp=int((base_hp * (1 + ratio["hp"] + av_hp + lg_hp + dt_all) + flat["hp"]) * set_mult * pet_mult * dz_mult) + int(sy_lotus),
         bao=min(bao + dt_bao, 1.0),
         set_lines=tuple(set_lines),
+        speed=battle_mod.speed_of(doc),
+        crit_damage=min(min(bao + dt_bao, 1.0) + 1.5, 2.5) + pet_crit_damage,
+        action_bar=battle_mod.initial_action_bar(doc),
     )

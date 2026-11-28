@@ -83,12 +83,8 @@ def deity_state_of(doc: PlayerDoc) -> dict[str, Any]:
 
 
 def _secret_level(doc: PlayerDoc) -> int:
-    legacy = doc.ext.get("legacy_source")
-    if isinstance(legacy, Mapping) and legacy.get("mijinglevel_id") is not None:
-        return max(0, int(legacy.get("mijinglevel_id") or 0))
-    return max(0, int(doc.realm_index) // 2)
-
-
+    from . import extra_cultivation
+    return extra_cultivation.level_of(doc, "mijing")
 def _save(doc: PlayerDoc, state: dict[str, Any]) -> None:
     doc.ext[EXT_KEY] = state
 

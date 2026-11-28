@@ -12,7 +12,7 @@ from typing import Any, AsyncIterator, Optional
 
 import aiosqlite
 
-LATEST_DB_VERSION = 18
+LATEST_DB_VERSION = 23
 
 
 def _shanghai_date_key(ts: float) -> str:
@@ -72,6 +72,150 @@ class DataBase:
             await self.conn.close()
             self.conn = None
 
+    @_serialized
+    async def get_combat_session(self, session_id: str) -> dict[str, Any] | None:
+        assert self.conn is not None
+        async with self.conn.execute(
+            "SELECT payload FROM combat_sessions WHERE session_id = ?", (str(session_id),)
+        ) as cur:
+            row = await cur.fetchone()
+        return json.loads(row[0]) if row else None
+
+    @_serialized
+    async def find_active_combat_session(self, uid: str, now: float | None = None) -> dict[str, Any] | None:
+        assert self.conn is not None
+        now = time.time() if now is None else float(now)
+        async with self.conn.execute(
+            "SELECT payload FROM combat_sessions WHERE status = 'active' AND expires_at > ? "
+            "AND (player_a = ? OR player_b = ?) ORDER BY updated_at DESC LIMIT 1",
+            (now, str(uid), str(uid)),
+        ) as cur:
+            row = await cur.fetchone()
+        return json.loads(row[0]) if row else None
+
+    @_serialized
+    async def create_combat_session(self, doc: dict[str, Any]) -> tuple[bool, str | None]:
+        """原子创建玩家切磋会话；任一参战者已有未过期会话时拒绝。"""
+        assert self.conn is not None
+        now = time.time()
+        try:
+            await self.conn.execute("BEGIN IMMEDIATE")
+            async with self.conn.execute(
+                "SELECT player_a, player_b FROM combat_sessions "
+                "WHERE status='active' AND expires_at > ? AND "
+                "(player_a IN (?, ?) OR player_b IN (?, ?)) LIMIT 1",
+                (now, str(doc["player_a"]), str(doc["player_b"]),
+                 str(doc["player_a"]), str(doc["player_b"]))
+            ) as cur:
+                active = await cur.fetchone()
+            if active:
+                await self.conn.rollback()
+                occupied = next((uid for uid in (str(doc["player_a"]), str(doc["player_b"]))
+                                 if uid in (str(active[0]), str(active[1]))), str(active[0]))
+                return False, occupied
+            await self.conn.execute(
+                "INSERT INTO combat_sessions(session_id, platform_id, group_id, player_a, player_b, "
+                "status, expires_at, updated_at, payload) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)",
+                (str(doc["session_id"]), str(doc["platform_id"]), str(doc["group_id"]),
+                 str(doc["player_a"]), str(doc["player_b"]), float(doc["expires_at"]), now,
+                 json.dumps(doc, ensure_ascii=False)),
+            )
+            await self.conn.commit()
+            return True, None
+        except Exception:
+            await self.conn.rollback()
+            raise
+
+    @_serialized
+    async def save_combat_session(self, doc: dict[str, Any]) -> None:
+        assert self.conn is not None
+        now = time.time()
+        await self.conn.execute(
+            "INSERT INTO combat_sessions(session_id, platform_id, group_id, player_a, player_b, "
+            "status, expires_at, updated_at, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(session_id) DO UPDATE SET platform_id=excluded.platform_id, "
+            "group_id=excluded.group_id, player_a=excluded.player_a, player_b=excluded.player_b, "
+            "status=excluded.status, expires_at=excluded.expires_at, updated_at=excluded.updated_at, "
+            "payload=excluded.payload",
+            (str(doc["session_id"]), str(doc["platform_id"]), str(doc["group_id"]),
+             str(doc["player_a"]), str(doc["player_b"]), str(doc.get("status", "active")),
+             float(doc["expires_at"]), now, json.dumps(doc, ensure_ascii=False)),
+        )
+        await self.conn.commit()
+
+    @_serialized
+    async def due_combat_sessions(self, now: float | None = None) -> list[dict[str, Any]]:
+        assert self.conn is not None
+        now = time.time() if now is None else float(now)
+        async with self.conn.execute(
+            "SELECT payload FROM combat_sessions WHERE status='active' AND expires_at <= ?",
+            (now,),
+        ) as cur:
+            return [json.loads(row[0]) for row in await cur.fetchall()]
+
+    @_serialized
+    async def expire_combat_sessions(self, now: float | None = None) -> list[dict[str, Any]]:
+        assert self.conn is not None
+        now = time.time() if now is None else float(now)
+        async with self.conn.execute(
+            "SELECT session_id, payload FROM combat_sessions WHERE status='active' AND expires_at <= ?",
+            (now,),
+        ) as cur:
+            rows = await cur.fetchall()
+        sessions = [json.loads(row[1]) for row in rows]
+        if rows:
+            await self.conn.executemany(
+                "UPDATE combat_sessions SET status='expired', updated_at=? WHERE session_id=?",
+                [(now, str(row[0])) for row in rows],
+            )
+            await self.conn.commit()
+        return sessions
+
+    @_serialized
+    async def delete_combat_session(self, session_id: str) -> None:
+        assert self.conn is not None
+        await self.conn.execute("DELETE FROM combat_sessions WHERE session_id=?", (str(session_id),))
+        await self.conn.commit()
+
+    @staticmethod
+    def _spar_session_record(duel: dict[str, Any], platform_id: str | None = None,
+                             group_id: str | None = None) -> dict[str, Any]:
+        record = dict(duel)
+        record.update({
+            "session_id": f"spar:{duel['id']}",
+            "platform_id": str(platform_id if platform_id is not None else duel.get("platform_id", "unknown")),
+            "group_id": str(group_id if group_id is not None else duel.get("group_id", "")),
+            "player_a": str(duel["a"]["uid"]),
+            "player_b": str(duel["b"]["uid"]),
+            "status": "done" if duel.get("phase") == "done" else "active",
+            "expires_at": float(duel.get("deadline", time.time())),
+        })
+        return record
+
+    @_serialized
+    async def get_spar(self, duel_id: str) -> dict[str, Any] | None:
+        """Read a persisted duel, falling back to the pre-v20 table."""
+        session = await self.get_combat_session(f"spar:{duel_id}")
+        if session is not None:
+            return session
+        assert self.conn is not None
+        async with self.conn.execute(
+            "SELECT doc FROM spar_duel WHERE id = ?", (str(duel_id),)
+        ) as cur:
+            row = await cur.fetchone()
+        return json.loads(row[0]) if row else None
+
+    async def create_spar(self, duel: dict[str, Any], platform_id: str,
+                          group_id: str = "") -> tuple[bool, str | None]:
+        """Atomically create a multi-round duel, rejecting busy players."""
+        return await self.create_combat_session(
+            self._spar_session_record(duel, platform_id, group_id),
+        )
+
+    async def save_spar(self, duel: dict[str, Any]) -> None:
+        """Persist an existing multi-round duel state and its current deadline."""
+        await self.save_combat_session(self._spar_session_record(duel))
+
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[aiosqlite.Connection]:
         """多语句事务；异常自动回滚。持写锁执行，期间其它写命令排队。"""
@@ -120,11 +264,16 @@ class DataBase:
                 await _v16_era(self.conn)
                 await _v17_tianjiao_faction(self.conn)
                 await _v18_qq_operations(self.conn)
+                await _v19_spar_duel(self.conn)
+                await _v20_combat_sessions(self.conn)
+                await _v21_exchange(self.conn)
+                await _v22_universe(self.conn)
+                await _v23_item_grant_orders(self.conn)
                 await self.conn.execute("INSERT INTO db_info (version) VALUES (?)", (LATEST_DB_VERSION,))
             return
 
         # 后续版本在此登记：MIGRATIONS[n] = upgrade_fn
-        MIGRATIONS = {2: _v2_inventory, 3: _v3_world_boss, 4: _v4_sects, 5: _v5_auction, 6: _v6_sect_score, 7: _v7_daily_tasks, 8: _v8_dark_boss, 9: _v9_raid, 10: _v10_rift, 11: _v11_calamity, 12: _v12_lingjie, 13: _v13_ancient, 14: _v14_other_shore, 15: _v15_market, 16: _v16_era, 17: _v17_tianjiao_faction, 18: _v18_qq_operations}
+        MIGRATIONS = {2: _v2_inventory, 3: _v3_world_boss, 4: _v4_sects, 5: _v5_auction, 6: _v6_sect_score, 7: _v7_daily_tasks, 8: _v8_dark_boss, 9: _v9_raid, 10: _v10_rift, 11: _v11_calamity, 12: _v12_lingjie, 13: _v13_ancient, 14: _v14_other_shore, 15: _v15_market, 16: _v16_era, 17: _v17_tianjiao_faction, 18: _v18_qq_operations, 19: _v19_spar_duel, 20: _v20_combat_sessions, 21: _v21_exchange, 22: _v22_universe, 23: _v23_item_grant_orders}
         for version in sorted(v for v in MIGRATIONS if v > current):
             async with self.transaction():
                 await MIGRATIONS[version](self.conn)
@@ -496,6 +645,78 @@ class DataBase:
         owned = not self.conn.in_transaction
         await self.conn.execute(
             "INSERT OR REPLACE INTO market_state (id, doc) VALUES (1, ?)",
+            (json.dumps(doc, ensure_ascii=False),),
+        )
+        if owned:
+            await self.conn.commit()
+
+    @_serialized
+    async def get_exchange(self) -> dict[str, Any]:
+        """交易行单例（冲水堂/聚宝堂挂单账本）。缺表或空档返回 {}。"""
+        assert self.conn is not None
+        async with self.conn.execute("SELECT doc FROM exchange_state WHERE id = 1") as cur:
+            row = await cur.fetchone()
+        if not row:
+            return {}
+        try:
+            return json.loads(row[0]) or {}
+        except Exception:
+            return {}
+
+    @_serialized
+    async def save_exchange(self, doc: dict[str, Any]) -> None:
+        assert self.conn is not None
+        owned = not self.conn.in_transaction
+        await self.conn.execute(
+            "INSERT OR REPLACE INTO exchange_state (id, doc) VALUES (1, ?)",
+            (json.dumps(doc, ensure_ascii=False),),
+        )
+        if owned:
+            await self.conn.commit()
+
+    @_serialized
+    async def get_universe(self) -> dict[str, Any]:
+        """仙王大宇宙注册表单例。缺表或空档返回 {}。"""
+        assert self.conn is not None
+        async with self.conn.execute("SELECT doc FROM universe_state WHERE id = 1") as cur:
+            row = await cur.fetchone()
+        if not row:
+            return {}
+        try:
+            return json.loads(row[0]) or {}
+        except Exception:
+            return {}
+
+    @_serialized
+    async def save_universe(self, doc: dict[str, Any]) -> None:
+        assert self.conn is not None
+        owned = not self.conn.in_transaction
+        await self.conn.execute(
+            "INSERT OR REPLACE INTO universe_state (id, doc) VALUES (1, ?)",
+            (json.dumps(doc, ensure_ascii=False),),
+        )
+        if owned:
+            await self.conn.commit()
+
+    @_serialized
+    async def get_grant(self) -> dict[str, Any]:
+        """道具发单账本单例（待领单 + 哈希链事件）。缺表或空档返回 {}。"""
+        assert self.conn is not None
+        async with self.conn.execute("SELECT doc FROM grant_state WHERE id = 1") as cur:
+            row = await cur.fetchone()
+        if not row:
+            return {}
+        try:
+            return json.loads(row[0]) or {}
+        except Exception:
+            return {}
+
+    @_serialized
+    async def save_grant(self, doc: dict[str, Any]) -> None:
+        assert self.conn is not None
+        owned = not self.conn.in_transaction
+        await self.conn.execute(
+            "INSERT OR REPLACE INTO grant_state (id, doc) VALUES (1, ?)",
             (json.dumps(doc, ensure_ascii=False),),
         )
         if owned:
@@ -1448,3 +1669,52 @@ async def _v18_qq_operations(conn: aiosqlite.Connection) -> None:
         " claim_uid TEXT, confirmed_at REAL, created_at REAL NOT NULL, claimed_at REAL)"
     )
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_item_grants_target ON item_grants(target_uid, claimed_at)")
+
+
+async def _v19_spar_duel(conn: aiosqlite.Connection) -> None:
+    """Legacy persisted multi-round duel state retained for existing databases."""
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS spar_duel ("
+        " id TEXT PRIMARY KEY, doc TEXT NOT NULL)"
+    )
+
+
+async def _v20_combat_sessions(conn: aiosqlite.Connection) -> None:
+    """持久化玩家交互切磋的选技与逐回合状态，支持重载恢复。"""
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS combat_sessions ("
+        " session_id TEXT PRIMARY KEY, platform_id TEXT NOT NULL, group_id TEXT NOT NULL,"
+        " player_a TEXT NOT NULL, player_b TEXT NOT NULL, status TEXT NOT NULL,"
+        " expires_at REAL NOT NULL, updated_at REAL NOT NULL, payload TEXT NOT NULL)"
+    )
+    await conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_combat_sessions_active_player "
+        "ON combat_sessions(status, player_a, player_b, expires_at)"
+    )
+
+
+async def _v21_exchange(conn: aiosqlite.Connection) -> None:
+    """交易行：冲水堂挂单 + 聚宝堂委托（单例 JSON）。"""
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS exchange_state ("
+        " id INTEGER PRIMARY KEY CHECK (id = 1),"
+        " doc TEXT NOT NULL)"
+    )
+
+
+async def _v23_item_grant_orders(conn: aiosqlite.Connection) -> None:
+    """道具发单与领取（公益防诈通道）：单例账本（待领单 + 哈希链事件，原版 itemGrantStore）。"""
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS grant_state ("
+        " id INTEGER PRIMARY KEY CHECK (id = 1),"
+        " doc TEXT NOT NULL)"
+    )
+
+
+async def _v22_universe(conn: aiosqlite.Connection) -> None:
+    """仙王大宇宙：全服宇宙注册表（单例 JSON）。"""
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS universe_state ("
+        " id INTEGER PRIMARY KEY CHECK (id = 1),"
+        " doc TEXT NOT NULL)"
+    )

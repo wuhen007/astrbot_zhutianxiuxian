@@ -19,10 +19,10 @@
 - 原版 `RealmEvents` 整档 JSON + redis 锁 → `calamity_state["realm_event"]` 单例；帝关整档
   JSON → `calamity_state["imperial_pass"]`。db 恒 v17。
 - cron 触发 / 5 分钟检查 → 指令入口惰性 `maybe_spawn()` / `maybe_tick()`。
-- 专属玩法（圣地大战 14 条 / 秦门兵字秘 6 条 / 万化天魔传承 / 先天至宝择主之争）本移植
-  无底座 → 事件类型池剔除，保留 8 类通用参与事件；「先天灵宝出世」折为通用参与。
-- 原版奖励里的 `mijinglevel_id`（秘境阶）本移植无该轨 → 折算 `realm_index // 2`。
-- 帝关门槛 `mijinglevel_id>=13 || xiangulevel_id>=12` → 折算 `realm_index >= 26`
+- 圣地大战、秦门兵字秘仍未接入本事件档；万化天魔传承使用专属入口。
+  先天至宝择主之争挂在 `realm_event.active[*].contest`，参与时绕过通用修为奖励，过期后按试炼与道心结算。
+- 原版奖励里的 `mijinglevel_id`（秘境阶）改由独立额外境界状态提供，旧档缺字段时按现行境界投影迁移。
+- 帝关门槛使用独立秘境/仙古轨等级 (`mijinglevel_id>=13 || xiangulevel_id>=12`)
   （本移植「九天十地」位面门槛）。原版一次打 12~32 名天骄 → 折算 1 场聚合 `battle.spar`。
 - 「帝血」道具在 data 里存在但**全库无产出点** → 第三波进入帝血决战时给威名第一的
   参战者发 1 枚，形成闭环；原版囚禁 999999 分钟 / 云崽广播群推送未搬。
@@ -31,10 +31,14 @@
 from __future__ import annotations
 
 import time
+import random
+from copy import deepcopy
 from collections.abc import Mapping, Sequence
 from typing import Any
 
 from . import plane
+from . import xtzb_birth
+from .xtzb import CONTESTABLE
 
 # ---------------------------------------------------------------- 位面大事件常量
 
@@ -50,7 +54,8 @@ REWARD_MIN = 10000
 EVENT_KEY = "realm_event"
 PASS_KEY = "imperial_pass"
 
-# 8 类通用参与事件（剔除 sectWar / bingziLegacy / tianmoHuashengLegacy 三类专属玩法）
+# 通用参与事件与需专属入口的位面事件；特殊事件不走通用参与奖励。
+TIANMO_LEGACY_TYPE = "tianmoHuashengLegacy"
 EVENT_NAMES: dict[str, str] = {
     "treasureAppear": "先天灵宝出世",
     "merchantVisit": "云游商人降临",
@@ -60,20 +65,25 @@ EVENT_NAMES: dict[str, str] = {
     "mysteriousRuins": "神秘遗迹",
     "coordinateClue": "位面坐标石壁",
     "wenxianClue": "问仙古碑",
+    TIANMO_LEGACY_TYPE: "万化天魔传承·万相魔冢",
 }
 
-# 原版 getAvailableEvents(eraIndex) 五时代权重，剔除无底座的 war/legacy/tianmoLegacy
+# 原版 getAvailableEvents(eraIndex) 五时代权重；其他未移植专属事件仍剔除。
 ERA_WEIGHTS: tuple[dict[str, int], ...] = (
     {"treasureAppear": 3, "merchantVisit": 2, "prodigyRise": 2,
-     "worldChange": 3, "coordinateClue": 2, "wenxianClue": 1},                 # 神话时代
+     "worldChange": 3, "tianmoHuashengLegacy": 1,
+     "coordinateClue": 2, "wenxianClue": 1, "sectWar": 1},                     # 神话时代
     {"forbiddenZone": 2, "prodigyRise": 2, "treasureAppear": 2,
-     "coordinateClue": 2, "wenxianClue": 1},                                   # 太古时代
-    {"prodigyRise": 2, "merchantVisit": 2,
-     "coordinateClue": 2, "wenxianClue": 1},                                   # 天命时代
+     "tianmoHuashengLegacy": 1, "coordinateClue": 2, "wenxianClue": 1,
+     "sectWar": 1},                                                    # 太古时代
+    {"prodigyRise": 2, "merchantVisit": 2, "tianmoHuashengLegacy": 1,
+     "coordinateClue": 2, "wenxianClue": 1, "sectWar": 1},                     # 天命时代
     {"mysteriousRuins": 3, "forbiddenZone": 2, "worldChange": 2,
-     "coordinateClue": 2, "wenxianClue": 1},                                   # 末法时代
+     "tianmoHuashengLegacy": 1,
+     "coordinateClue": 2, "wenxianClue": 1, "sectWar": 1},                     # 末法时代
     {"forbiddenZone": 3, "worldChange": 3, "merchantVisit": 2,
-     "mysteriousRuins": 2, "coordinateClue": 2, "wenxianClue": 1},             # 绝灵时代
+     "mysteriousRuins": 2, "tianmoHuashengLegacy": 1,
+     "coordinateClue": 2, "wenxianClue": 1, "sectWar": 1},                     # 绝灵时代
 )
 
 OUTCOMES: dict[str, str] = {
@@ -85,6 +95,7 @@ OUTCOMES: dict[str, str] = {
     "mysteriousRuins": "你踏入遗迹外围完成初步探查，带回一份残缺的古史记录。",
     "coordinateClue": "你拓下石壁上的残缺星图，辨出一处未曾记录的位面坐标。",
     "wenxianClue": "古碑道纹入心，你隐约窥见问仙之路的一段残章。",
+    "sectWar": "你亲赴圣地大战的战场，于攻守之间记下一笔战功。",
 }
 
 # ---------------------------------------------------------------- 帝关常量
@@ -100,7 +111,9 @@ WAVE_ENEMY_RANGES = {1: (12, 16), 2: (18, 24), 3: (26, 32)}
 WAVE_KILLS = {1: 20, 2: 25, 3: 30}   # 折算：一次聚合战斗的斩敌数
 WAVE_RATIO = {1: 1.0, 2: 1.25, 3: 1.5}
 TARGET_PLANES = ("遮天位面", "九天十地")
-PASS_REALM_GATE = 26              # 折算自 mijinglevel_id>=13 / xiangulevel_id>=12
+PASS_MIJING_GATE = 13
+PASS_XIANGU_GATE = 12
+PASS_REALM_GATE = 26  # Legacy display constant; checks use the extra tracks.
 BLOOD_ITEM = "帝血"
 CHAMPION_STONES = 50_000_000      # 帝血决战胜利奖励（折算自原版守城全服收益）
 
@@ -182,10 +195,14 @@ def weighted_types(era_index: int) -> list[str]:
     return [t for t, w in weights.items() for _ in range(w)]
 
 
-def _pick_location(plane_data: Mapping, rng: Any) -> tuple[str, str, dict] | None:
-    """从位面坐标表里挑一处地点与精确坐标（原版 createRealmEventLocation 的折算）。"""
+def _pick_location(plane_data: Mapping, rng: Any,
+                   unavailable_planes: Sequence[str] = ()) -> tuple[str, str, dict] | None:
+    """从未毁灭且有坐标的位面中挑选事件地点，避免生成不可抵达的事件。"""
+    unavailable = {str(name) for name in unavailable_planes}
     candidates: list[tuple[str, list[dict]]] = []
     for name in plane.PLANES:
+        if name in unavailable:
+            continue
         locs = plane.locations_of(plane_data, name)
         if locs:
             candidates.append((name, locs))
@@ -204,7 +221,7 @@ def make_event(kind: str, spot: tuple[str, str, dict], now: float,
                world_year: int, rng: Any) -> dict[str, Any]:
     pname, locname, coord = spot
     eid = f"{int(now * 1000)}:{kind}:{rng.randrange(1 << 30)}"
-    return {
+    event = {
         "id": eid,
         "type": kind,
         "plane": pname,
@@ -217,6 +234,12 @@ def make_event(kind: str, spot: tuple[str, str, dict], now: float,
         "source": "era",
         "participants": [],
     }
+    if kind == "sectWar":
+        from . import sect_war as sect_war_mod
+        sects = random.Random(eid).sample(["摇光圣地", "瑶池圣地", "剑云海"], 2)
+        event["war"] = sect_war_mod.create(
+            "mine", {"name": sects[0]}, {"name": sects[1]}, None, float(now))
+    return event
 
 
 def prune(ev: dict, now: float) -> bool:
@@ -227,7 +250,28 @@ def prune(ev: dict, now: float) -> bool:
     return len(ev["active"]) != before
 
 
+def treasure_name_of(event: Mapping) -> str:
+    value = event.get("treasureName")
+    if not value:
+        treasure = event.get("treasure")
+        value = treasure.get("name") if isinstance(treasure, Mapping) else treasure
+    return str(value or "")
+
+
 def spawn_text(e: Mapping) -> str:
+    if str(e.get("type")) == TIANMO_LEGACY_TYPE:
+        return ("【万化天魔传承·万相魔冢】\n"
+                f"{e['plane']} › {e['location']}（{e['x']}, {e['y']}）裂开一道贯穿诸天的魔隙。\n"
+                "亿万残破灵根与众生本源在其中沉浮，唯有极道天魔可踏入，直面万灵怨胎。\n"
+                "抵达后发送「#进入万相魔冢」接受试炼；魔冢将在 24 小时后闭合。")
+    if str(e.get("type")) == "treasureAppear":
+        name = treasure_name_of(e) or "先天至宝"
+        profile = xtzb_birth.get_profile(name)
+        return ("【逆天机缘·先天至宝出世】\n"
+                f"异象现于 {e['plane']} › {e['location']}（{e['x']}, {e['y']}）。\n"
+                f"先天至宝【{name}】横空出世，{profile['omen']}\n"
+                "抵达精确坐标后发送「#观摩灵宝」，再发送「#夺宝」参加择主。\n"
+                "事件持续 24 小时；完成三种不同试炼并立下道心，结束后按公开评分择主。")
     return (f"【位面大事件 · {EVENT_NAMES.get(str(e['type']), '未知事件')}】\n"
             f"异象现于 {e['plane']} › {e['location']}（{e['x']}, {e['y']}）。\n"
             f"抵达精确坐标后发送「#参与位面大事件」，可发「#诸天大事件」查看全部。")
@@ -235,7 +279,11 @@ def spawn_text(e: Mapping) -> str:
 
 def maybe_spawn(ev: dict, world_year: int, era_index: int, now: float, rng: Any,
                 plane_data: Mapping, *, force: bool = False,
-                preferred: str | None = None) -> tuple[str, bool]:
+                preferred: str | None = None,
+                exclude_types: Sequence[str] = (),
+                unavailable_planes: Sequence[str] = (),
+                treasure_names: Sequence[str] | None = None,
+                tianjiao_list: Sequence[Mapping[str, Any]] = ()) -> tuple[str, bool]:
     """惰性触发（原版 triggerRandomEvent 的折算）。返回 (广播文案, 是否变化)。"""
     prune(ev, now)
     if not ev["enabled"]:
@@ -251,14 +299,23 @@ def maybe_spawn(ev: dict, world_year: int, era_index: int, now: float, rng: Any,
         ev["active"].pop(0)          # 超管强制：挤掉最老的一条
     pool = weighted_types(era_index)
     used = {str(e.get("type")) for e in ev["active"]}
-    avail = [t for t in pool if t not in used]
+    excluded = {str(value) for value in exclude_types}
+    treasures = list(treasure_names) if treasure_names is not None else sorted(CONTESTABLE)
+    if not treasures:
+        excluded.add("treasureAppear")
+    avail = [t for t in pool if t not in used and t not in excluded]
     if not avail:
         return "", False
     kind = preferred if preferred in avail else avail[rng.randrange(len(avail))]
-    spot = _pick_location(plane_data, rng)
+    spot = _pick_location(plane_data, rng, unavailable_planes)
     if not spot:
         return "", False
     e = make_event(kind, spot, now, world_year, rng)
+    if kind == "treasureAppear":
+        name = str(rng.choice(treasures))
+        e["treasureName"] = name
+        e["treasure"] = {"name": name, "rarity": "至宝", "desc": "先天至宝择主之争开启。", "power": 15}
+        ensure_treasure_contest(e, tianjiao_list=tianjiao_list, now=now, rng=rng)
     if force:
         e["source"] = "admin"
     ev["active"].append(e)
@@ -303,11 +360,20 @@ def reach(doc: Any, e: Mapping) -> bool:
         return False
 
 
+
+def meets_pass_gate(doc: Any) -> bool:
+    from . import extra_cultivation
+    tracks = extra_cultivation.levels_of(doc)
+    return (tracks["mijing"] >= PASS_MIJING_GATE
+            or tracks["xiangu"] >= PASS_XIANGU_GATE)
+
 def reward_of(doc: Any) -> int:
     """原版 (level_id + Physique_id + mijinglevel_id*2 + 2) * 5000，下限 10000。"""
-    realm = max(0, int(getattr(doc, "realm_index", 0) or 0))
-    body = max(0, int(getattr(doc, "physique_index", 0) or 0))
-    secret = realm // 2                      # 折算：本移植无独立秘境轨
+    from . import extra_cultivation
+    # PlayerDoc stores both base realms as zero-based indexes; the original uses 1-based IDs.
+    realm = max(0, int(getattr(doc, "realm_index", 0) or 0)) + 1
+    body = max(0, int(getattr(doc, "physique_index", 0) or 0)) + 1
+    secret = extra_cultivation.level_of(doc, "mijing")
     return max(REWARD_MIN, (realm + body + secret * 2 + 2) * REWARD_PER_POINT)
 
 
@@ -321,7 +387,24 @@ def join(ev: dict, uid: str, name: str, doc: Any, now: float) -> tuple[bool, str
     if not reached:
         spots = "；".join(f"{e['plane']} › {e['location']}（{e['x']}, {e['y']}）" for e in live[:3])
         return False, f"你尚未抵达任何大事件的精确坐标。可先发「#前往 x,y」赶路：{spots}。", 0
-    e = next((x for x in reached if str(uid) not in (x.get("participants") or [])), None)
+    treasure = next((e for e in reached if str(e.get("type")) == "treasureAppear"), None)
+    if treasure is not None:
+        result = join_treasure_event(ev, treasure, uid, name, now)
+        if not result.get("ok"):
+            if result.get("reason") == "duplicate":
+                return False, "你已经参加本次择主之争，发送「#观摩灵宝」查看进度。", 0
+            return False, "这场先天至宝择主之争已经结束。", 0
+        contest = treasure.get("contest") or {}
+        return True, (
+            f"【{treasure_name_of(treasure) or '先天至宝'}·择主之争】\n"
+            f"你已在 {treasure['plane']} › {treasure['location']}（{treasure['x']}, {treasure['y']}）留下神识烙印。\n"
+            f"参与修士：{len(contest.get('participants') or {})} 人；可完成三种不同试炼并立下道心。\n"
+            "发送「#观摩灵宝」查看试炼与进度；事件结束后按公开评分择主。"
+        ), 0
+    generic = [e for e in reached if str(e.get("type")) != TIANMO_LEGACY_TYPE]
+    if not generic:
+        return False, "万相魔冢需通过专属试炼获取传承，请发送「#进入万相魔冢」，不可使用通用参与奖励。", 0
+    e = next((x for x in generic if str(uid) not in (x.get("participants") or [])), None)
     if e is None:
         return False, "你已经参与过当前可抵达的位面大事件，每人每事件仅限一次。", 0
     e.setdefault("participants", []).append(str(uid))
@@ -351,8 +434,11 @@ def board_lines(ev: dict, now: float, world_year: int, era_name: str = "") -> li
     for e in ev["active"]:
         lines.append(f"· {EVENT_NAMES.get(str(e['type']), '未知事件')}｜"
                      f"{e['plane']} › {e['location']}（{e['x']}, {e['y']}）")
+        command = ("#进入万相魔冢" if str(e.get("type")) == TIANMO_LEGACY_TYPE
+                   else "#夺宝" if str(e.get("type")) == "treasureAppear"
+                   else "#参与位面大事件")
         lines.append(f"  剩余 {_left_text(e, now)}｜已参与 {len(e.get('participants') or [])} 人"
-                     f"｜「#参与位面大事件」")
+                     f"｜「{command}」")
     lines.append("--- 最近记录 ---")
     if not ev["history"]:
         lines.append("暂无大事件记录。")
@@ -364,6 +450,128 @@ def board_lines(ev: dict, now: float, world_year: int, era_name: str = "") -> li
     lines.append("累计触发 " + str(sum(int(v) for v in stats.values())) + " 次｜"
                  + ("、".join(f"{EVENT_NAMES.get(k, k)}×{v}" for k, v in stats.items()) or "无"))
     return lines
+
+
+def record_participant(ev: dict, event_id: str, uid: str) -> bool:
+    """为专属事件记录尝试者，并同步历史快照；重复调用不重复计数。"""
+    uid, event_id = str(uid), str(event_id)
+    event = next((row for row in ev.get("active", [])
+                  if str(row.get("id") or "") == event_id), None)
+    if event is None:
+        event = next((row for row in reversed(ev.get("history", []))
+                      if str(row.get("id") or "") == event_id), None)
+    if event is None:
+        return False
+    participants = event.setdefault("participants", [])
+    if uid in participants:
+        return False
+    participants.append(uid)
+    for row in ev.get("history", []):
+        if str(row.get("id") or "") == event_id:
+            row["participants"] = list(participants)
+    return True
+
+
+# ---------------------------------------------------------------- 先天灵宝出世：择主赛事薄接线
+
+def _sync_treasure_event(ev: dict, event: dict) -> None:
+    """同步专属参与者到通用事件记录及历史快照。"""
+    event_id = str(event.get("id") or "")
+    contest = event.get("contest") or {}
+    participants = event.setdefault("participants", [])
+    for uid in (contest.get("participants") or {}):
+        if not str(uid).startswith("tianjiao:") and str(uid) not in participants:
+            participants.append(str(uid))
+    for row in ev.get("active", []) + ev.get("history", []):
+        if str(row.get("id") or "") == event_id and row is not event:
+            row["contest"] = deepcopy(contest)
+            row["participants"] = list(participants)
+
+
+def sync_treasure_event(ev: dict, event: dict) -> None:
+    """Synchronize a lazily initialized contest to the event-history snapshot."""
+    _sync_treasure_event(ev, event)
+
+
+def ensure_treasure_contest(event: dict, tianjiao_list=None, now=None, rng=None) -> dict:
+    """惰性初始化 treasureAppear 赛事；返回 contest。"""
+    if str(event.get("type")) != "treasureAppear":
+        return {}
+    contest = event.get("contest")
+    if not isinstance(contest, dict):
+        rng = rng or random
+        treasure = treasure_name_of(event) or str(rng.choice(sorted(CONTESTABLE)))
+        event["treasureName"] = treasure
+        seed = str(event.get("id") or "")
+        contest = xtzb_birth.contest_create(treasure, seed, now)
+        contest["expires_at"] = float(event.get("expires_at") or
+                                       (float(now if now is not None else time.time()) + xtzb_birth.TREASURE_CONTEST_DURATION))
+        event["contest"] = contest
+    if not contest.get("tianjiaoInjected") and tianjiao_list is not None:
+        xtzb_birth.inject_tianjiao_contestants(
+            contest, treasure_name_of(event) or "先天至宝",
+            tianjiao_list, {"now": now}, rng or random)
+        contest["tianjiaoInjected"] = True
+    return contest
+
+
+def _treasure_call(ev, event, func, *args, **kwargs):
+    contest = ensure_treasure_contest(event)
+    before = deepcopy(contest)
+    result = func(contest, *args, **kwargs)
+    if not result.get("ok"):
+        event["contest"] = before
+        return result
+    _sync_treasure_event(ev, event)
+    return result
+
+
+def join_treasure_event(ev, event, uid, name, now):
+    treasure = treasure_name_of(event) or "先天至宝"
+    return _treasure_call(ev, event, xtzb_birth.contest_join, uid, name, now,
+                          event.get("expires_at"))
+
+
+def record_treasure_trial(ev, event, uid, trial, options, rng):
+    options = dict(options or {})
+    options.setdefault("expires_at", event.get("expires_at"))
+    treasure = treasure_name_of(event) or "先天至宝"
+    return _treasure_call(ev, event, xtzb_birth.contest_trial, treasure, uid,
+                          trial, options, rng)
+
+
+def set_treasure_dao_heart(ev, event, uid, choice, now):
+    return _treasure_call(ev, event, xtzb_birth.contest_vow, uid, choice, now,
+                          event.get("expires_at"))
+
+
+def rank_treasure_event(event, event_seed=""):
+    contest = event.get("contest") or {}
+    return xtzb_birth.contest_rank(
+        contest, treasure_name_of(event) or "先天至宝",
+        event_seed or event.get("id") or contest.get("eventSeed") or "")
+
+
+def settle_treasure_event(ev, event, now):
+    contest = ensure_treasure_contest(event)
+    result = xtzb_birth.contest_settle(
+        contest, treasure_name_of(event) or "先天至宝",
+        event.get("id") or contest.get("eventSeed") or "", now,
+        event.get("expires_at"))
+    if result.get("ok"):
+        _sync_treasure_event(ev, event)
+    return result
+
+
+def mark_treasure_rewarded(ev, event, uid):
+    contest = ensure_treasure_contest(event)
+    rewarded = contest.setdefault("rewardedQqs", [])
+    uid = str(uid)
+    if uid in rewarded:
+        return False
+    rewarded.append(uid)
+    _sync_treasure_event(ev, event)
+    return True
 
 
 def history_lines(ev: dict, limit: int = 20) -> list[str]:
@@ -644,7 +852,7 @@ def panel_lines(ps: dict, world_year: int) -> list[str]:
     st = ps.get("status")
     if st == "dormant":
         return ["【帝关战况】", "原始帝城烽燧未燃，异域暂未叩关。",
-                f"需有修士达到第 {PASS_REALM_GATE} 境以上，且每次纪元推进有 0.25 概率叩关。"]
+                f"需有修士达到人体秘境第 {PASS_MIJING_GATE} 级或仙古第 {PASS_XIANGU_GATE} 级，且每次纪元推进有 0.25 概率叩关。"]
     if st == "resting":
         return ["【帝关战后】", "异域大军暂退，正在休养生息。",
                 f"当前已过第 {ps.get('wave')} 波，下一波将在纪年 {ps.get('next_wave_year')} 年到来。",
@@ -683,7 +891,7 @@ def prestige_lines(ps: dict, limit: int = 20) -> list[str]:
 
 
 def pass_rules_text() -> str:
-    return ("有修士达第 26 境后，纪元推进时有 0.25 概率点燃帝关烽火；共 3 波，"
+    return ("有人体秘境第 13 级或仙古第 12 级修士后，纪元推进时有 0.25 概率点燃帝关烽火；共 3 波，"
             "每波需发「#驰援帝关」斩敌 100 且全部守城修士驰援，期限 3000 诸天年（每 1000 年告急）。"
             "两波之间休整 5000 年；第三波进入帝血决战，持「帝血」的参战者可发「#融合帝血」。"
             "出战冷却 10 分钟，须身处遮天位面或九天十地，战况看「#帝关战况」。"

@@ -45,6 +45,7 @@ DUNGEON_TABLES: dict[str, str] = {
     "仙境": "item/副本/仙境列表",
     "下界八域": "item/副本/下界八域列表",
     "九天十地": "item/副本/九天十地",
+    "遮天位面": "item/副本/遮天宇宙列表",
 }
 
 TIANJIAO: list[dict] = [
@@ -312,8 +313,12 @@ def tianjiao_fight(doc: PlayerDoc, name: str, stats: Any, rng: random.Random) ->
     done = set(doc.ext.get("tianjiao_defeated") or [])
     if t["name"] in done:
         return f"【{t['name']}】已讨伐过。", False, {}
-    me = Unit(doc.name or "道友", int(stats.atk), int(stats.defense), int(stats.hp), float(stats.bao))
-    foe = Unit(t["name"], t["atk"], t["defense"], t["hp"], 0.05)
+    me = Unit(doc.name or "道友", int(stats.atk), int(stats.defense), int(stats.hp), float(stats.bao),
+              speed=int(getattr(stats, "speed", 100)), crit_damage=getattr(stats, "crit_damage", None),
+              action_bar=int(getattr(stats, "action_bar", 0)))
+    foe = Unit(t["name"], t["atk"], t["defense"], t["hp"], 0.05,
+               speed=int(t.get("speed", t.get("速度", 100))),
+               crit_damage=t.get("暴击伤害"))
     winner, log = spar(me, foe, rng)
     if winner == 0:
         doc.stones += t["reward"]
@@ -410,7 +415,7 @@ def dispatch(cmd: str, doc: PlayerDoc, arg: str, content: Callable[[str], Any],
         text = tianjiao_status(doc, arg, content)
     elif cmd == "#讨伐天骄":
         text, changed, items = tianjiao_fight(doc, arg, stats, rng)
-    elif cmd in ("#禁地", "#仙境", "#下界八域", "#九天十地"):
+    elif cmd in ("#禁地", "#仙境", "#下界八域", "#九天十地", "#遮天位面"):
         text = dungeon_list(cmd[1:], content)
     elif cmd == "#探索仙府":
         text = dungeon_list("仙府", content) if not (arg or "").strip() else \
@@ -426,10 +431,22 @@ def dispatch(cmd: str, doc: PlayerDoc, arg: str, content: Callable[[str], Any],
         text, changed = guard_xianjing(doc, now)
     elif cmd == "#献祭魂与血":
         text, changed = sacrifice(doc)
-    elif cmd == "#更新公告" or cmd == "#公告网页":
+    elif cmd == "#更新公告" or cmd == "#公告网页" or cmd == "#更新内容":
         text = "--- 更新公告 ---\n" + "\n".join(f"· {x}" for x in CHANGELOG)
     elif cmd == "#查看日志":
         text = "--- 更新日志 ---\n" + "\n".join(f"· {x}" for x in CHANGELOG)
+    elif cmd in ("#修仙游玩说明", "#修仙引导", "#开始修仙", "#怎么玩修仙"):
+        # 原版 Guide.js 两步宿主设置；AstrBot 宿主形态不同，按本地方式引导（宿主差异）。
+        text = ("--- 踏入仙途 · 新手引导 ---\n"
+                "① 确认机器人在本群可用（AstrBot 群聊响应/唤醒前缀按宿主配置）。\n"
+                "② 发送 #踏入仙途 创建角色，随后 #修仙帮助 查看全部指令。\n"
+                "③ 推荐顺序：#我的练气 → #宗门 → #副本掉落 → #踏上花粉路。\n"
+                "本插件仅供娱乐。")
+    elif cmd == "#传音状态":
+        note = str(doc.ext.get("author_msg") or "")
+        text = ("--- 传音状态 ---\n"
+                + (f"最近一次传音：{note}\n（记录于你的存档，作者查看档案可见）" if note
+                   else "尚无传音记录；#传音给作者 内容 可留言。"))
     elif cmd == "#传音给作者":
         msg = (arg or "").strip()
         if not msg:
