@@ -686,6 +686,15 @@ CMD_OSW_GOTO = "#前往星辰"
 CMD_OSW_EXPLORE = "#贡献探索"
 CMD_OSW_ANCHOR = "#建立道标"
 CMD_OSW_CLEAR = "#完成大星"
+# 真世界主链（原版 OtherShoreWorld 真世界层，每玩家会话制）
+CMD_TW_ENTER = "#进入真世界"
+CMD_TW_LEAVE = "#返回沧澜界"
+CMD_TW_STATUS = "#真世界状态"
+CMD_TW_OBSERVE = "#观测真世界"
+CMD_TW_GOTO = "#前往真世界"
+CMD_TW_EXPLORE = "#探索真世界"
+CMD_TW_FIGHT = "#迎战真世界敌群"
+CMD_TW_CLAIM = "#领取真世界战果"
 CMD_OSW_NEAREST = "#最近星辰"
 # W7-5a：彼岸大道至宝
 CMD_OSF_PANEL = "#彼岸铸宝"
@@ -19172,6 +19181,159 @@ class ZhutianPlugin(Star):
         ]
         async for r in self._smart(event, "\\n".join(lines), "彼岸世界"):
             yield r
+
+    # ---- 真世界主链（原版 OtherShoreWorld 真世界层） ----
+
+    @filter.command(CMD_TW_ENTER, "进入真世界（完成大星≥7 解锁）")
+    @_serialized_player_command
+    async def handle_tw_enter(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import other_shore_true_world as tw_mod
+        ok, msg = tw_mod.enter(doc)
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_TW_LEAVE, "返回沧澜界（真世界撤回）")
+    @_serialized_player_command
+    async def handle_tw_leave(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import other_shore_true_world as tw_mod
+        ok, msg = tw_mod.leave(doc)
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_TW_STATUS, "真世界状态面板", alias={"#真世界"})
+    async def handle_tw_status(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import other_shore_true_world as tw_mod
+        yield event.plain_result(tw_mod.panel(doc, time.time()))
+
+    def _tw_coord(self, arg: str, doc: PlayerDoc) -> tuple[int, int] | None:
+        from .core import other_shore_true_world as tw_mod
+        m = re.match(r"^[\(\[（【]?\s*(-?\d+)\s*[,，]\s*(-?\d+)\s*[\)\]）】]?$", (arg or "").strip())
+        if m:
+            return int(m.group(1)), int(m.group(2))
+        st = tw_mod.state_of(doc)
+        return int(st.get("q", 0) or 0), int(st.get("r", 0) or 0)
+
+    @filter.command(CMD_TW_OBSERVE, "观测真世界 q,r（范围3格）")
+    @_serialized_player_command
+    async def handle_tw_observe(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import other_shore_true_world as tw_mod
+        coord = self._tw_coord(arg, doc)
+        ok, msg = tw_mod.observe(doc, coord[0], coord[1])
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_TW_GOTO, "前往真世界 q,r（每步1格）")
+    @_serialized_player_command
+    async def handle_tw_goto(self, event: AstrMessageEvent, arg: str = ""):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import other_shore_true_world as tw_mod
+        coord = self._tw_coord(arg, doc)
+        ok, msg = tw_mod.move(doc, coord[0], coord[1])
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_TW_EXPLORE, "探索当前真世界扇区")
+    @_serialized_player_command
+    async def handle_tw_explore(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import other_shore_true_world as tw_mod
+        now = time.time()
+        ok, msg = tw_mod.explore(doc, now, random.Random(f"{doc.uid}:tw:{int(now)}"))
+        if ok:
+            await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
+
+    @filter.command(CMD_TW_FIGHT, "迎战真世界敌群（真实战斗）")
+    @_serialized_player_command
+    async def handle_tw_fight(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import other_shore_true_world as tw_mod
+        from .core.combat.loadout import build_fighter
+        from .core.combat import run_1v1
+        st = tw_mod.state_of(doc)
+        enemy = st.get("enemy")
+        if not isinstance(enemy, dict):
+            yield event.plain_result("当前没有敌群。#探索真世界 寻找敌群。")
+            return
+        tier = tw_mod.TIER_BY_ID[str(enemy["tier"])]
+        now = time.time()
+        stats = self._stats(doc)
+        hp_cur, hp_max = self._hp_pair(doc)
+        me = build_fighter(doc, doc.name or "道友", stats.atk, stats.defense,
+                           hp_cur, stats.bao, self.item_index.get)
+        foe = Fighter(name=tier["name"], atk=max(1, int(tier["atk"])),
+                      defense=max(1, int(tier["def"])), hp=max(1, int(enemy["hp"])),
+                      hp_max=max(1, int(tier["hp"])), bao=0.10, speed=1150)
+        rng = random.Random(f"{doc.uid}:twf:{int(now)}")
+        result = run_1v1([me], [foe], rng)
+        won = result.winner == 0
+        ok, msg, _mats = tw_mod.battle_outcome(doc, won, rng, now)
+        hp_after = max(0, min(hp_max, int(result.a_hp) if won else 1))
+        doc.ext["hp"] = hp_after
+        async with self.db.transaction():
+            await self.db.save_player(doc.model_dump())
+        tail = f"\n我方气血 {hp_after:,}/{hp_max:,}"
+        async for r in self._smart(event, msg + tail, "真世界迎战"):
+            yield r
+
+    @filter.command(CMD_TW_CLAIM, "领取真世界战果（材料入铸宝袋+纪元积累）")
+    @_serialized_player_command
+    async def handle_tw_claim(self, event: AstrMessageEvent):
+        if not self._allowed(event):
+            return
+        doc, err = await self._require_player(event)
+        if err:
+            yield event.plain_result(err)
+            return
+        from .core import other_shore_true_world as tw_mod
+        ok, msg, items, _era = tw_mod.claim(doc)
+        if ok:
+            async with self.db.transaction():
+                await self.db.save_player(doc.model_dump())
+        yield event.plain_result(msg)
 
     @filter.command(CMD_OSW_LEAVE, "离开彼岸世界", alias={CMD_OSW_LEAVE_ALIAS})
     async def handle_other_shore_leave(self, event: AstrMessageEvent):
